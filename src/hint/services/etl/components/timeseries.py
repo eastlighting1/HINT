@@ -1,0 +1,105 @@
+import polars as pl
+from pathlib import Path
+
+from hint.foundation.interfaces import PipelineComponent, Registry, TelemetryObserver
+from hint.domain.vo import ETLConfig
+
+class TimeSeriesAggregator(PipelineComponent):
+    """
+    Aggregates CHARTEVENTS and LABEVENTS into hourly mean/count/std.
+    Ported from make_data.py: step_extract_timeseries
+    """
+    def __init__(self, config: ETLConfig, registry: Registry, observer: TelemetryObserver):
+        self.cfg = config
+        self.registry = registry
+        self.observer = observer
+
+    def execute(self) -> None:
+        raw_dir = Path(self.cfg.raw_dir)
+        resources_dir = Path(self.cfg.resources_dir)
+        
+        self.observer.log("INFO", "TimeSeriesAggregator: Processing events...")
+
+        # Helper: process_events from make_data.py
+        def process_events(table: str, time_col: str) -> pl.LazyFrame:
+            fpath = raw_dir / f"{table.upper()}.csv.gz"
+            if not fpath.exists():
+                 # Try uncompressed if gz not found (simple fallback)
+                 fpath = raw_dir / f"{table.upper()}.csv"
+            
+            # Helper for ISO datetime
+            def to_datetime_iso(col: str) -> pl.Expr:
+                base = pl.col(col).str.to_datetime(time_unit="us", time_zone="UTC", strict=False)
+                return pl.when(base.is_null() & pl.col(col).is_not_null()).then(
+                    pl.col(col).str.replace(r"Z$", "+00:00", literal=False)
+                    .str.to_datetime(time_unit="us", time_zone="UTC", strict=False)
+                ).otherwise(base)
+            
+            def duration_hours(start: str, end: str) -> pl.Expr:
+                return (pl.col(end).dt.epoch(time_unit="us") - pl.col(start).dt.epoch(time_unit="us")) / 3_600_000_000
+
+            def floor_int(expr: pl.Expr, dtype=pl.Int32) -> pl.Expr:
+                return expr.floor().cast(dtype)
+
+            ev = pl.scan_csv(str(fpath), infer_schema_length=0, has_header=True).with_columns([
+                pl.col("ITEMID").cast(pl.Int64),
+                pl.col("SUBJECT_ID").cast(pl.Int64),
+                pl.col("HADM_ID").cast(pl.Int64),
+                to_datetime_iso(time_col.upper()).alias("EVENT_TS"),
+            ])
+
+            varmap = (
+                pl.read_csv(str(resources_dir / "itemid_to_variable_map.csv"))
+                .with_columns(pl.col("ITEMID").cast(pl.Int64))
+                .select(["ITEMID", pl.col("MIMIC LABEL").alias("LABEL")])
+                .lazy()
+            )
+
+            # Load ICUSTAYS map for time alignment
+            icu_map = (
+                pl.scan_csv(str(raw_dir / "ICUSTAYS.csv.gz"), infer_schema_length=0, has_header=True)
+                .with_columns([
+                    pl.col("SUBJECT_ID").cast(pl.Int64),
+                    pl.col("HADM_ID").cast(pl.Int64),
+                    pl.col("ICUSTAY_ID").cast(pl.Int64),
+                    to_datetime_iso("INTIME").alias("INTIME_DT"),
+                ])
+                .select(["SUBJECT_ID", "HADM_ID", "ICUSTAY_ID", "INTIME_DT"])
+                .unique(subset=["SUBJECT_ID", "HADM_ID", "ICUSTAY_ID"])
+            )
+
+            return (
+                ev.join(varmap, on="ITEMID", how="inner")
+                .join(icu_map, on=["SUBJECT_ID", "HADM_ID"], how="left")
+                .with_columns([
+                    duration_hours("INTIME_DT", "EVENT_TS").alias("DURATION_HOURS"),
+                    floor_int(duration_hours("INTIME_DT", "EVENT_TS")).alias("HOURS_IN"),
+                    pl.col("ICUSTAY_ID").cast(pl.Int64),
+                    pl.col("VALUENUM").cast(pl.Float64),
+                ])
+                .select(["SUBJECT_ID", "HADM_ID", "ICUSTAY_ID", "HOURS_IN", "LABEL", "VALUENUM"])
+            )
+
+        char_lf = process_events("chartevents", "charttime")
+        lab_lf = process_events("labevents", "charttime")
+        full_lf = pl.concat([char_lf, lab_lf])
+
+        # Save Rich Stats
+        vitals_labs = (
+            full_lf.group_by(["SUBJECT_ID", "HADM_ID", "ICUSTAY_ID", "HOURS_IN", "LABEL"])
+            .agg([
+                pl.col("VALUENUM").mean().alias("MEAN"),
+                pl.col("VALUENUM").count().alias("COUNT"),
+                pl.col("VALUENUM").std().alias("STDDEV"),
+            ])
+            .collect()
+        )
+        self.registry.save_dataframe(vitals_labs, "vitals_labs.parquet")
+        self.observer.log("INFO", "TimeSeriesAggregator: Saved vitals_labs.parquet")
+
+        # Save Mean Only (for downstream)
+        vitals_mean = (
+            vitals_labs.select(["SUBJECT_ID", "HADM_ID", "ICUSTAY_ID", "HOURS_IN", "LABEL", "MEAN"])
+        )
+        self.registry.save_dataframe(vitals_mean, "vitals_labs_mean.parquet")
+        self.observer.log("INFO", "TimeSeriesAggregator: Saved vitals_labs_mean.parquet")

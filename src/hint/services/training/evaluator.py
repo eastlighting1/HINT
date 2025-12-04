@@ -1,0 +1,272 @@
+import torch
+import torch.nn as nn
+import torch.nn.functional as F
+import numpy as np
+import json
+import shap
+from pathlib import Path
+from typing import List, Dict, Any
+from torch.utils.data import DataLoader
+from sklearn.metrics import accuracy_score, f1_score
+
+from hint.foundation.interfaces import TelemetryObserver, Registry, StreamingSource
+from hint.domain.entities import InterventionModelEntity
+from hint.domain.vo import CNNConfig
+from hint.infrastructure.components import TemperatureScaler
+
+class EvaluationService:
+    """
+    Domain service for Calibration, Evaluation and XAI of CNN.
+    Fully ported from CNN.py including numeric-only SHAP and tabular LIME logic.
+    """
+    def __init__(
+        self,
+        config: CNNConfig,
+        registry: Registry,
+        observer: TelemetryObserver,
+        entity: InterventionModelEntity,
+        device: str
+    ):
+        self.cfg = config
+        self.registry = registry
+        self.observer = observer
+        self.entity = entity
+        self.device = device
+        self.CLASS_NAMES = ["ONSET", "WEAN", "STAY ON", "STAY OFF"]
+
+    def calibrate(self, val_source: StreamingSource) -> None:
+        self.observer.log("INFO", "EvaluationService: Starting calibration (Temperature Scaling)...")
+        self.entity.to(self.device)
+        self.entity.network.eval()
+        
+        dl_val = DataLoader(val_source, batch_size=self.cfg.batch_size, num_workers=4)
+        ts = TemperatureScaler().to(self.device)
+        
+        logits_list, labels_list = [], []
+        with torch.no_grad():
+            for batch in dl_val:
+                batch = batch.to(self.device)
+                logits = self.entity.network(batch.x_num, batch.x_cat)
+                logits_list.append(logits)
+                labels_list.append(batch.y)
+        
+        temp = ts.fit(logits_list, labels_list, self.device)
+        self.entity.temperature = temp
+        self.observer.log("INFO", f"EvaluationService: Optimal temperature T={temp:.4f}")
+        
+        self.registry.save_model(self.entity.state_dict(), "cnn_model", "calibrated")
+
+    def evaluate(self, test_source: StreamingSource) -> None:
+        self.observer.log("INFO", "EvaluationService: Running test evaluation...")
+        self.entity.to(self.device)
+        self.entity.network.eval()
+        
+        dl_te = DataLoader(test_source, batch_size=self.cfg.batch_size, num_workers=4)
+        all_preds, all_labels = [], []
+        
+        with torch.no_grad():
+            for batch in dl_te:
+                batch = batch.to(self.device)
+                logits = self.entity.network(batch.x_num, batch.x_cat)
+                probs = torch.softmax(logits / self.entity.temperature, dim=1)
+                preds = probs.argmax(dim=1)
+                
+                all_preds.extend(preds.cpu().numpy())
+                all_labels.extend(batch.y.cpu().numpy())
+        
+        metrics = {
+            "accuracy": accuracy_score(all_labels, all_preds),
+            "macro_f1": f1_score(all_labels, all_preds, average="macro")
+        }
+        self.registry.save_json(metrics, "test_metrics.json")
+        self.observer.log("INFO", f"EvaluationService: Test Accuracy={metrics['accuracy']:.4f}")
+
+    def run_xai(self, val_source: StreamingSource, test_source: StreamingSource) -> None:
+        self.observer.log("INFO", "EvaluationService: Starting XAI pipeline...")
+        self.entity.to(self.device)
+        self.entity.network.eval()
+        
+        # Load Metadata
+        feat_info = self.registry.load_json("feature_info.json")
+        cat_vocab_sizes = feat_info.get("vocab_info", {})
+        seq_len = self.cfg.seq_len
+        n_cat_feats = len(cat_vocab_sizes)
+
+        # 1. SHAP (Numeric Only)
+        self._run_shap_numeric(val_source, test_source, n_cat_feats, seq_len)
+
+        # 2. LIME (Tabular)
+        self._run_lime_tabular(test_source, feat_info, n_cat_feats, seq_len)
+
+    def _run_shap_numeric(self, val_source, test_source, n_cat_feats, seq_len):
+        self.observer.log("INFO", "EvaluationService: Computing numeric-only SHAP...")
+        
+        max_bg = 128
+        max_samples = 256
+        
+        # Collect Background
+        dl_val = DataLoader(val_source, batch_size=self.cfg.batch_size, shuffle=False)
+        bg_num_list = []
+        total_bg = 0
+        for batch in dl_val:
+            bg_num_list.append(batch.x_num)
+            total_bg += batch.x_num.size(0)
+            if total_bg >= max_bg: break
+            
+        if not bg_num_list:
+            self.observer.log("WARNING", "No validation data for SHAP background.")
+            return
+            
+        bg_num = torch.cat(bg_num_list, dim=0)[:max_bg].to(self.device)
+
+        # Collect Samples
+        dl_te = DataLoader(test_source, batch_size=self.cfg.batch_size, shuffle=False)
+        samp_num_list = []
+        total_samp = 0
+        for batch in dl_te:
+            samp_num_list.append(batch.x_num)
+            total_samp += batch.x_num.size(0)
+            if total_samp >= max_samples: break
+            
+        samp_num = torch.cat(samp_num_list, dim=0)[:max_samples].to(self.device)
+
+        # Wrapper Class
+        class ProbWrapperNumOnly(nn.Module):
+            def __init__(self, base_model, temp, n_cat, length):
+                super().__init__()
+                self.base_model = base_model
+                self.temp = temp
+                self.n_cat = n_cat
+                self.length = length
+            
+            def forward(self, x_num):
+                batch_size = x_num.size(0)
+                if self.n_cat > 0:
+                    x_cat_dummy = torch.zeros(batch_size, self.n_cat, self.length, dtype=torch.long, device=x_num.device)
+                else:
+                    x_cat_dummy = torch.zeros(batch_size, 0, self.length, dtype=torch.long, device=x_num.device)
+                logits = self.base_model(x_num, x_cat_dummy) / self.temp
+                return F.softmax(logits, dim=1)
+
+        prob_model = ProbWrapperNumOnly(self.entity.network, self.entity.temperature, n_cat_feats, seq_len).to(self.device)
+        prob_model.eval()
+
+        explainer = shap.DeepExplainer(prob_model, bg_num)
+        shap_values = explainer.shap_values(samp_num, check_additivity=False)
+        
+        shap_data = {
+            "background_num": bg_num.detach().cpu().numpy().tolist(),
+            "sample_num": samp_num.detach().cpu().numpy().tolist(),
+            "shap_values": [s.tolist() for s in shap_values], # List of arrays
+            "class_names": self.CLASS_NAMES
+        }
+        self.registry.save_json(shap_data, "cnn_shap_values.json")
+        self.observer.log("INFO", "EvaluationService: SHAP values saved.")
+
+    def _run_lime_tabular(self, test_source, feat_info, n_cat_feats, seq_len):
+        try:
+            from lime.lime_tabular import LimeTabularExplainer
+        except ImportError:
+            self.observer.log("WARNING", "LIME not installed, skipping.")
+            return
+
+        self.observer.log("INFO", "EvaluationService: Computing LIME tabular explanations...")
+        
+        max_lime_samples = 2000
+        num_explanations = 50
+        
+        dl_te = DataLoader(test_source, batch_size=self.cfg.batch_size, shuffle=False)
+        tab_rows, tab_labels = [], []
+        total_rows = 0
+        
+        for batch in dl_te:
+            last_num = batch.x_num[:, :, -1].cpu().numpy()
+            if n_cat_feats > 0 and batch.x_cat is not None:
+                last_cat = batch.x_cat[:, :, -1].cpu().numpy()
+                row = np.concatenate([last_num, last_cat], axis=1)
+            else:
+                row = last_num
+            
+            tab_rows.append(row)
+            tab_labels.append(batch.y.numpy())
+            total_rows += row.shape[0]
+            if total_rows >= max_lime_samples: break
+            
+        if not tab_rows:
+            return
+
+        X_tab = np.vstack(tab_rows)
+        y_tab = np.concatenate(tab_labels)
+        
+        # Feature Names
+        base_feats_num = feat_info["base_feats_numeric"]
+        n_feats_num = feat_info["n_feats_numeric"]
+        cat_vocab_sizes = feat_info.get("vocab_info", {})
+        
+        if n_feats_num == len(base_feats_num) * 3:
+            suffixes = ["_obs", "_gap", "_pred"]
+            num_feat_names = [f"{name}{suf}" for suf in suffixes for name in base_feats_num]
+        else:
+            num_feat_names = [f"num_{i}" for i in range(n_feats_num)]
+            
+        cat_feat_names_last = [f"{name}_last" for name in cat_vocab_sizes.keys()]
+        feat_names_all = num_feat_names + cat_feat_names_last
+        categorical_features_idx = list(range(len(num_feat_names), len(feat_names_all)))
+
+        # Predict Function
+        def predict_fn(X):
+            X = np.atleast_2d(X)
+            n = X.shape[0]
+            num_part = X[:, :n_feats_num]
+            if n_cat_feats > 0:
+                cat_part = X[:, n_feats_num : n_feats_num + n_cat_feats]
+            else:
+                cat_part = None
+                
+            num_seq = np.repeat(num_part[:, :, None], seq_len, axis=2).astype(np.float32)
+            
+            if cat_part is not None:
+                # Clip to vocab
+                cat_part_int = np.rint(cat_part).astype(np.int64)
+                cat_part_clipped_list = []
+                for idx, (name, vocab_size) in enumerate(cat_vocab_sizes.items()):
+                    vals = np.clip(cat_part_int[:, idx], 0, vocab_size - 1)
+                    cat_part_clipped_list.append(vals[:, None])
+                cat_part_arr = np.concatenate(cat_part_clipped_list, axis=1)
+                cat_seq = np.repeat(cat_part_arr[:, :, None], seq_len, axis=2).astype(np.int64)
+            else:
+                cat_seq = np.zeros((n, 0, seq_len), dtype=np.int64)
+            
+            with torch.no_grad():
+                t_num = torch.from_numpy(num_seq).to(self.device)
+                t_cat = torch.from_numpy(cat_seq).to(self.device)
+                logits = self.entity.network(t_num, t_cat) / self.entity.temperature
+                probs = F.softmax(logits, dim=1).cpu().numpy()
+            return probs
+
+        explainer = LimeTabularExplainer(
+            training_data=X_tab,
+            feature_names=feat_names_all,
+            class_names=self.CLASS_NAMES,
+            categorical_features=categorical_features_idx if categorical_features_idx else None,
+            mode="classification"
+        )
+        
+        lime_results = []
+        limit = min(num_explanations, X_tab.shape[0])
+        
+        for idx in range(limit):
+            exp = explainer.explain_instance(X_tab[idx], predict_fn, num_features=20, top_labels=1)
+            probs = predict_fn(X_tab[idx:idx+1])[0]
+            top_label = int(exp.top_labels[0])
+            
+            lime_results.append({
+                "sample_index": int(idx),
+                "true_label": int(y_tab[idx]),
+                "pred_label": int(np.argmax(probs)),
+                "probs": probs.tolist(),
+                "explanation": exp.as_list(label=top_label)
+            })
+            
+        self.registry.save_json({"explanations": lime_results}, "cnn_lime_explanations.json")
+        self.observer.log("INFO", "EvaluationService: LIME explanations saved.")

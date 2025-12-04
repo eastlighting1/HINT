@@ -1,48 +1,39 @@
 from dataclasses import dataclass
+from typing import Any, Dict, List, Optional
 import torch
-from typing import List
+from hint.domain.vo import ETLConfig, ICDConfig, CNNConfig
+
+@dataclass
+class AppContext:
+    """Holds all configuration VOs for the application."""
+    etl: ETLConfig
+    icd: ICDConfig
+    cnn: CNNConfig
+    mode: str
+    seed: int
 
 @dataclass
 class TensorBatch:
-    """
-    Data Transfer Object holding a batch of tensors and metadata.
-
-    This container ensures that numeric inputs, categorical inputs, targets,
-    and associated metadata travel together through the system.
-
-    Args:
-        x_num: Numeric features tensor of shape (B, F_num, T).
-        x_cat: Categorical features tensor of shape (B, F_cat, T).
-        targets: Target labels tensor of shape (B,).
-        stay_ids: List of unique stay identifiers corresponding to the batch.
-    """
+    """Standard batch format for model training."""
     x_num: torch.Tensor
-    x_cat: torch.Tensor
-    targets: torch.Tensor
-    stay_ids: List[int]
-
-    def to(self, device: str) -> "TensorBatch":
-        """
-        Move all tensors in the batch to the specified device.
-
-        Args:
-            device: Target device string (e.g., 'cuda', 'cpu').
-
-        Returns:
-            A new TensorBatch instance with tensors on the target device.
-        """
+    x_cat: Optional[torch.Tensor]
+    y: torch.Tensor
+    ids: Optional[torch.Tensor] = None # For input_ids (BERT) or StayIDs
+    mask: Optional[torch.Tensor] = None # For attention_mask
+    
+    def to(self, device: str) -> 'TensorBatch':
         return TensorBatch(
             x_num=self.x_num.to(device),
-            x_cat=self.x_cat.to(device),
-            targets=self.targets.to(device),
-            stay_ids=self.stay_ids
+            x_cat=self.x_cat.to(device) if self.x_cat is not None else None,
+            y=self.y.to(device),
+            ids=self.ids.to(device) if self.ids is not None else None,
+            mask=self.mask.to(device) if self.mask is not None else None
         )
 
-    def __len__(self) -> int:
-        """
-        Return the batch size.
-
-        Returns:
-            Number of samples in the batch.
-        """
-        return self.x_num.size(0)
+@dataclass
+class PredictionResult:
+    """Result of a prediction step."""
+    logits: torch.Tensor
+    probs: torch.Tensor
+    preds: torch.Tensor
+    targets: Optional[torch.Tensor] = None

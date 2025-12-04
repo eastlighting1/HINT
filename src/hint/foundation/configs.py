@@ -1,84 +1,61 @@
-from dataclasses import dataclass, field
-from typing import List
+from omegaconf import DictConfig
+from hint.foundation.dtos import AppContext
+from hint.domain.vo import ETLConfig, ICDConfig, CNNConfig
 
-@dataclass(frozen=True)
-class DataConfig:
+def load_app_context(cfg: DictConfig) -> AppContext:
     """
-    Configuration for data loading and processing.
+    Convert Hydra DictConfig to strongly typed AppContext.
+    """
+    # ETL Config extraction (assuming default values if not present in Hydra cfg)
+    etl_cfg = ETLConfig(
+        raw_dir=cfg.get("data", {}).get("raw_dir", "./data/raw"),
+        proc_dir=cfg.get("data", {}).get("proc_dir", "./data/processed"),
+        resources_dir=cfg.get("data", {}).get("resources_dir", "./resources")
+    )
+    
+    # ICD Config extraction
+    icd_raw = cfg.get("icd", {})
+    icd_cfg = ICDConfig(
+        data_path=icd_raw.get("data_path", "data/processed/dataset_123_answer.parquet"),
+        model_name=icd_raw.get("model_name", "Charangan/MedBERT"),
+        batch_size=icd_raw.get("batch_size", 2048),
+        lr=icd_raw.get("lr", 1e-5),
+        epochs=icd_raw.get("epochs", 100),
+        patience=icd_raw.get("patience", 5),
+        dropout=icd_raw.get("dropout", 0.3),
+        # Add other fields as necessary from Hydra config
+        xgb_params=icd_raw.get("xgb_params", {})
+    )
 
-    Args:
-        data_path: Path to the input data file.
-        seq_len: Sequence length for the time-series data.
-        batch_size: Number of samples per batch.
-        num_workers: Number of subprocesses for data loading.
-    """
-    data_path: str
-    seq_len: int = 120
-    batch_size: int = 512
-    num_workers: int = 4
+    # CNN Config extraction
+    cnn_raw = cfg.get("cnn", {})
+    cnn_data = cnn_raw.get("data", {})
+    cnn_model = cnn_raw.get("model", {})
+    
+    cnn_cfg = CNNConfig(
+        data_path=cnn_data.get("path", "data/processed/dataset_123_inferred.parquet"),
+        data_cache_dir=cnn_data.get("data_cache_dir", "data/cache"),
+        exclude_cols=cnn_data.get("exclude_cols", ["ICD9_CODES"]),
+        seq_len=cnn_model.get("seq_len", 120),
+        batch_size=cnn_model.get("batch_size", 512),
+        epochs=cnn_model.get("epochs", 100),
+        lr=cnn_model.get("lr", 0.001),
+        patience=cnn_model.get("patience", 10),
+        focal_gamma=cnn_model.get("focal_gamma", 2.0),
+        label_smoothing=cnn_model.get("label_smoothing", 0.1),
+        ema_decay=cnn_model.get("ema_decay", 0.999),
+        embed_dim=cnn_model.get("embed_dim", 128),
+        cat_embed_dim=cnn_model.get("cat_embed_dim", 32),
+        dropout=cnn_model.get("dropout", 0.5),
+        tcn_kernel_size=cnn_model.get("tcn_kernel_size", 5),
+        tcn_layers=cnn_model.get("tcn_layers", 5),
+        tcn_dropout=cnn_model.get("tcn_dropout", 0.4)
+    )
 
-@dataclass(frozen=True)
-class ModelConfig:
-    """
-    Configuration for the neural network model structure.
-
-    Args:
-        embed_dim: Dimension of the embedding layers.
-        dropout: Dropout rate for the classifier head.
-        tcn_kernel_size: Kernel size for the TCN layers.
-        tcn_layers: Number of TCN layers.
-        tcn_dropout: Dropout rate for the TCN layers.
-        n_classes: Number of target classes.
-        g1_indices: Indices for the first group of features.
-        g2_indices: Indices for the second group of features.
-        rest_indices: Indices for the remaining features.
-        vocab_sizes: Dictionary mapping categorical feature names to vocabulary sizes.
-    """
-    embed_dim: int = 128
-    dropout: float = 0.5
-    tcn_kernel_size: int = 5
-    tcn_layers: int = 5
-    tcn_dropout: float = 0.4
-    n_classes: int = 4
-    g1_indices: List[int] = field(default_factory=list)
-    g2_indices: List[int] = field(default_factory=list)
-    rest_indices: List[int] = field(default_factory=list)
-    vocab_sizes: dict = field(default_factory=dict)
-
-@dataclass(frozen=True)
-class TrainingConfig:
-    """
-    Configuration for the training process.
-
-    Args:
-        epochs: Number of total epochs to run.
-        lr: Learning rate for the optimizer.
-        patience: Patience for early stopping.
-        focal_gamma: Gamma parameter for Focal Loss.
-        ema_decay: Decay rate for Exponential Moving Average.
-        device: Computation device (e.g., 'cuda', 'cpu').
-    """
-    epochs: int = 100
-    lr: float = 0.001
-    patience: int = 10
-    focal_gamma: float = 2.0
-    ema_decay: float = 0.999
-    device: str = "cuda"
-
-@dataclass(frozen=True)
-class HINTConfig:
-    """
-    Root configuration aggregating all sub-configurations.
-
-    Args:
-        data: Data configuration.
-        model: Model configuration.
-        train: Training configuration.
-        project_name: Name of the project.
-        artifact_dir: Directory to store artifacts.
-    """
-    data: DataConfig
-    model: ModelConfig
-    train: TrainingConfig
-    project_name: str = "HINT"
-    artifact_dir: str = "artifacts"
+    return AppContext(
+        etl=etl_cfg,
+        icd=icd_cfg,
+        cnn=cnn_cfg,
+        mode=cfg.get("mode", "train"),
+        seed=cfg.get("seed", 42)
+    )

@@ -66,115 +66,129 @@ HINT is evaluated on the **MIMIC-III** dataset and compared against strong basel
 
 ### Prerequisites
 
-- Python 3.8+
+- Python 3.9+
 - PyTorch 1.12+
 - CUDA-capable GPU (recommended)
+- [Polars](https://pola.rs/) (for fast data processing)
 
 ### Installation
 
 ```bash
-git clone https://github.com/eastlighting1/HINT.git
+git clone [https://github.com/eastlighting1/HINT.git](https://github.com/eastlighting1/HINT.git)
 cd HINT
 pip install -r requirements.txt
 ```
 
----
+-----
 
 ## 📂 Data Preparation (MIMIC-III)
 
 This project uses the **MIMIC-III** database. You must have credentialed access via **PhysioNet**.
 
-1. Download the MIMIC-III CSV files from PhysioNet.
-2. Run the ETL pipeline via the unified entry point. This replaces the legacy `build_cohort.py` script:
+1.  Download the MIMIC-III CSV files from PhysioNet.
 
-   ```bash
-   # Run the ETL pipeline (Extraction + Preprocessing)
-   python src/hint/app/main.py mode=etl data.data_path=/path/to/mimic/raw
-   ```
+2.  Run the **ETL Pipeline** to extract cohorts, process time-series, and generate windowed tensors.
 
-3. The pipeline generates:
-   - Parquet files in `data/processed/`: static cohorts and time-series aggregates.
-   - HDF5 files in `data/cache/`: windowed tensors (**VAL/MSK/DELTA**) for efficient training.
+    ```bash
+    # Run the full ETL pipeline (Extraction -> Processing -> Tensor Conversion)
+    # Ensure 'data.raw_dir' points to your downloaded MIMIC CSVs
+    python src/hint/app/main.py mode=etl data.raw_dir=/path/to/mimic/raw
+    ```
 
----
+3.  The pipeline generates artifacts in the directory specified by `logging.artifacts_dir` (default: `artifacts/`):
+
+      - **Dataframes** (`artifacts/data/`): `patients.parquet`, `interventions.parquet`, `dataset_123.parquet`.
+      - **Tensors** (`artifacts/data/`): `train.h5`, `val.h5`, `test.h5` (Windowed & Normalized).
+      - **Metadata** (`artifacts/metrics/`): `train_stats.json`, `feature_info.json`.
+
+-----
 
 ## 🧪 Usage
 
-The application uses **Hydra** for configuration management. All major workflows are triggered via `src/hint/app/main.py` by switching the `mode`.
+The application uses **Hydra** for configuration management. Workflows are orchestrated via `src/hint/app/main.py` by switching the `mode`.
 
 ### 1. Train Automated ICD Coding Module
 
-Train the MedBERT-based ICD encoder and the XGBoost ensemble stacker.
+Trains the **MedBERT-based ICD encoder** and the XGBoost ensemble stacker using the processed parquet data.
 
 ```bash
 python src/hint/app/main.py mode=icd
 ```
 
-### 2. Train Intervention Prediction Module (HINT)
+### 2. Train Intervention Prediction Module (CNN)
 
-Train the main CNN (TCN + ICD-Gating) model for intervention prediction. This is the default training workflow.
+Trains the main **GFINet (CNN)** model for intervention prediction using the HDF5 tensor streams. This mode includes **Training**, **Temperature Calibration**, and **Evaluation**.
 
 ```bash
-python src/hint/app/main.py mode=train \
-  train.epochs=100 \
-  train.batch_size=512
+python src/hint/app/main.py mode=cnn \
+  cnn.model.epochs=100 \
+  cnn.model.batch_size=512
 ```
 
-### 3. Run Tests & Coverage
+### 3. Full Training Pipeline
 
-We provide a dedicated test runner that executes unit, integration, and end-to-end tests and generates JaCoCo-style HTML coverage reports.  
-The runner is configured via `configs/test_config.yaml`.
+Execute both ICD training and CNN training sequentially.
+
+```bash
+python src/hint/app/main.py mode=train
+```
+
+### 4. Run Tests & Coverage
+
+We provide a dedicated test runner that executes unit, integration, and end-to-end tests.
 
 ```bash
 # Run all tests (default configuration)
-python src/tests/runner.py
+python src/test/runner.py
 
-# Run only unit tests by overriding targets via CLI
-python src/tests/runner.py test.targets="['src/tests/unit']"
+# Run only unit tests
+python src/test/runner.py test.targets="['src/test/unit']"
 
-# Run tests matching a keyword (e.g., "icd")
-python src/tests/runner.py test.keywords="icd"
+# Run tests matching a keyword
+python src/test/runner.py test.keywords="icd"
 ```
 
-The HTML coverage report will be generated at:
+The HTML coverage report will be generated at `coverage_report/index.html`.
 
-```text
-coverage_report/index.html
-```
-
----
+-----
 
 ## 📁 Directory Structure
 
-The project follows a **Domain-Driven Design (DDD)** architecture.
+The project follows a rigorous **Domain-Driven Design (DDD)** architecture to ensure separation of concerns between data processing, model logic, and infrastructure.
 
 ```text
-HINT/
-├── configs/                   # Hydra configuration files (hydra.yaml, cnn_config.yaml, test_config.yaml, etc.)
-├── data/                      # Data storage (raw, processed, cache)
-├── src/
-│   ├── hint/                  # Main package
-│   │   ├── app/               # Application Layer (entry point, factory)
-│   │   ├── domain/            # Domain Layer (TrainableEntity)
-│   │   ├── foundation/        # Foundation Layer (configs, DTOs, interfaces)
-│   │   ├── infrastructure/    # Infrastructure Layer (networks, data source, registry)
-│   │   └── services/          # Service Layer (orchestration logic)
-│   │       ├── etl/           # ETL pipeline service
-│   │       ├── icd_service.py # ICD training & XAI service
-│   │       └── trainer.py     # Main CNN training service
-│   │
-│   └── tests/                 # Test suite
-│       ├── unit/              # Unit tests (mock-heavy)
-│       ├── integration/       # Integration tests (real I/O)
-│       ├── e2e/               # End-to-end smoke tests
-│       ├── utils/             # Test helpers (synthetic data generators)
-│       └── runner.py          # Custom test runner with coverage support (Hydra-based)
+src/hint/
+├── app/                        # Application Layer
+│   ├── main.py                 # Entry Point & Pipeline Orchestrator
+│   └── factory.py              # Dependency Injection Factory
 │
-├── requirements.txt
-└── README.md
+├── domain/                     # Domain Layer (Business Logic & State)
+│   ├── entities.py             # TrainableEntity (Model State, EMA, Steps)
+│   └── vo.py                   # Value Objects (Immutable Configs)
+│
+├── foundation/                 # Foundation Layer (Shared Kernels)
+│   ├── configs.py              # Config Loading & Validation
+│   ├── dtos.py                 # Data Transfer Objects (TensorBatch)
+│   ├── exceptions.py           # Custom Domain Exceptions
+│   └── interfaces.py           # Abstract Base Classes (Port Definitions)
+│
+├── infrastructure/             # Infrastructure Layer (Adapters)
+│   ├── datasource.py           # Streaming Sources (HDF5, Parquet Adapters)
+│   ├── registry.py             # Artifact Persistence (File I/O)
+│   ├── telemetry.py            # Logging & Metrics (Rich Observer)
+│   ├── networks.py             # PyTorch Modules (GFINet, MedBERT)
+│   └── components.py           # Shared ML Components (FocalLoss, TempScaler)
+│
+└── services/                   # Service Layer (Use Cases)
+    ├── etl/                    # ETL Pipeline
+    │   ├── service.py          # ETL Orchestrator
+    │   └── components/         # Pipeline Steps (Static, TimeSeries, Tensor...)
+    ├── icd/                    # ICD Domain Service
+    │   └── service.py          # Training, Stacking, XAI logic
+    └── training/               # Intervention Domain Service
+        ├── trainer.py          # CNN Training Loop
+        └── evaluator.py        # Calibration & Evaluation
 ```
-
----
 
 ## 📜 License
 

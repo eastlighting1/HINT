@@ -1,118 +1,85 @@
-import uuid
-from pathlib import Path
-from typing import Dict, Any
-
 import torch
 import torch.nn as nn
+from typing import Dict, Any, Optional
 from torch_ema import ExponentialMovingAverage
+from abc import ABC, abstractmethod
 
-from ..foundation.configs import TrainingConfig
-from ..foundation.dtos import TensorBatch
+class TrainableEntity(ABC):
+    """Abstract base class for trainable models with state."""
+    def __init__(self, name: str):
+        self.name = name
+        self.epoch: int = 0
+        self.global_step: int = 0
+        self.best_metric: float = -float('inf')
+        self.network: Optional[nn.Module] = None
+    
+    @abstractmethod
+    def state_dict(self) -> Dict[str, Any]: ...
+    
+    @abstractmethod
+    def load_state_dict(self, state: Dict[str, Any]) -> None: ...
 
-class TrainableEntity:
-    """
-    Domain Entity representing a trainable model with state.
-
-    This entity encapsulates the network architecture, optimizer, EMA state,
-    and training metadata like current epoch and best metrics. It provides
-    methods for prediction, training steps, and state snapshots.
-
-    Attributes:
-        id: Unique identifier for the training session.
-        network: The underlying neural network module.
-        config: Training configuration.
-        epoch: Current training epoch.
-        best_metric: Best metric value achieved so far.
-        current_loss: Most recent loss value.
-        state: Lifecycle state of the entity.
-        optimizer: Optimizer instance.
-        ema: Exponential Moving Average instance.
-    """
-    def __init__(self, network: nn.Module, config: TrainingConfig):
-        self.id = uuid.uuid4().hex[:8]
-        self.network = network
-        self.config = config
+class ICDModelEntity(TrainableEntity):
+    """Entity for ICD coding model (Ensemble of BERT heads)."""
+    def __init__(self, head1: nn.Module, head2: nn.Module, stacker: Any):
+        super().__init__("icd_ensemble")
+        self.head1 = head1
+        self.head2 = head2
+        self.stacker = stacker # XGBoost wrapper
         
-        self.epoch = 0
-        self.best_metric = 0.0
-        self.current_loss = float('inf')
-        self.state = "INITIALIZED"
-        
-        self.optimizer = torch.optim.AdamW(
-            network.parameters(), 
-            lr=config.lr, 
-            weight_decay=1e-5
-        )
-        self.ema = ExponentialMovingAverage(
-            network.parameters(), 
-            decay=config.ema_decay
-        )
-
-    def predict(self, batch: TensorBatch) -> torch.Tensor:
-        """
-        Perform inference using EMA weights.
-
-        Args:
-            batch: Input data batch.
-
-        Returns:
-            Logits tensor.
-        """
-        self.network.eval()
-        with self.ema.average_parameters():
-            with torch.no_grad():
-                return self.network(batch.x_num, batch.x_cat)
-
-    def step_train(self, batch: TensorBatch, loss_fn: nn.Module) -> float:
-        """
-        Perform a single training step.
-
-        Args:
-            batch: Input data batch.
-            loss_fn: Loss function module.
-
-        Returns:
-            The scalar loss value.
-        """
-        self.network.train()
-        self.optimizer.zero_grad()
-        
-        logits = self.network(batch.x_num, batch.x_cat)
-        loss = loss_fn(logits, batch.targets)
-        
-        loss.backward()
-        self.optimizer.step()
-        self.ema.update(self.network.parameters())
-        
-        self.current_loss = loss.item()
-        return self.current_loss
-
-    def snapshot(self) -> Dict[str, Any]:
-        """
-        Create a serializable snapshot of the current state.
-
-        Returns:
-            Dictionary containing state dictionaries of components and metadata.
-        """
+    def state_dict(self) -> Dict[str, Any]:
         return {
-            "id": self.id,
-            "network_state": self.network.state_dict(),
-            "optimizer_state": self.optimizer.state_dict(),
-            "ema_state": self.ema.state_dict(),
-            "epoch": self.epoch,
+            "head1": self.head1.state_dict(),
+            "head2": self.head2.state_dict(),
+            # XGBoost model handling is done separately via Registry usually,
+            # or wrapped here if serializable.
             "best_metric": self.best_metric,
+            "epoch": self.epoch
+        }
+    
+    def load_state_dict(self, state: Dict[str, Any]) -> None:
+        self.head1.load_state_dict(state["head1"])
+        self.head2.load_state_dict(state["head2"])
+        self.best_metric = state.get("best_metric", 0.0)
+        self.epoch = state.get("epoch", 0)
+
+    def to(self, device: str) -> None:
+        self.head1.to(device)
+        self.head2.to(device)
+
+class InterventionModelEntity(TrainableEntity):
+    """Entity for Intervention Prediction CNN with EMA and Calibration."""
+    def __init__(self, network: nn.Module, ema_decay: float = 0.999):
+        super().__init__("intervention_cnn")
+        self.network = network
+        self.ema = ExponentialMovingAverage(network.parameters(), decay=ema_decay)
+        self.temperature: float = 1.0
+        self.thresholds: Optional[Any] = None # numpy array
+
+    def update_ema(self) -> None:
+        self.ema.update(self.network.parameters())
+
+    def state_dict(self) -> Dict[str, Any]:
+        with self.ema.average_parameters():
+            # Save EMA weights as the primary state
+            net_state = self.network.state_dict()
+            
+        return {
+            "network": net_state, # EMA averaged weights
+            "temperature": self.temperature,
+            "thresholds": self.thresholds,
+            "best_metric": self.best_metric,
+            "epoch": self.epoch
         }
 
-    def restore(self, snapshot: Dict[str, Any]) -> None:
-        """
-        Restore state from a snapshot.
+    def load_state_dict(self, state: Dict[str, Any]) -> None:
+        self.network.load_state_dict(state["network"])
+        self.temperature = state.get("temperature", 1.0)
+        self.thresholds = state.get("thresholds", None)
+        self.best_metric = state.get("best_metric", 0.0)
+        self.epoch = state.get("epoch", 0)
+        # Reset EMA to current weights upon load
+        self.ema = ExponentialMovingAverage(self.network.parameters(), decay=0.999) 
 
-        Args:
-            snapshot: Dictionary containing saved state.
-        """
-        self.id = snapshot["id"]
-        self.network.load_state_dict(snapshot["network_state"])
-        self.optimizer.load_state_dict(snapshot["optimizer_state"])
-        self.ema.load_state_dict(snapshot["ema_state"])
-        self.epoch = snapshot["epoch"]
-        self.best_metric = snapshot["best_metric"]
+    def to(self, device: str) -> None:
+        self.network.to(device)

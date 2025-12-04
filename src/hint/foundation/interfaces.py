@@ -1,101 +1,39 @@
 from abc import ABC, abstractmethod
-from typing import Any, Iterator, ContextManager, Optional
-from .dtos import TensorBatch
+from typing import Any, Dict, List, Optional, Protocol, Union
+from pathlib import Path
+import torch
 
-class TelemetryObserver(ABC):
-    """
-    Abstract interface for observability (logging, metrics, tracing).
+class TelemetryObserver(Protocol):
+    """Interface for logging, metrics, and progress tracking."""
+    def log(self, level: str, message: str) -> None: ...
+    def track_metric(self, name: str, value: float, step: int) -> None: ...
+    def create_progress(self, desc: str, total: int) -> Any: ...
 
-    This interface decouples the business logic from specific logging libraries
-    like Loguru or Rich.
-    """
+class Registry(ABC):
+    """Interface for artifact persistence (Model, Data, Config)."""
     @abstractmethod
-    def log(self, level: str, message: str) -> None:
-        """
-        Log a message with a specific severity level.
-
-        Args:
-            level: Severity level (e.g., 'INFO', 'ERROR').
-            message: The message to log.
-        """
-        pass
-
+    def save_model(self, state_dict: Dict[str, Any], name: str, tag: str) -> Path: ...
     @abstractmethod
-    def track_metric(self, name: str, value: float, step: Optional[int] = None) -> None:
-        """
-        Track a numerical metric.
-
-        Args:
-            name: Name of the metric (e.g., 'loss').
-            value: Value of the metric.
-            step: Current step or epoch number.
-        """
-        pass
-    
+    def load_model(self, name: str, tag: str, device: str) -> Dict[str, Any]: ...
     @abstractmethod
-    def trace(self, span_name: str) -> ContextManager:
-        """
-        Create a context manager for tracing a block of code.
+    def save_dataframe(self, df: Any, name: str) -> Path: ...
+    @abstractmethod
+    def load_dataframe(self, name: str) -> Any: ...
+    @abstractmethod
+    def save_json(self, data: Dict[str, Any], name: str) -> Path: ...
+    @abstractmethod
+    def load_json(self, name: str) -> Dict[str, Any]: ...
+    @abstractmethod
+    def get_artifact_path(self, name: str) -> Path: ...
 
-        Args:
-            span_name: Name of the span/operation to trace.
-
-        Returns:
-            A context manager that measures execution time.
-        """
-        pass
+class PipelineComponent(ABC):
+    """Interface for ETL pipeline steps."""
+    @abstractmethod
+    def execute(self) -> None: ...
 
 class StreamingSource(ABC):
-    """
-    Abstract interface for streaming data batches.
-
-    This interface hides the details of data loading (e.g., HDF5, CSV, SQL).
-    """
+    """Interface for data streaming."""
     @abstractmethod
-    def stream_batches(self) -> Iterator[TensorBatch]:
-        """
-        Yield batches of data.
-
-        Returns:
-            An iterator yielding TensorBatch objects.
-        """
-        pass
-    
+    def __len__(self) -> int: ...
     @abstractmethod
-    def __len__(self) -> int:
-        """
-        Return the total number of batches.
-
-        Returns:
-            Total number of batches available.
-        """
-        pass
-
-class ModelRegistry(ABC):
-    """
-    Abstract interface for saving and loading model artifacts.
-    """
-    @abstractmethod
-    def save(self, entity: Any, tag: str = "latest") -> None:
-        """
-        Save the model entity.
-
-        Args:
-            entity: The entity to save.
-            tag: Version tag (e.g., 'best', 'latest').
-        """
-        pass
-
-    @abstractmethod
-    def load(self, entity_id: str, tag: str = "latest") -> Any:
-        """
-        Load the model entity.
-
-        Args:
-            entity_id: The unique identifier of the entity.
-            tag: Version tag to load.
-
-        Returns:
-            The loaded artifact (usually a state dictionary).
-        """
-        pass
+    def __iter__(self): ...

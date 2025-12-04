@@ -1,0 +1,16 @@
+# configs/etl_config.yaml
+data:
+  raw_dir: "data/raw"
+  proc_dir: "data/processed"
+  resources_dir: "resources"
+
+cohort:
+  min_los_icu_days: 0.0
+  min_duration_hours: 0
+  max_duration_hours: 999999
+  min_age: 0
+
+processing:
+  input_window_h: 6
+  gap_h: 6
+  pred_window_h: 4

@@ -1,31 +1,42 @@
 import hydra
 from omegaconf import DictConfig
-from .factory import AppFactory
+from hint.app.factory import AppFactory
 
-@hydra.main(config_path="../../configs", config_name="cnn_config", version_base=None)
+@hydra.main(config_path="../../../configs", config_name="config", version_base=None)
 def main(cfg: DictConfig) -> None:
     """
-    Main entry point for the HINT application.
-
-    Orchestrates the creation of the Factory, Domain Objects, and Services,
-    then executes the training workflow.
-
-    Args:
-        cfg: Hydra configuration object.
+    Main entry point for HINT pipeline.
+    Orchestrates ETL, ICD, and CNN workflows based on configuration mode.
     """
     factory = AppFactory(cfg)
+    mode = cfg.get("mode", "train")
     
-    hint_config = factory.create_configs()
-    entity = factory.create_entity(hint_config)
-    trainer = factory.create_service(hint_config)
-    train_source, val_source = factory.create_sources(hint_config)
-    
-    trainer.train_model(
-        entity=entity,
-        train_source=train_source,
-        val_source=val_source,
-        epochs=hint_config.train.epochs
-    )
+    factory.observer.log("INFO", f"Main: Starting HINT pipeline in mode='{mode}'")
+
+    # 1. ETL Pipeline
+    if mode in ["all", "etl"]:
+        etl_service = factory.create_etl_service()
+        etl_service.run_pipeline()
+
+    # 2. ICD Pipeline
+    if mode in ["all", "train", "icd"]:
+        icd_service = factory.create_icd_service()
+        icd_service.train()
+        icd_service.run_xai()
+
+    # 3. CNN Pipeline
+    if mode in ["all", "train", "cnn"]:
+        trainer, evaluator = factory.create_cnn_services()
+        
+        # Train
+        trainer.train_model(trainer.tr_src, trainer.val_src)
+        
+        # Calibrate & Test
+        evaluator.calibrate(trainer.val_src)
+        evaluator.evaluate(evaluator.te_src)
+        evaluator.run_xai(evaluator.te_src)
+
+    factory.observer.log("INFO", "Main: Pipeline finished successfully.")
 
 if __name__ == "__main__":
     main()
