@@ -1,0 +1,58 @@
+# configs/icd_config.yaml
+
+# Configuration for the Automated ICD Coding module
+
+icd:
+  # Pretrained BERT model from HuggingFace
+  model_name: "Charangan/MedBERT"
+  
+  # Maximum sequence length for text tokenization
+  max_length: 512
+  
+  # Data split ratios
+  test_split: 0.2
+  val_split: 0.15625  # 0.15625 of remaining 0.8 is approx 0.125 of total
+  
+  # Number of most frequent ICD codes to keep
+  top_k_labels: 50.
+  
+  # Alpha for weighted random sampler (handling class imbalance)
+  sampler_alpha: 0.5
+  
+  # Beta for Class-Balanced Loss
+  cb_beta: 0.999
+  
+  # Gamma for Focal Loss
+  focal_gamma: 1.5
+  
+  # Dropout rate for the BERT classifier head
+  dropout: 0.3
+  
+  # Learning rate for BERT fine-tuning
+  lr: 1e-5
+  
+  # Training epochs
+  epochs: 50
+  
+  # Early stopping patience
+  patience: 5
+  
+  # Number of epochs to keep BERT backbone frozen
+  freeze_bert_epochs: 1
+  
+  # PCA components for dimensionality reduction before Stacking
+  # If float < 1.0, represents variance ratio. If int, represents number of components.
+  pca_components: 0.95
+  
+  # Hyperparameters for the XGBoost ensemble stacker
+  xgb_params:
+    objective: "multi:softprob"
+    eval_metric: "mlogloss"
+    tree_method: "hist"  # Use 'gpu_hist' if GPU is available for XGBoost
+    device: "cuda"       # XGBoost device parameter
+    n_estimators: 100
+    max_depth: 6
+    learning_rate: 0.1
+    subsample: 0.8
+    colsample_bytree: 0.8
+    n_jobs: -1

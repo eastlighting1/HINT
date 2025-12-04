@@ -1,0 +1,55 @@
+# configs/cnn_config.yaml
+
+# Configuration for the HINT CNN model (Intervention Prediction)
+
+data:
+  # Path to the HDF5 file containing windowed time-series data
+  # In ETL mode, this points to raw input; in Train mode, to processed H5.
+  data_path: "data/cache/train.h5" 
+  
+  # Time-series sequence length (T)
+  seq_len: 120
+  
+  # Training batch size
+  batch_size: 512
+  
+  # Number of data loader workers
+  num_workers: 8
+
+model:
+  # Dimension of the embedding space
+  embed_dim: 128
+  
+  # Dropout rate for the final classifier head
+  dropout: 0.5
+  
+  # Kernel size for Temporal Convolutional Network (TCN) layers
+  tcn_kernel_size: 5
+  
+  # Number of stacked TCN layers
+  tcn_layers: 5
+  
+  # Dropout rate within TCN blocks
+  tcn_dropout: 0.4
+  
+  # Number of target classes (ONSET, WEAN, STAY ON, STAY OFF)
+  n_classes: 4
+
+train:
+  # Total number of training epochs
+  epochs: 100
+  
+  # Learning rate
+  lr: 0.001
+  
+  # Patience for early stopping (epochs without improvement)
+  patience: 10
+  
+  # Gamma parameter for Focal Loss (handles class imbalance)
+  focal_gamma: 2.0
+  
+  # Decay rate for Exponential Moving Average (EMA) of model weights
+  ema_decay: 0.999
+  
+  # Computation device ('cuda' or 'cpu')
+  device: "cuda"
