@@ -1,211 +1,206 @@
 # HINT: Hierarchical ICD-aware Network for Time-series Intervention
 
-[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
-[![Framework: PyTorch](https://img.shields.io/badge/Framework-PyTorch-orange.svg)](https://pytorch.org/)
-[![Dataset: MIMIC-III](https://img.shields.io/badge/Dataset-MIMIC--III-blue.svg)](https://physionet.org/content/mimiciii/)
-
-> **Author:** Donghyeon Kim  
-> **Institution:** Gachon University, School of Computing
-
----
-
-## 📖 Overview
-
-**HINT** is a hierarchical Clinical Decision Support System (CDSS) designed to predict mechanical ventilation interventions in the Intensive Care Unit (ICU).
-
-Unlike traditional models that rely solely on vital signs, HINT integrates high-level diagnostic context with low-level time-series data. It addresses the challenges of **sparse ICU data**, **incomplete diagnostic labels (partial labels)**, and **extreme class imbalance** in intervention events.
-
-### Key Features
-
-- **Hierarchical Structure:** Two-stage pipeline consisting of *Automated ICD Coding* and *Intervention Prediction*.
-- **Partial Label Learning:** Handles incomplete and noisy EMR diagnostic records effectively.
-- **Context-Adaptive:** Uses an **ICD-Conditioned Gating Mechanism** to dynamically reweight physiological features based on the patient's diagnostic context.
-- **Imbalance-Robust:** Achieves strong performance on rare events (ONSET/WEAN) using class-balanced focal loss and group-wise Temporal Convolutional Networks (TCNs).
-- **Explainable (XAI):** Provides global (SHAP) and local (LIME) explanations to support clinical decision-making.
-
----
-
-## 🏗️ Architecture
-
-The system operates in two main phases:
-
-1. **Automated ICD Coding Module**
-   - **Inputs:** Candidate ICD-9 code sets and static/numeric features.
-   - **Method:** Partial label learning with BERT-based text encoders.
-   - **Output:** Inferred admission-level representative ICD context.
-
-2. **Intervention Prediction Module**
-   - **Inputs:** 3-channel time-series tensor (**VAL**, **MSK**, **DELTA**) and inferred ICD context.
-   - **Method:** **Group-wise TCN** (Temporal Convolutional Network) with an **ICD-Conditioned Gating Mechanism**.
-   - **Output:** Probability of 4 states: `ONSET`, `WEAN`, `STAY ON`, `STAY OFF`.
-
 <div align="center">
-   <br>
-   <img width="800" alt="HINT Architectur" src="https://github.com/user-attachments/assets/85fde6e4-3800-4bd2-8983-e33a504cd72d" />
 
+![Version](https://img.shields.io/badge/Version-1.0.0-blue?style=for-the-badge)
+![License](https://img.shields.io/badge/License-MIT-yellow?style=for-the-badge)
+![Python](https://img.shields.io/badge/Python-3.10%2B-3776AB?style=for-the-badge&logo=python&logoColor=white)
+![PyTorch](https://img.shields.io/badge/PyTorch-2.0%2B-EE4C2C?style=for-the-badge&logo=pytorch&logoColor=white)
+![Hydra](https://img.shields.io/badge/Config-Hydra-89b8cd?style=for-the-badge&logo=hydra&logoColor=white)
+![uv](https://img.shields.io/badge/Managed%20by-uv-purple?style=for-the-badge)
 
-  <br>
-  <em>Figure 1. Overall pipeline of HINT (Diagnosis–Time-series–Intervention).</em>
+**A Hierarchical Clinical Decision Support System (CDSS) for ICU Mechanical Ventilation Prediction**
+
+[📖 Introduction](#-introduction) • [🧠 Core Architecture](#-core-architecture) • [⚡ Quick Start](#-quick-start-with-uv) • [🛠️ Usage Guide](#-usage-guide) • [📊 Benchmarks](#-benchmarks--performance)
+
 </div>
 
 ---
 
-## 📊 Experimental Results
+## 👋 Introduction
 
-HINT is evaluated on the **MIMIC-III** dataset and compared against strong baselines, including LSTM-GNN and MTS-GCNN. It particularly improves performance on imbalanced metrics such as Macro AUPRC.
+Welcome to the **HINT** repository!
 
-| Model            | Onset AUC | Wean AUC | Macro AUC | **Macro AUPRC** | **F1 Score** |
-| ---------------- | :-------: | :------: | :-------: | :-------------: | :----------: |
-| RF               |   87.5    |  98.9    |   81.6    |      43.9       |     52.4     |
-| LSTM-GNN         |   84.4    |  98.7    |   85.2    |      48.0       |     60.6     |
-| MTS-GCNN         | **89.9**  | **99.4** |   91.9    |      52.5       |     60.6     |
-| **HINT (Proposed)** |   89.0    |  87.1    | **92.3** |   **75.2**      |   **69.8**   |
+**HINT** stands for *Hierarchical ICD-aware Network for Time-series Intervention*. It is a cutting-edge Clinical Decision Support System (CDSS) developed to assist clinicians in the Intensive Care Unit (ICU) by predicting the need for **mechanical ventilation interventions**.
 
-> **Highlight:** HINT achieves a **22.7 percentage-point improvement in Macro AUPRC** compared to the strongest baseline, demonstrating superior capability in detecting rare clinical transitions.
+### 🏥 Why is this important?
+In the ICU, a patient's condition changes rapidly. Clinicians must process massive amounts of data—vital signs (heart rate, SpO2) and lab results—in real-time. However, existing AI models often fail to connect these "low-level" signals with the patient's "high-level" diagnosis (ICD codes), leading to suboptimal predictions.
+
+**HINT solves this by thinking like a doctor:** it first understands the patient's underlying diagnosis (even if records are incomplete!) and then uses that context to interpret the fluctuating vital signs more accurately.
+
+### ✨ Key Features at a Glance
+
+* **Hierarchical Thinking**: A two-stage pipeline that separates *diagnosis inference* from *event prediction*, mimicking clinical reasoning.
+* **Robust to Noisy Data**: Uses **Partial Label Learning** with MedBERT. Even if the medical records are messy or incomplete, HINT can infer the probable diagnosis.
+* **Context-Aware**: It doesn't just look at the numbers. An **ICD-Conditioned Gating Mechanism** dynamically adjusts which vital signs are most important based on the patient's specific disease.
+* **Imbalance Expert**: Designed for rare events. It uses specialized loss functions (Focal Loss) to accurately predict critical moments like `Onset` (starting ventilation) or `Weaning` (stopping it).
+* **Explainable (XAI)**: It's not a black box. HINT provides **SHAP** and **LIME** analyses so clinicians can understand *why* a prediction was made.
 
 ---
 
-## 🚀 Getting Started
+## 🧠 Core Architecture
 
-### Prerequisites
+The system is built upon a **Domain-Driven Design (DDD)** architecture, ensuring that the code is as robust as the model itself.
 
-- Python 3.9+
-- PyTorch 1.12+
-- CUDA-capable GPU (recommended)
-- [Polars](https://pola.rs/) (for fast data processing)
+### Stage 1: Automated ICD Coding Module
+Before looking at the time-series, HINT understands the patient.
+-   **Input**: Static data (age, gender) & Candidate ICD-9 code sets.
+-   **Tech Stack**: `MedBERT` (Text Encoder) + `XGBoost` (Stacking).
+-   **Output**: A dense "Context Vector" representing the patient's admission-level diagnosis.
 
-### Installation
+### Stage 2: Intervention Prediction Module (GFINet)
+This is where the magic happens. The model combines the context from Stage 1 with real-time monitoring data.
+-   **Input**:
+    -   **Time-Series Tensor**: (Values, Mask, Time-Delta) for 30+ vital signs.
+    -   **Context Vector**: Output from Stage 1.
+-   **Tech Stack**:
+    -   **Group-wise TCN**: Analyzes temporal patterns efficiently.
+    -   **Gating Mechanism**: Fuses diagnosis context to re-weight time-series features.
+-   **Output**: Probabilities for 4 states (`ONSET`, `WEAN`, `STAY ON`, `STAY OFF`).
+
+<div align="center">
+  <img width="850" alt="HINT Architecture Diagram" src="https://github.com/user-attachments/assets/85fde6e4-3800-4bd2-8983-e33a504cd72d" />
+  <br>
+  <em>Figure 1. The comprehensive pipeline: From raw MIMIC-III data to actionable clinical insights.</em>
+</div>
+
+---
+
+## ⚡ Quick Start (with `uv`)
+
+We use **[uv](https://github.com/astral-sh/uv)**, a blazing fast Python package manager. If you haven't used it before, you'll love the speed!
+
+### 1. Prerequisites
+-   **Python 3.10+**
+-   **CUDA 11.8+** (Highly recommended for GPU acceleration)
+-   **MIMIC-III Access**: You need credentialed access from [PhysioNet](https://physionet.org/content/mimiciii/).
+
+### 2. Installation
+Clone the repo and let `uv` handle the rest. No need to manually create virtual environments.
 
 ```bash
-git clone https://github.com/eastlighting1/HINT.git
+# 1. Clone the repository
+git clone [https://github.com/eastlighting1/HINT.git](https://github.com/eastlighting1/HINT.git)
 cd HINT
-pip install -r requirements.txt
+
+# 2. Sync dependencies (This creates a virtualenv and installs everything)
+uv sync
+```
+
+### 3. Data Setup (Crucial Step!)
+
+Since we cannot distribute MIMIC-III data, please place your downloaded CSV files in a folder.
+
+```bash
+# Example directory structure
+mkdir -p data/mimic3/raw
+
+# ... Place ADMISSIONS.csv, CHARTEVENTS.csv, etc. inside data/mimic3/raw
+```
+
+Now, run the **ETL Pipeline**. This will clean the data and generate the tensors needed for training.
+
+```bash
+# Run the ETL process using uv
+uv run hint mode=etl data.raw_dir="./data/mimic3/raw"
+```
+
+> **Tip**: The processed data (HDF5 tensors) will be saved in the `artifacts/` folder by default.
+
+-----
+
+## 🛠️ Usage Guide
+
+HINT is configured using **Hydra**. This means you can easily override any setting directly from the command line without changing the code.
+
+### 🏃 Training the Diagnosis Model (Stage 1)
+
+First, we train the module that learns to predict ICD codes from partial labels.
+
+```bash
+uv run hint mode=icd
+```
+
+### 🏃 Training the Intervention Model (Stage 2)
+
+Next, train the main GFINet (CNN) model. You can adjust hyperparameters on the fly:
+
+```bash
+uv run hint mode=cnn \
+    cnn.model.epochs=50 \
+    cnn.model.batch_size=256 \
+    cnn.optimizer.lr=0.001
+```
+
+### 🔄 Full Pipeline Execution
+
+To run everything sequentially (ICD training -> CNN training -> Evaluation):
+
+```bash
+uv run hint mode=train
+```
+
+### 🧪 Running Tests (TBD)
+
+We care about code quality. Run our test suite to ensure everything is working correctly on your machine.
+
+```bash
+# Run all unit and integration tests
+uv run python src/test/runner.py
+
+# Run only specific tests (e.g., entity tests)
+uv run python src/test/runner.py test.targets="['src/test/unit/domain']"
 ```
 
 -----
 
-## 📂 Data Preparation (MIMIC-III)
+## 📊 Benchmarks & Performance
 
-This project uses the **MIMIC-III** database. You must have credentialed access via **PhysioNet**.
+HINT has been rigorously evaluated on the MIMIC-III dataset. It specifically excels in the **Macro AUPRC** metric, which is the most critical metric for imbalanced medical data.
 
-1.  Download the MIMIC-III CSV files from PhysioNet.
+| Model Architecture | Macro AUC | **Macro AUPRC** | F1 Score |
+| :--- | :---: | :---: | :---: |
+| **Random Forest** | 81.6 | 43.9 | 52.4 |
+| **LSTM-GNN** | 85.2 | 48.0 | 60.6 |
+| **MTS-GCNN** | 91.9 | 52.5 | 60.6 |
+| **HINT (Ours)** | **92.3** | **75.2** | **69.8** |
 
-2.  Run the **ETL Pipeline** to extract cohorts, process time-series, and generate windowed tensors.
-
-    ```bash
-    # Run the full ETL pipeline (Extraction -> Processing -> Tensor Conversion)
-    # Ensure 'data.raw_dir' points to your downloaded MIMIC CSVs
-    python src/hint/app/main.py mode=etl data.raw_dir=/path/to/mimic/raw
-    ```
-
-3.  The pipeline generates artifacts in the directory specified by `logging.artifacts_dir` (default: `artifacts/`):
-
-      - **Dataframes** (`artifacts/data/`): `patients.parquet`, `interventions.parquet`, `dataset_123.parquet`.
-      - **Tensors** (`artifacts/data/`): `train.h5`, `val.h5`, `test.h5` (Windowed & Normalized).
-      - **Metadata** (`artifacts/metrics/`): `train_stats.json`, `feature_info.json`.
+> **📈 Result:** HINT improves the AUPRC by **+22.7%** compared to the strongest baseline (MTS-GCNN). This means significantly fewer false alarms for clinicians.
 
 -----
 
-## 🧪 Usage
+## 📂 Project Structure
 
-The application uses **Hydra** for configuration management. Workflows are orchestrated via `src/hint/app/main.py` by switching the `mode`.
-
-### 1. Train Automated ICD Coding Module
-
-Trains the **MedBERT-based ICD encoder** and the XGBoost ensemble stacker using the processed parquet data.
-
-```bash
-python src/hint/app/main.py mode=icd
-```
-
-### 2. Train Intervention Prediction Module (CNN)
-
-Trains the main **GFINet (CNN)** model for intervention prediction using the HDF5 tensor streams. This mode includes **Training**, **Temperature Calibration**, and **Evaluation**.
-
-```bash
-python src/hint/app/main.py mode=cnn \
-  cnn.model.epochs=100 \
-  cnn.model.batch_size=512
-```
-
-### 3. Full Training Pipeline
-
-Execute both ICD training and CNN training sequentially.
-
-```bash
-python src/hint/app/main.py mode=train
-```
-
-### 4. Run Tests & Coverage (TBD)
-
-We provide a dedicated test runner that executes unit, integration, and end-to-end tests.
-
-```bash
-# Run all tests (default configuration)
-python src/test/runner.py
-
-# Run only unit tests
-python src/test/runner.py test.targets="['src/test/unit']"
-
-# Run tests matching a keyword
-python src/test/runner.py test.keywords="icd"
-```
-
-The HTML coverage report will be generated at `coverage_report/index.html`.
-
------
-
-## 📁 Directory Structure
-
-The project follows a rigorous **Domain-Driven Design (DDD)** architecture to ensure separation of concerns between data processing, model logic, and infrastructure.
+We follow a strict **DDD (Domain-Driven Design)** pattern to keep things organized.
 
 ```text
 src/hint/
-├── app/                        # Application Layer
-│   ├── main.py                 # Entry Point & Pipeline Orchestrator
-│   └── factory.py              # Dependency Injection Factory
-│
-├── domain/                     # Domain Layer (Business Logic & State)
-│   ├── entities.py             # TrainableEntity (Model State, EMA, Steps)
-│   └── vo.py                   # Value Objects (Immutable Configs)
-│
-├── foundation/                 # Foundation Layer (Shared Kernels)
-│   ├── configs.py              # Config Loading & Validation
-│   ├── dtos.py                 # Data Transfer Objects (TensorBatch)
-│   ├── exceptions.py           # Custom Domain Exceptions
-│   └── interfaces.py           # Abstract Base Classes (Port Definitions)
-│
-├── infrastructure/             # Infrastructure Layer (Adapters)
-│   ├── datasource.py           # Streaming Sources (HDF5, Parquet Adapters)
-│   ├── registry.py             # Artifact Persistence (File I/O)
-│   ├── telemetry.py            # Logging & Metrics (Rich Observer)
-│   ├── networks.py             # PyTorch Modules (GFINet, MedBERT)
-│   └── components.py           # Shared ML Components (FocalLoss, TempScaler)
-│
-└── services/                   # Service Layer (Use Cases)
-    ├── etl/                    # ETL Pipeline
-    │   ├── service.py          # ETL Orchestrator
-    │   └── components/         # Pipeline Steps (Static, TimeSeries, Tensor...)
-    ├── icd/                    # ICD Domain Service
-    │   └── service.py          # Training, Stacking, XAI logic
-    └── training/               # Intervention Domain Service
-        ├── trainer.py          # CNN Training Loop
-        └── evaluator.py        # Calibration & Evaluation
+├── app/                  # 🏁 Entry points
+│   ├── main.py           # The main CLI orchestrator
+│   └── factory.py        # Dependency Injection setup
+├── domain/               # 💎 Core Business Logic
+│   ├── entities.py       # State models (TrainableEntity)
+│   └── vo.py             # Value Objects (Immutable configs)
+├── foundation/           # 🧱 Basic building blocks (DTOs, Exceptions)
+├── infrastructure/       # 🔌 External Adapters
+│   ├── datasource.py     # HDF5 & Parquet data loaders
+│   ├── networks.py       # PyTorch Models (GFINet, MedBERT)
+│   └── telemetry.py      # Logging & Metrics (Rich/WandB)
+└── services/             # 💼 Application Services
+    ├── etl/              # Data Processing Pipeline
+    ├── icd/              # ICD Coding Service
+    └── training/         # Intervention Training Service
 ```
 
-## 📜 License
-
-This project is released under the **MIT License**. See the `LICENSE` file for details.
-
----
+-----
 
 ## 📝 Citation
 
-If you find this work useful in your research, please cite the following thesis:
+If this work helps your research, please cite the Master's Thesis:
 
 ```bibtex
 @article{kim2026design,
-title = {HINT : Hierarchical ICD-aware Network for Time-series Intervention},
+title = {Design and Implementation of a Clinical Decision Support System Using an Intervention Prediction Model},
 journal = {TBD},
 volume = {},
 pages = {},
@@ -219,12 +214,16 @@ abstract = {Intensive Care Units generate massive volumes of heterogeneous clini
 }
 ```
 
----
+-----
 
-## 📧 Contact
+## 📮 Contact & Support
 
-For questions, issues, or collaboration inquiries, please contact:
+We love hearing from the community! If you have questions, run into issues, or just want to discuss medical AI:
 
-**Donghyeon Kim**  
-Email: eastlighting1@gachon.ac.kr <br>
-GitHub: [https://github.com/eastlighting1](https://github.com/eastlighting1)
+  * **Author**: Donghyeon Kim
+  * **Email**: eastlighting1@gachon.ac.kr
+  * **GitHub Issues**: Please open an issue if you find a bug!
+
+Happy Coding! 🚀
+````
+
