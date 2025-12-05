@@ -1,15 +1,10 @@
 import polars as pl
 from pathlib import Path
 from typing import List
-
-from hint.foundation.interfaces import PipelineComponent, Registry, TelemetryObserver
-from hint.domain.vo import ETLConfig
+from ....foundation.interfaces import PipelineComponent, Registry, TelemetryObserver
+from ....domain.vo import ETLConfig
 
 class OutcomesBuilder(PipelineComponent):
-    """
-    Builds hourly outcome flags from OUTPUTEVENTS.
-    Ported from make_data.py: step_build_outcomes
-    """
     def __init__(self, config: ETLConfig, registry: Registry, observer: TelemetryObserver):
         self.cfg = config
         self.registry = registry
@@ -17,6 +12,9 @@ class OutcomesBuilder(PipelineComponent):
 
     def execute(self) -> None:
         raw_dir = Path(self.cfg.raw_dir)
+        proc_dir = Path(self.cfg.proc_dir)
+        proc_dir.mkdir(parents=True, exist_ok=True)
+        
         self.observer.log("INFO", "OutcomesBuilder: Deriving OUTCOME_FLAG from OUTPUTEVENTS...")
 
         icu = (
@@ -29,11 +27,13 @@ class OutcomesBuilder(PipelineComponent):
         )
 
         all_flags: List[pl.DataFrame] = []
-        # Support multiple chunks if present
         files = list(raw_dir.glob("OUTPUTEVENTS.csv.gz"))
         if not files:
-             self.observer.log("WARNING", "OutcomesBuilder: No OUTPUTEVENTS found.")
-             return
+             # Try uncompressed
+             files = list(raw_dir.glob("OUTPUTEVENTS.csv"))
+             if not files:
+                 self.observer.log("WARNING", "OutcomesBuilder: No OUTPUTEVENTS found.")
+                 return
 
         for fname in files:
             ev = (
@@ -53,8 +53,7 @@ class OutcomesBuilder(PipelineComponent):
             )
             all_flags.append(ev)
 
-        if not all_flags:
-            return
+        if not all_flags: return
 
         flags_union = (
             pl.concat(all_flags)
@@ -68,5 +67,5 @@ class OutcomesBuilder(PipelineComponent):
             .sort(["SUBJECT_ID", "HADM_ID", "ICUSTAY_ID", "HOUR_IN"])
         )
 
-        self.registry.save_dataframe(flags_union, "interventions.parquet")
+        flags_union.write_parquet(proc_dir / "interventions.parquet")
         self.observer.log("INFO", f"OutcomesBuilder: Saved interventions.parquet (rows={flags_union.height})")

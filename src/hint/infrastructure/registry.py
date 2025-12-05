@@ -5,12 +5,13 @@ import joblib
 from pathlib import Path
 from typing import Any, Dict, Optional, Union
 
-from hint.foundation.interfaces import Registry
-from hint.foundation.exceptions import ConfigurationError
+from ..foundation.interfaces import Registry
+from ..foundation.exceptions import ConfigurationError
 
 class FileSystemRegistry(Registry):
     """
     Implementation of Registry that stores artifacts on the local file system.
+    Updated to handle absolute paths or paths outside artifacts dir.
     """
     def __init__(self, base_dir: Union[str, Path]):
         self.base_dir = Path(base_dir)
@@ -26,73 +27,79 @@ class FileSystemRegistry(Registry):
         for d in self.dirs.values():
             d.mkdir(parents=True, exist_ok=True)
 
+    def _resolve_path(self, name: Union[str, Path], category: str) -> Path:
+        """
+        If name is a Path object or contains separator, use it directly (relative to CWD).
+        Otherwise, prepend the default category directory.
+        """
+        if isinstance(name, Path) or "/" in str(name) or "\\" in str(name):
+            path = Path(name)
+            # Ensure parent directory exists for write operations
+            if not path.parent.exists() and path.parent != Path('.'):
+                try:
+                    path.parent.mkdir(parents=True, exist_ok=True)
+                except OSError:
+                    pass # Ignore if permission issue, let saver fail
+            return path
+        return self.dirs[category] / name
+
     def get_artifact_path(self, name: str) -> Path:
-        # Simple heuristic to find file
-        for d in self.dirs.values():
-            if (d / name).exists():
-                return d / name
-        return self.base_dir / name
+        return self._resolve_path(name, "data")
 
     def save_model(self, state_dict: Dict[str, Any], name: str, tag: str) -> Path:
         filename = f"{name}_{tag}.pt"
-        path = self.dirs["checkpoints"] / filename
+        path = self._resolve_path(filename, "checkpoints")
         torch.save(state_dict, path)
         return path
 
     def load_model(self, name: str, tag: str, device: str) -> Dict[str, Any]:
         filename = f"{name}_{tag}.pt"
-        path = self.dirs["checkpoints"] / filename
+        path = self._resolve_path(filename, "checkpoints")
+        
         if not path.exists():
-            # Fallback search
-            path = self.get_artifact_path(filename)
-            
-        if not path.exists():
-            raise FileNotFoundError(f"Model artifact {filename} not found.")
+            # Fallback search in default dir if absolute path failed
+            fallback = self.dirs["checkpoints"] / filename
+            if fallback.exists():
+                path = fallback
+            else:
+                raise FileNotFoundError(f"Model artifact {filename} not found at {path}")
             
         return torch.load(path, map_location=device)
 
-    def save_dataframe(self, df: Any, name: str) -> Path:
-        path = self.dirs["data"] / name
+    def save_dataframe(self, df: Any, name: Union[str, Path]) -> Path:
+        path = self._resolve_path(name, "data")
         if isinstance(df, pl.DataFrame):
             df.write_parquet(path)
         else:
-            # Assume pandas if not polars, or raise error
-            raise ValueError("Only Polars DataFrame supported for now.")
+            raise ValueError("Only Polars DataFrame supported.")
         return path
 
-    def load_dataframe(self, name: str) -> pl.DataFrame:
-        path = self.dirs["data"] / name
+    def load_dataframe(self, name: Union[str, Path]) -> pl.DataFrame:
+        path = self._resolve_path(name, "data")
         if not path.exists():
-             path = self.get_artifact_path(name)
-             
-        if not path.exists():
-            raise FileNotFoundError(f"Data artifact {name} not found.")
+            raise FileNotFoundError(f"Data artifact {name} not found at {path}")
         return pl.read_parquet(path)
 
-    def save_json(self, data: Dict[str, Any], name: str) -> Path:
-        path = self.dirs["metrics"] / name
+    def save_json(self, data: Dict[str, Any], name: Union[str, Path]) -> Path:
+        path = self._resolve_path(name, "metrics")
         with open(path, "w", encoding="utf-8") as f:
             json.dump(data, f, indent=2, default=str)
         return path
 
-    def load_json(self, name: str) -> Dict[str, Any]:
-        path = self.dirs["metrics"] / name
+    def load_json(self, name: Union[str, Path]) -> Dict[str, Any]:
+        path = self._resolve_path(name, "metrics")
         if not path.exists():
-             path = self.get_artifact_path(name)
-             
-        if not path.exists():
-            raise FileNotFoundError(f"JSON artifact {name} not found.")
+            raise FileNotFoundError(f"JSON artifact {name} not found at {path}")
         with open(path, "r", encoding="utf-8") as f:
             return json.load(f)
             
     def save_sklearn(self, model: Any, name: str) -> Path:
-        """Helper for saving sklearn/xgboost models via joblib"""
-        path = self.dirs["checkpoints"] / f"{name}.joblib"
+        path = self._resolve_path(f"{name}.joblib", "checkpoints")
         joblib.dump(model, path)
         return path
         
     def load_sklearn(self, name: str) -> Any:
-        path = self.dirs["checkpoints"] / f"{name}.joblib"
+        path = self._resolve_path(f"{name}.joblib", "checkpoints")
         if not path.exists():
-            raise FileNotFoundError(f"Sklearn artifact {name} not found.")
+            raise FileNotFoundError(f"Sklearn artifact {name} not found at {path}")
         return joblib.load(path)

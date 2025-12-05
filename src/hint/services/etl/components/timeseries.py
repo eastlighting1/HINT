@@ -1,14 +1,9 @@
 import polars as pl
 from pathlib import Path
-
-from hint.foundation.interfaces import PipelineComponent, Registry, TelemetryObserver
-from hint.domain.vo import ETLConfig
+from ....foundation.interfaces import PipelineComponent, Registry, TelemetryObserver
+from ....domain.vo import ETLConfig
 
 class TimeSeriesAggregator(PipelineComponent):
-    """
-    Aggregates CHARTEVENTS and LABEVENTS into hourly mean/count/std.
-    Ported from make_data.py: step_extract_timeseries
-    """
     def __init__(self, config: ETLConfig, registry: Registry, observer: TelemetryObserver):
         self.cfg = config
         self.registry = registry
@@ -17,17 +12,15 @@ class TimeSeriesAggregator(PipelineComponent):
     def execute(self) -> None:
         raw_dir = Path(self.cfg.raw_dir)
         resources_dir = Path(self.cfg.resources_dir)
+        proc_dir = Path(self.cfg.proc_dir)
+        proc_dir.mkdir(parents=True, exist_ok=True)
         
         self.observer.log("INFO", "TimeSeriesAggregator: Processing events...")
 
-        # Helper: process_events from make_data.py
         def process_events(table: str, time_col: str) -> pl.LazyFrame:
             fpath = raw_dir / f"{table.upper()}.csv.gz"
-            if not fpath.exists():
-                 # Try uncompressed if gz not found (simple fallback)
-                 fpath = raw_dir / f"{table.upper()}.csv"
+            if not fpath.exists(): fpath = raw_dir / f"{table.upper()}.csv"
             
-            # Helper for ISO datetime
             def to_datetime_iso(col: str) -> pl.Expr:
                 base = pl.col(col).str.to_datetime(time_unit="us", time_zone="UTC", strict=False)
                 return pl.when(base.is_null() & pl.col(col).is_not_null()).then(
@@ -55,7 +48,6 @@ class TimeSeriesAggregator(PipelineComponent):
                 .lazy()
             )
 
-            # Load ICUSTAYS map for time alignment
             icu_map = (
                 pl.scan_csv(str(raw_dir / "ICUSTAYS.csv.gz"), infer_schema_length=0, has_header=True)
                 .with_columns([
@@ -84,7 +76,6 @@ class TimeSeriesAggregator(PipelineComponent):
         lab_lf = process_events("labevents", "charttime")
         full_lf = pl.concat([char_lf, lab_lf])
 
-        # Save Rich Stats
         vitals_labs = (
             full_lf.group_by(["SUBJECT_ID", "HADM_ID", "ICUSTAY_ID", "HOURS_IN", "LABEL"])
             .agg([
@@ -94,12 +85,11 @@ class TimeSeriesAggregator(PipelineComponent):
             ])
             .collect()
         )
-        self.registry.save_dataframe(vitals_labs, "vitals_labs.parquet")
+        
+        # Explicit path saving
+        vitals_labs.write_parquet(proc_dir / "vitals_labs.parquet")
         self.observer.log("INFO", "TimeSeriesAggregator: Saved vitals_labs.parquet")
 
-        # Save Mean Only (for downstream)
-        vitals_mean = (
-            vitals_labs.select(["SUBJECT_ID", "HADM_ID", "ICUSTAY_ID", "HOURS_IN", "LABEL", "MEAN"])
-        )
-        self.registry.save_dataframe(vitals_mean, "vitals_labs_mean.parquet")
+        vitals_mean = vitals_labs.select(["SUBJECT_ID", "HADM_ID", "ICUSTAY_ID", "HOURS_IN", "LABEL", "MEAN"])
+        vitals_mean.write_parquet(proc_dir / "vitals_labs_mean.parquet")
         self.observer.log("INFO", "TimeSeriesAggregator: Saved vitals_labs_mean.parquet")

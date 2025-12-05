@@ -1,14 +1,9 @@
 import polars as pl
 from pathlib import Path
-
-from hint.foundation.interfaces import PipelineComponent, Registry, TelemetryObserver
-from hint.domain.vo import ETLConfig
+from ....foundation.interfaces import PipelineComponent, Registry, TelemetryObserver
+from ....domain.vo import ETLConfig
 
 class VentilationTagger(PipelineComponent):
-    """
-    Augments interventions with derived VENT flag from chartevents items.
-    Ported from make_data.py: step_add_vent_flag
-    """
     def __init__(self, config: ETLConfig, registry: Registry, observer: TelemetryObserver):
         self.cfg = config
         self.registry = registry
@@ -17,6 +12,7 @@ class VentilationTagger(PipelineComponent):
     def execute(self) -> None:
         self.observer.log("INFO", "VentilationTagger: Deriving VENT flag...")
         resources_dir = Path(self.cfg.resources_dir)
+        proc_dir = Path(self.cfg.proc_dir)
         
         vent_itemids = {
             445, 448, 449, 450, 1340, 1486, 1600, 224687, 639, 654, 681, 682, 683, 684, 
@@ -32,17 +28,11 @@ class VentilationTagger(PipelineComponent):
             pl.col("MIMIC LABEL").alias("LABEL"),
         ])
 
-        vent_labels = (
-            itemmap.filter(
-                pl.col("ITEMID").is_in(list(vent_itemids)) & (pl.col("LINKSTO") == "chartevents")
-            )
-            .select("LABEL")
-            .unique()
-            .to_series()
-            .to_list()
-        )
+        vent_labels = itemmap.filter(
+            pl.col("ITEMID").is_in(list(vent_itemids)) & (pl.col("LINKSTO") == "chartevents")
+        ).select("LABEL").unique().to_series().to_list()
 
-        vl = self.registry.load_dataframe("vitals_labs.parquet")
+        vl = pl.read_parquet(proc_dir / "vitals_labs.parquet")
         
         vent_times = (
             vl.filter(pl.col("LABEL").is_in(vent_labels))
@@ -52,7 +42,7 @@ class VentilationTagger(PipelineComponent):
             .rename({"HOURS_IN": "HOUR_IN"})
         )
 
-        iv = self.registry.load_dataframe("interventions.parquet")
+        iv = pl.read_parquet(proc_dir / "interventions.parquet")
         
         iv_out = (
             iv.join(vent_times, on=["SUBJECT_ID", "HADM_ID", "ICUSTAY_ID", "HOUR_IN"], how="left")
@@ -61,5 +51,5 @@ class VentilationTagger(PipelineComponent):
             .sort(["SUBJECT_ID", "HADM_ID", "ICUSTAY_ID", "HOUR_IN"])
         )
 
-        self.registry.save_dataframe(iv_out, "interventions.parquet") # Overwrite
-        self.observer.log("INFO", f"VentilationTagger: Updated interventions.parquet with VENT flag (rows={iv_out.height})")
+        iv_out.write_parquet(proc_dir / "interventions.parquet")
+        self.observer.log("INFO", f"VentilationTagger: Updated interventions.parquet (rows={iv_out.height})")

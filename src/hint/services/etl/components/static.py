@@ -1,14 +1,12 @@
 import polars as pl
 from pathlib import Path
-from typing import Any
-
-from hint.foundation.interfaces import PipelineComponent, Registry, TelemetryObserver
-from hint.domain.vo import ETLConfig
+from ....foundation.interfaces import PipelineComponent, Registry, TelemetryObserver
+from ....domain.vo import ETLConfig
 
 class StaticExtractor(PipelineComponent):
     """
     Extracts static patient cohort data (ICUSTAYS, ADMISSIONS, PATIENTS).
-    Ported from make_data.py: step_extract_static
+    Fixed: Polars LazyFrame execution order and output path.
     """
     def __init__(self, config: ETLConfig, registry: Registry, observer: TelemetryObserver):
         self.cfg = config
@@ -17,10 +15,13 @@ class StaticExtractor(PipelineComponent):
 
     def execute(self) -> None:
         raw_dir = Path(self.cfg.raw_dir)
+        proc_dir = Path(self.cfg.proc_dir)
+        
+        # Ensure output directory exists
+        proc_dir.mkdir(parents=True, exist_ok=True)
         
         self.observer.log("INFO", "StaticExtractor: Loading raw tables...")
         
-        # Helper to find files (logic ported from find_raw_file)
         def find_raw_file(table: str) -> str:
             candidates = sorted(raw_dir.glob(f"{table}*.csv*"))
             if not candidates:
@@ -29,16 +30,13 @@ class StaticExtractor(PipelineComponent):
                         candidates.append(p)
             if not candidates:
                 raise FileNotFoundError(f"No raw file for '{table}' in {raw_dir}")
-            # Prefer compressed
             best = sorted(candidates, key=lambda p: (p.suffix != ".gz", str(p).lower()))[0]
             return str(best)
 
-        # Helper for ISO datetime (logic ported from to_datetime_iso)
         def to_datetime_iso(col: str) -> pl.Expr:
             base = pl.col(col).str.to_datetime(time_unit="us", time_zone="UTC", strict=False)
             return pl.when(base.is_null() & pl.col(col).is_not_null()).then(
-                pl.col(col)
-                .str.replace(r"Z$", "+00:00", literal=False)
+                pl.col(col).str.replace(r"Z$", "+00:00", literal=False)
                 .str.to_datetime(time_unit="us", time_zone="UTC", strict=False)
             ).otherwise(base)
 
@@ -48,14 +46,19 @@ class StaticExtractor(PipelineComponent):
         def between_closed(expr: pl.Expr, left: pl.Expr, right: pl.Expr) -> pl.Expr:
             return expr.is_not_null() & left.is_not_null() & right.is_not_null() & (expr >= left) & (expr <= right)
 
-        # 1. Process ICUSTAYS
+        # 1. Process ICUSTAYS with explicit aliases to prevent optimization issues
         icu_fp = find_raw_file("ICUSTAYS")
         icu_raw = (
             pl.scan_csv(icu_fp, infer_schema_length=0)
-            .with_columns([to_datetime_iso("INTIME"), to_datetime_iso("OUTTIME")])
+            .with_columns([
+                to_datetime_iso("INTIME").alias("INTIME_DT"), 
+                to_datetime_iso("OUTTIME").alias("OUTTIME_DT")
+            ])
             .with_columns([
                 pl.col("LOS").cast(pl.Float64).alias("LOS_ICU"),
-                floor_int((pl.col("OUTTIME") - pl.col("INTIME")).dt.total_hours()).alias("STAY_HOURS"),
+                floor_int((pl.col("OUTTIME_DT") - pl.col("INTIME_DT")).dt.total_hours()).alias("STAY_HOURS"),
+                pl.col("INTIME_DT").alias("INTIME"),
+                pl.col("OUTTIME_DT").alias("OUTTIME")
             ])
         )
 
@@ -72,18 +75,23 @@ class StaticExtractor(PipelineComponent):
         adm = (
             pl.scan_csv(adm_fp, infer_schema_length=0)
             .with_columns([
-                to_datetime_iso("ADMITTIME"),
-                to_datetime_iso("DISCHTIME"),
-                to_datetime_iso("DEATHTIME"),
+                to_datetime_iso("ADMITTIME").alias("ADMITTIME"),
+                to_datetime_iso("DISCHTIME").alias("DISCHTIME"),
+                to_datetime_iso("DEATHTIME").alias("DEATHTIME"),
             ])
             .select(["SUBJECT_ID", "HADM_ID", "ADMITTIME", "DISCHTIME", "DEATHTIME", "ETHNICITY", "ADMISSION_TYPE", "INSURANCE"])
         )
 
         # 3. Process PATIENTS
         pat_fp = find_raw_file("PATIENTS")
-        pat = pl.scan_csv(pat_fp, infer_schema_length=0).with_columns(
-            [to_datetime_iso("DOB"), to_datetime_iso("DOD")]
-        ).select(["SUBJECT_ID", "DOB", "DOD"])
+        pat = (
+            pl.scan_csv(pat_fp, infer_schema_length=0)
+            .with_columns([
+                to_datetime_iso("DOB").alias("DOB"), 
+                to_datetime_iso("DOD").alias("DOD")
+            ])
+            .select(["SUBJECT_ID", "DOB", "DOD"])
+        )
 
         # Join and Filter
         df = (
@@ -103,5 +111,6 @@ class StaticExtractor(PipelineComponent):
             .collect()
         )
 
-        self.registry.save_dataframe(df, "patients.parquet")
-        self.observer.log("INFO", f"StaticExtractor: Saved cohort to patients.parquet (rows={df.height})")
+        out_path = proc_dir / "patients.parquet"
+        df.write_parquet(out_path)
+        self.observer.log("INFO", f"StaticExtractor: Saved cohort to {out_path} (rows={df.height})")

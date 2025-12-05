@@ -118,7 +118,7 @@ hydra:
     override_dirname: ''
     id: ???
     num: ???
-    config_name: cnn_config
+    config_name: config
     env_set: {}
     env_copy: []
     config:
@@ -140,7 +140,7 @@ hydra:
     - path: ''
       schema: structured
       provider: schema
-    output_dir: /home/guestkdh/HINT/outputs/2025-12-05/02-17-55
+    output_dir: /home/guestkdh/HINT/outputs/2025-12-05/12-01-00
     choices:
       hydra/env: default
       hydra/callbacks: null

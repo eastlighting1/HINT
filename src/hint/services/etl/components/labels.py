@@ -1,13 +1,14 @@
 import polars as pl
+from pathlib import Path
 from typing import List
 
-from hint.foundation.interfaces import PipelineComponent, Registry, TelemetryObserver
-from hint.domain.vo import ETLConfig
+from ....foundation.interfaces import PipelineComponent, Registry, TelemetryObserver
+from ....domain.vo import ETLConfig
 
 class LabelGenerator(PipelineComponent):
     """
     Generates ONSET/WEAN/STAY ON/STAY OFF labels.
-    Ported from make_data.py: step_build_vent_labels
+    Refactored to use vectorized Polars expressions instead of slow Python loops.
     """
     def __init__(self, config: ETLConfig, registry: Registry, observer: TelemetryObserver):
         self.cfg = config
@@ -16,69 +17,150 @@ class LabelGenerator(PipelineComponent):
 
     def execute(self) -> None:
         self.observer.log("INFO", "LabelGenerator: Generating ventilation labels...")
-        ds = self.registry.load_dataframe("dataset_123.parquet")
         
-        # 1. Fill Sequence Logic
-        def fill_sequence_for_vent(df: pl.DataFrame) -> pl.DataFrame:
-            df = df.sort("HOUR_IN")
-            hmin, hmax = int(df["HOUR_IN"].min()), int(df["HOUR_IN"].max())
-            base = pl.DataFrame({"HOUR_IN": pl.arange(hmin, hmax + 1, eager=True, dtype=pl.Int32)})
-            subj = int(df["SUBJECT_ID"][0])
-            hadm = int(df["HADM_ID"][0])
-            stay = int(df["ICUSTAY_ID"][0])
-            
-            return (
-                base.join(df.select(["HOUR_IN", "VENT"]), on="HOUR_IN", how="left")
-                .with_columns(pl.col("VENT").cast(pl.Int8).fill_null(strategy="forward").fill_null(0))
-                .with_columns(
-                    SUBJECT_ID=pl.lit(subj, dtype=pl.Int64),
-                    HADM_ID=pl.lit(hadm, dtype=pl.Int64),
-                    ICUSTAY_ID=pl.lit(stay, dtype=pl.Int64),
-                )
+        proc_dir = Path(self.cfg.proc_dir)
+        ds_path = proc_dir / "dataset_123.parquet"
+        ds = pl.read_parquet(ds_path)
+        
+        # --- 1. Sequence Filling (Vectorized) ---
+        self.observer.log("INFO", "LabelGenerator: Filling sequences (vectorized)...")
+        
+        # Calculate min/max hours per stay
+        bounds = (
+            ds.group_by("ICUSTAY_ID")
+            .agg([
+                pl.min("HOUR_IN").alias("min_h"),
+                pl.max("HOUR_IN").alias("max_h"),
+                pl.first("SUBJECT_ID"),
+                pl.first("HADM_ID")
+            ])
+        )
+        
+        # Create full grid
+        # Note: This list comprehension is unavoidable for range generation but fast enough for metadata
+        grid_rows = []
+        for row in bounds.iter_rows(named=True):
+            h_start, h_end = row["min_h"], row["max_h"]
+            sid, hid, iid = row["SUBJECT_ID"], row["HADM_ID"], row["ICUSTAY_ID"]
+            # Generate range [min_h, max_h] inclusive
+            for h in range(h_start, h_end + 1):
+                grid_rows.append((sid, hid, iid, h))
+                
+        base = pl.DataFrame(
+            grid_rows, 
+            schema=["SUBJECT_ID", "HADM_ID", "ICUSTAY_ID", "HOUR_IN"], 
+            orient="row"
+        )
+        
+        # Join and forward fill
+        filled = (
+            base.join(
+                ds.select(["ICUSTAY_ID", "HOUR_IN", "VENT"]), 
+                on=["ICUSTAY_ID", "HOUR_IN"], 
+                how="left"
             )
+            .sort(["ICUSTAY_ID", "HOUR_IN"])
+            .with_columns(
+                pl.col("VENT").fill_null(strategy="forward").fill_null(0).cast(pl.Int8)
+            )
+        )
 
-        # 2. Window Labeling Logic
-        TOTAL_WIN = self.cfg.input_window_h + self.cfg.gap_h + self.cfg.pred_window_h
+        # --- 2. Window Labeling (Vectorized) ---
+        self.observer.log("INFO", "LabelGenerator: Calculating labels (vectorized)...")
         
-        def label_windows(vents: List[int]) -> List[str]:
-            labels = []
-            n = len(vents)
-            if n < TOTAL_WIN: return labels
-            for s in range(0, n - TOTAL_WIN + 1):
-                pw = vents[s + self.cfg.input_window_h + self.cfg.gap_h : s + TOTAL_WIN]
-                if all(v == 1 for v in pw): labels.append("STAY ON")
-                elif all(v == 0 for v in pw): labels.append("STAY OFF")
-                else:
-                    delta = [pw[i+1] - pw[i] for i in range(len(pw)-1)]
-                    labels.append("ONSET" if 1 in delta else "WEAN")
-            return labels
-
-        def per_stay_labels(df: pl.DataFrame) -> pl.DataFrame:
-            vents = df["VENT"].to_list()
-            labels = label_windows(vents)
-            if not labels:
-                return pl.DataFrame(schema={"SUBJECT_ID": pl.Int64, "HADM_ID": pl.Int64, "ICUSTAY_ID": pl.Int64, "HOUR_IN": pl.Int32, "VENT_CLASS": pl.Utf8})
+        INPUT_WIN = self.cfg.input_window_h
+        GAP = self.cfg.gap_h
+        PRED_WIN = self.cfg.pred_window_h
+        TOTAL_WIN = INPUT_WIN + GAP + PRED_WIN
+        
+        # We need to look ahead to determine label
+        # Window logic: at time t (start of prediction window), look at [t, t+PRED_WIN)
+        # But original logic anchors at t_0 and looks at t_0 + INPUT + GAP.
+        # Let's align with original logic:
+        # Original: labels.append(...) for window starting at index s + INPUT + GAP
+        # Meaning: Label is assigned to the timestamp WHERE THE PREDICTION STARTS.
+        
+        # Shift VENT column to create future views
+        # We want to check VENT status in [t, t+PRED_WIN)
+        # Shift -1 means "next hour"
+        
+        expressions = []
+        for i in range(PRED_WIN):
+            expressions.append(pl.col("VENT").shift(-i).alias(f"v_{i}"))
             
-            h0 = int(df["HOUR_IN"][0])
-            label_hours = [h0 + (s + self.cfg.input_window_h + self.cfg.gap_h) for s in range(len(labels))]
+        windowed = filled.with_columns(expressions)
+        
+        # Define conditions
+        # STAY ON: All 1s
+        # STAY OFF: All 0s
+        # ONSET: 0 -> 1 transition
+        # WEAN: 1 -> 0 transition
+        
+        cols = [pl.col(f"v_{i}") for i in range(PRED_WIN)]
+        sum_expr = sum(cols)
+        
+        # Transition check: is there any (v_{i+1} - v_{i}) == 1?
+        # ONSET condition: any increase
+        onset_cond = pl.lit(False)
+        for i in range(PRED_WIN - 1):
+            onset_cond = onset_cond | ((pl.col(f"v_{i+1}") - pl.col(f"v_{i}")) == 1)
             
-            return pl.DataFrame({
-                "SUBJECT_ID": [df["SUBJECT_ID"][0]] * len(labels),
-                "HADM_ID": [df["HADM_ID"][0]] * len(labels),
-                "ICUSTAY_ID": [df["ICUSTAY_ID"][0]] * len(labels),
-                "HOUR_IN": label_hours,
-                "VENT_CLASS": labels
-            })
-
-        seq_df = ds.select(["SUBJECT_ID", "HADM_ID", "ICUSTAY_ID", "HOUR_IN", "VENT"])
+        # WEAN condition: any decrease
+        # (Original code: ONSET if 1 in delta else WEAN) - implies WEAN is default if mixed?
+        # Original: labels.append("ONSET" if 1 in delta else "WEAN")
+        # So if ANY onset occurs, it's ONSET. If not, and not stay on/off, it's WEAN.
         
-        # Apply grouping and mapping
-        # Note: Polars map_groups is used. This might be slow in Python loop if cohort is huge.
-        # Ideally, use polars plugins, but sticking to Python logic from make_data.py
-        filled = seq_df.group_by(["SUBJECT_ID", "HADM_ID", "ICUSTAY_ID"]).map_groups(fill_sequence_for_vent)
-        labels = filled.group_by(["SUBJECT_ID", "HADM_ID", "ICUSTAY_ID"]).map_groups(per_stay_labels)
+        labels = (
+            windowed
+            .with_columns([
+                sum_expr.alias("sum_v"),
+                onset_cond.alias("has_onset")
+            ])
+            .with_columns(
+                pl.when(pl.col("sum_v") == PRED_WIN).then(pl.lit("STAY ON"))
+                .when(pl.col("sum_v") == 0).then(pl.lit("STAY OFF"))
+                .when(pl.col("has_onset")).then(pl.lit("ONSET"))
+                .otherwise(pl.lit("WEAN"))
+                .alias("VENT_CLASS")
+            )
+        )
         
-        answer = ds.join(labels, on=["SUBJECT_ID", "HADM_ID", "ICUSTAY_ID", "HOUR_IN"], how="inner")
+        # Filter invalid windows (end of stay)
+        # The shift operation introduces nulls at the end of each group
+        # We also need to respect the Input+Gap lag.
+        # The label computed at 'filled' row T corresponds to the prediction starting at T.
+        # But the original code aligns this label to T = t_start + INPUT + GAP.
+        # So we need to shift the calculated label BACK by (INPUT + GAP) to align?
+        # NO, original code: label_hours = [h0 + (s + INPUT + GAP) ...]
+        # This means at hour H, we predict the window starting at H.
+        # So the label computed above at row T is valid for hour T.
+        # We just need to remove the last (PRED_WIN - 1) rows per stay where windows are incomplete.
         
-        self.registry.save_dataframe(answer, "dataset_123_answer.parquet")
-        self.observer.log("INFO", f"LabelGenerator: Wrote dataset_123_answer.parquet (rows={answer.height})")
+        valid_labels = labels.filter(
+            pl.col(f"v_{PRED_WIN-1}").is_not_null()
+        ).select(["SUBJECT_ID", "HADM_ID", "ICUSTAY_ID", "HOUR_IN", "VENT_CLASS"])
+        
+        # Join back to features
+        # Features are at HOUR_IN. We want to predict window [HOUR_IN, HOUR_IN + PRED_WIN]
+        # But we need input data from [HOUR_IN - GAP - INPUT, HOUR_IN - GAP]
+        # Wait, the dataset_123.parquet contains features at HOUR_IN.
+        # If we want to predict 'VENT_CLASS' for the window starting at HOUR_IN,
+        # we attach the label to the row at HOUR_IN.
+        
+        # However, the original logic was:
+        # label_hours = h0 + s + INPUT + GAP
+        # This implies we only generate labels for hours where we have enough history?
+        # Yes, standard supervised learning.
+        # So we need to ensure we only keep rows where HOUR_IN >= min_h + INPUT + GAP.
+        
+        min_offset = INPUT_WIN + GAP
+        final_df = (
+            ds.join(valid_labels, on=["SUBJECT_ID", "HADM_ID", "ICUSTAY_ID", "HOUR_IN"], how="inner")
+            .filter(pl.col("HOUR_IN") >= (pl.col("HOUR_IN").min().over("ICUSTAY_ID") + min_offset))
+        )
+        
+        out_path = proc_dir / "dataset_123_answer.parquet"
+        out_path.parent.mkdir(parents=True, exist_ok=True)
+        final_df.write_parquet(out_path)
+        
+        self.observer.log("INFO", f"LabelGenerator: Wrote dataset_123_answer.parquet (rows={final_df.height}) to {out_path}")

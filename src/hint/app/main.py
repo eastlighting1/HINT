@@ -1,8 +1,12 @@
 import hydra
 from omegaconf import DictConfig
+from pathlib import Path
 from hint.app.factory import AppFactory
 
-@hydra.main(config_path="../../../configs", config_name="config", version_base=None)
+BASE_DIR = Path(__file__).resolve().parents[3]
+CONFIG_DIR = BASE_DIR / "configs"
+
+@hydra.main(config_path=str(CONFIG_DIR), config_name="config", version_base=None)
 def main(cfg: DictConfig) -> None:
     """
     Main entry point for HINT pipeline.

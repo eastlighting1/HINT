@@ -220,3 +220,111 @@ For questions, issues, or collaboration inquiries, please contact:
 **Donghyeon Kim**  
 Email: your.email@example.com
 GitHub: [https://github.com/username](https://github.com/username)
+```
+HINT
+├─ .python-version
+├─ README.md
+├─ artifacts
+│  ├─ checkpoints
+│  ├─ configs
+│  └─ metrics
+├─ configs
+│  ├─ cnn_config.yaml
+│  ├─ config.yaml
+│  ├─ etl_config.yaml
+│  └─ icd_config.yaml
+├─ outputs
+│  └─ 2025-12-05
+│     ├─ 02-17-55
+│     │  └─ .hydra
+│     │     ├─ config.yaml
+│     │     ├─ hydra.yaml
+│     │     └─ overrides.yaml
+│     ├─ 05-58-25
+│     │  └─ .hydra
+│     │     ├─ config.yaml
+│     │     ├─ hydra.yaml
+│     │     └─ overrides.yaml
+│     └─ 05-59-08
+│        └─ .hydra
+│           ├─ config.yaml
+│           ├─ hydra.yaml
+│           └─ overrides.yaml
+├─ pyproject.toml
+├─ src
+│  ├─ hint
+│  │  ├─ app
+│  │  │  ├─ __init__.py
+│  │  │  ├─ factory.py
+│  │  │  └─ main.py
+│  │  ├─ domain
+│  │  │  ├─ __init__.py
+│  │  │  ├─ entities.py
+│  │  │  └─ vo.py
+│  │  ├─ foundation
+│  │  │  ├─ __init__.py
+│  │  │  ├─ configs.py
+│  │  │  ├─ dtos.py
+│  │  │  ├─ exceptions.py
+│  │  │  └─ interfaces.py
+│  │  ├─ infrastructure
+│  │  │  ├─ __init__.py
+│  │  │  ├─ components.py
+│  │  │  ├─ datasource.py
+│  │  │  ├─ networks.py
+│  │  │  ├─ registry.py
+│  │  │  └─ telemetry.py
+│  │  └─ services
+│  │     ├─ __init__.py
+│  │     ├─ etl
+│  │     │  ├─ __init__.py
+│  │     │  ├─ components
+│  │     │  │  ├─ __init__.py
+│  │     │  │  ├─ assembler.py
+│  │     │  │  ├─ labels.py
+│  │     │  │  ├─ notes.py
+│  │     │  │  ├─ outcomes.py
+│  │     │  │  ├─ static.py
+│  │     │  │  ├─ tensor.py
+│  │     │  │  ├─ timeseries.py
+│  │     │  │  └─ ventilation.py
+│  │     │  └─ service.py
+│  │     ├─ icd
+│  │     │  ├─ __init__.py
+│  │     │  └─ service.py
+│  │     └─ training
+│  │        ├─ __init__.py
+│  │        ├─ evaluator.py
+│  │        └─ trainer.py
+│  └─ test
+│     ├─ conftest.py
+│     ├─ e2e
+│     │  └─ test_cli_entrypoint.py
+│     ├─ integration
+│     │  ├─ conftest.py
+│     │  ├─ infrastructure
+│     │  │  └─ test_hdf5_datasource.py
+│     │  ├─ test_model_persistence.py
+│     │  └─ workflows
+│     │     ├─ test_etl_execution.py
+│     │     └─ test_full_training_loop.py
+│     ├─ runner.py
+│     ├─ unit
+│     │  ├─ conftest.py
+│     │  ├─ domain
+│     │  │  └─ test_entities.py
+│     │  ├─ foundation
+│     │  │  ├─ test_configs.py
+│     │  │  └─ test_dtos.py
+│     │  ├─ infrastructure
+│     │  │  ├─ test_networks.py
+│     │  │  └─ test_registry.py
+│     │  └─ services
+│     │     ├─ test_etl.py
+│     │     └─ test_trainer.py
+│     └─ utils
+│        ├─ custom_assertions.py
+│        └─ synthetic_data.py
+└─ uv.lock
+
+```
