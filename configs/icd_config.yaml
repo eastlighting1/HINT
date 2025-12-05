@@ -16,7 +16,7 @@ max_length: 32
 
 # Validation & XAI
 test_split_size: 0.2
-val_split_size: 0.15625
+val_split_size: 0.125
 top_k_labels: 500
 topk_eval: 5
 

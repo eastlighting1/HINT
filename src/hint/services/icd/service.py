@@ -11,7 +11,7 @@ from sklearn.preprocessing import LabelEncoder
 from sklearn.model_selection import train_test_split
 from functools import partial
 from pathlib import Path
-from typing import Optional, List, Any, Dict, Tuple
+from typing import Optional, List, Any, Dict, Tuple, Union
 
 from ...foundation.interfaces import TelemetryObserver, Registry, StreamingSource
 from ...foundation.dtos import TensorBatch
@@ -56,11 +56,9 @@ def custom_collate(batch, tokenizer, max_length):
 
     texts = []
     for lst in lists:
-        if isinstance(lst, (list, tuple)):
-            texts.append(" ".join(lst) if lst else "")
-        elif hasattr(lst, "tolist"):
-            arr = lst.tolist()
-            texts.append(" ".join(arr) if len(arr) > 0 else "")
+        if isinstance(lst, (list, tuple, np.ndarray)):
+            valid_tokens = [str(t) for t in lst if t]
+            texts.append(" ".join(valid_tokens))
         else:
             texts.append("")
 
@@ -79,14 +77,22 @@ def custom_collate(batch, tokenizer, max_length):
     bt["attention_mask"] = tok["attention_mask"]
     return bt
 
-def _parse_codes(s):
-    if isinstance(s, str):
-        from ast import literal_eval
+def _to_python_list(val: Any) -> List[str]:
+    if isinstance(val, np.ndarray):
+        return val.tolist()
+    if isinstance(val, list):
+        return val
+    if isinstance(val, str):
         try:
-            return literal_eval(s)
-        except Exception:
-            return [t.strip(" '\"") for t in s.strip("[]").split(",") if t.strip()]
-    return s
+            from ast import literal_eval
+            parsed = literal_eval(val)
+            if isinstance(parsed, (list, tuple)):
+                return list(parsed)
+        except:
+            if val.startswith("[") and val.endswith("]"):
+                return [t.strip(" '\"") for t in val.strip("[]").split(",") if t.strip()]
+            return [val]
+    return []
 
 # -----------------------------------------------------------------------------
 # ICD Service
@@ -98,7 +104,6 @@ class ICDService:
         config: ICDConfig,
         registry: Registry, 
         observer: TelemetryObserver,
-        entity: ICDModelEntity,
         train_source: Optional[StreamingSource] = None,
         val_source: Optional[StreamingSource] = None,
         test_source: Optional[StreamingSource] = None
@@ -106,7 +111,10 @@ class ICDService:
         self.cfg = config
         self.registry = registry
         self.observer = observer
-        self.entity = entity
+        
+        # Entity is None initially, created after data inspection
+        self.entity: Optional[ICDModelEntity] = None 
+        
         self.train_source = train_source 
         self.val_source = val_source
         self.test_source = test_source
@@ -118,57 +126,32 @@ class ICDService:
     def _prepare_data(self):
         self.observer.log("INFO", "ICD Service: Loading data...")
         
-        # 1. Load Data (Spinner)
         with self.observer.console.status("[bold green]Loading Parquet file...") as status:
             df_pl = self.train_source.load()
             df = df_pl.to_pandas()
         
         self.observer.log("INFO", f"ICD Service: Loaded {len(df)} rows. Starting preprocessing...")
 
-        # 2. Parsing & Encoding (Progress Bar)
-        # We handle the heavy python loops here with a progress bar
-        
+        # Parsing ICD Codes
         total_steps = len(df)
+        clean_labels = []
         
-        # Prepare lists for new columns
-        parsed_labels = []
-        raw_labels = []
-        candidate_names = []
-        candidate_indices = []
-        
-        # Pre-calculation for Top-K
-        # Since we need to know all labels to filter top-k, we must parse first.
-        # But we can combine parsing and candidate generation if we do it carefully.
-        # For simplicity and progress visibility, let's iterate.
-        
-        # First pass: Parse ICD codes (Heavy if string parsing is needed)
-        # Using rich.progress.track for the loop
-        
-        # Check if parsing is needed
-        sample = df["ICD9_CODES"].iloc[0] if len(df) > 0 else []
-        need_parsing = isinstance(sample, str)
+        with self.observer.create_progress("Preprocessing ICD Codes", total=total_steps) as progress:
+            task = progress.add_task("Parsing", total=total_steps)
+            raw_codes = df["ICD9_CODES"].tolist()
+            for val in raw_codes:
+                clean_labels.append(_to_python_list(val))
+                progress.advance(task)
+                
+        df["label_list"] = clean_labels
 
-        if need_parsing:
-            with self.observer.create_progress("Parsing ICD Codes", total=total_steps) as progress:
-                task = progress.add_task("Parsing", total=total_steps)
-                temp_labels = []
-                for val in df["ICD9_CODES"]:
-                    parsed = _parse_codes(val)
-                    temp_labels.append(parsed)
-                    progress.advance(task)
-                df["label_list"] = temp_labels
-        else:
-            df["label_list"] = df["ICD9_CODES"]
-
-        # Raw label extraction
-        df["raw_label"] = df["label_list"].apply(
-            lambda lst: lst[0] if isinstance(lst, (list, tuple)) and len(lst) > 0 else None
-        )
+        df["raw_label"] = df["label_list"].apply(lambda lst: lst[0] if len(lst) > 0 else None)
         df["raw_label"] = df["raw_label"].fillna("__MISSING__")
 
-        # Label Encoder Setup
+        # Label Encoder
         vc = df["raw_label"].value_counts()
         top_k = self.cfg.top_k_labels
+        
         if top_k and vc.shape[0] > top_k:
             keep = set(vc.head(top_k).index.tolist())
             df["raw_label_filtered"] = df["raw_label"].where(df["raw_label"].isin(keep), "__OTHER__")
@@ -182,32 +165,27 @@ class ICDService:
         self.le = le
         self.observer.log("INFO", f"ICD Service: Final classes={len(le.classes_)}")
 
-        # Candidate Generation Loop (Progress Bar)
+        # Candidates
         all_names = list(le.classes_)
         class_set = set(all_names)
         has_other = "__OTHER__" in class_set
         
-        # Convert columns to lists for faster iteration
         label_lists = df["label_list"].tolist()
         filtered_labels = df["raw_label_filtered"].tolist()
+        candidate_names = []
+        candidate_indices = []
         
         with self.observer.create_progress("Generating Candidates", total=total_steps) as progress:
-            task = progress.add_task("Processing Candidates", total=total_steps)
-            
+            task = progress.add_task("Candidates", total=total_steps)
             for codes, backup in zip(label_lists, filtered_labels):
-                # Build cand logic inline for speed
                 out = []
-                if isinstance(codes, (list, tuple)):
-                    for c in codes:
-                        if c in class_set: out.append(c)
-                        elif has_other: out.append("__OTHER__")
-                
+                for c in codes:
+                    if c in class_set: out.append(c)
+                    elif has_other: out.append("__OTHER__")
                 if not out: out = [backup]
                 unique_cands = list(set(out))
-                
                 candidate_names.append(unique_cands)
                 candidate_indices.append(le.transform(unique_cands).tolist())
-                
                 progress.advance(task)
 
         df["candidate_names"] = candidate_names
@@ -216,37 +194,48 @@ class ICDService:
         # Feature Selection
         drop_cols = ["SUBJECT_ID", "HADM_ID", "ICUSTAY_ID", "HOUR_IN", "ICD9_CODES", "target_label", "label_list", 
                      "raw_label", "raw_label_filtered", "candidate_names", "candidate_indices", "VENT_CLASS"]
-        
         feats = [c for c in df.select_dtypes("number").columns if c not in drop_cols]
         self.feats = feats
         
-        # NaN Handling
         for f_name in feats:
             df[f_name] = df[f_name].replace([np.inf, -np.inf], np.nan).fillna(0.0).astype(np.float32)
         
         df["target_label"] = df["target_label"].astype(np.int64)
 
         # Splitting
+        # Config: test=0.2, val=0.125 (of remaining 80% = 10% total)
+        # 1. Total -> Train+Val (80%), Test (20%)
         try:
-            tr, tmp = train_test_split(df, test_size=self.cfg.test_split_size, random_state=42, stratify=df["target_label"])
+            tr_val, te = train_test_split(df, test_size=self.cfg.test_split_size, random_state=42, stratify=df["target_label"])
         except ValueError:
-            tr, tmp = train_test_split(df, test_size=self.cfg.test_split_size, random_state=42, stratify=None)
+            tr_val, te = train_test_split(df, test_size=self.cfg.test_split_size, random_state=42, stratify=None)
             
+        # 2. Train+Val -> Train (70%), Val (10%)
         try:
-            v, te = train_test_split(tmp, test_size=self.cfg.val_split_size, random_state=42, stratify=tmp["target_label"])
+            tr, v = train_test_split(tr_val, test_size=self.cfg.val_split_size, random_state=42, stratify=tr_val["target_label"])
         except ValueError:
-            v, te = train_test_split(tmp, test_size=self.cfg.val_split_size, random_state=42, stratify=None)
+            tr, v = train_test_split(tr_val, test_size=self.cfg.val_split_size, random_state=42, stratify=None)
 
         self.observer.log("INFO", f"ICD Service: Split sizes: Train={len(tr)}, Val={len(v)}, Test={len(te)}")
         return tr, v, te, feats, "target_label", le
 
     def train(self) -> None:
-        self.observer.log("INFO", f"ICD Service: Starting training on {self.device}...")
-        self.entity.to(str(self.device))
-        
         # 1. Prepare Data
         tr_df, val_df, test_df, feats, label_col, le = self._prepare_data()
         
+        # Lazy Entity Initialization based on ACTUAL data dimensions
+        num_feats = len(feats)
+        num_classes = len(le.classes_)
+        self.observer.log("INFO", f"ICD Service: Initializing model with num_features={num_feats}, num_classes={num_classes}")
+        
+        head1 = MedBERTClassifier(self.cfg.model_name, num_num=num_feats, num_cls=num_classes)
+        head2 = MedBERTClassifier(self.cfg.model_name, num_num=num_feats, num_cls=num_classes)
+        stacker = XGBoostStacker(self.cfg.xgb_params)
+        
+        self.entity = ICDModelEntity(head1, head2, stacker)
+        self.entity.to(str(self.device))
+        self.observer.log("INFO", f"ICD Service: Starting training on {self.device}...")
+
         # 2. Sampler Logic
         target_counts = tr_df[label_col].value_counts()
         class_weights_map = {cls: 1.0 / (count ** self.cfg.sampler_alpha) for cls, count in target_counts.items()}
@@ -262,7 +251,6 @@ class ICDService:
         ds_val = ICDDataset(val_df, feats, label_col, "label_list")
         ds_test = ICDDataset(test_df, feats, label_col, "label_list")
         
-        # Store datasets for XAI
         self.ds_val = ds_val
         self.ds_test = ds_test
 
@@ -274,8 +262,6 @@ class ICDService:
         opt2 = torch.optim.Adam(self.entity.head2.parameters(), lr=self.cfg.lr)
         
         # Loss
-        num_classes = len(le.classes_)
-        # Create effective counts array matching class indices
         class_freq = np.array([target_counts.get(i, 1) for i in range(num_classes)])
         loss_fn = CBFocalLoss(class_freq, beta=self.cfg.cb_beta, gamma=self.cfg.focal_gamma, device=str(self.device))
 
@@ -435,7 +421,6 @@ class ICDService:
 
         # 5. Run LIME
         self.observer.log("INFO", "ICD Service: Running LIME...")
-        # LIME needs feature names and class names
         class_names = list(self.le.classes_) if self.le else [str(i) for i in range(len(bg_lime[0]))]
         
         lime_exp = lime.lime_tabular.LimeTabularExplainer(
