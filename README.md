@@ -40,7 +40,10 @@ The system operates in two main phases:
    - **Output:** Probability of 4 states: `ONSET`, `WEAN`, `STAY ON`, `STAY OFF`.
 
 <div align="center">
-  <img src="assets/pipeline_diagram.png" alt="HINT Architecture" width="800"/>
+   <br>
+   <img width="800" alt="HINT Architectur" src="https://github.com/user-attachments/assets/85fde6e4-3800-4bd2-8983-e33a504cd72d" />
+
+
   <br>
   <em>Figure 1. Overall pipeline of HINT (Diagnosis–Time-series–Intervention).</em>
 </div>
@@ -74,7 +77,7 @@ HINT is evaluated on the **MIMIC-III** dataset and compared against strong basel
 ### Installation
 
 ```bash
-git clone [https://github.com/eastlighting1/HINT.git](https://github.com/eastlighting1/HINT.git)
+git clone https://github.com/eastlighting1/HINT.git
 cd HINT
 pip install -r requirements.txt
 ```
@@ -133,7 +136,7 @@ Execute both ICD training and CNN training sequentially.
 python src/hint/app/main.py mode=train
 ```
 
-### 4. Run Tests & Coverage
+### 4. Run Tests & Coverage (TBD)
 
 We provide a dedicated test runner that executes unit, integration, and end-to-end tests.
 
@@ -201,13 +204,18 @@ This project is released under the **MIT License**. See the `LICENSE` file for d
 If you find this work useful in your research, please cite the following thesis:
 
 ```bibtex
-@mastersthesis{kim2026hint,
-  author       = {Donghyeon Kim},
-  title        = {Design and Implementation of a Clinical Decision Support System Using an Intervention Prediction Model},
-  school       = {Gachon University},
-  year         = {2026},
-  month        = {February},
-  type         = {Master's Thesis}
+@article{kim2026design,
+title = {HINT : Hierarchical ICD-aware Network for Time-series Intervention},
+journal = {TBD},
+volume = {},
+pages = {},
+year = {2026},
+issn = {},
+doi = {},
+url = {},
+author = {Donghyeon Kim},
+keywords = {ICD Coding, Partial-label learning, Intervention Prediction, Clinical Decision Support System, TCN, Class Imbalance, Explainable AI, MIMIC-III},
+abstract = {Intensive Care Units generate massive volumes of heterogeneous clinical data from electronic medical records and bedside monitoring, yet the rapid and unstable nature of critical illness makes it difficult for clinicians to integrate these signals in real time. Building trustworthy clinical decision support systems (CDSSs) therefore requires models that can handle irregular, sparse multivariate time series and incorporate high-level diagnostic context. In practice, ICU time series are heavily affected by missingness and non-uniform sampling, while International Classification of Diseases codes exhibit incomplete and overlapping label structures together with extreme class imbalance. To address these challenges, this study proposes a hierarchical diagnosis-time-series-intervention CDSS for ICU intervention prediction. The system consists of a two-stage pipeline. First, an Automated ICD Coding module infers an admission-level representative ICD label from ICD-9 candidate sets and static/numerical patient features. The module embeds realistic documentation uncertainty through partial-label learning, and it mitigates extreme imbalance via inverse-frequency sampling and class-balanced focal loss, yielding robust diagnostic context under weak supervision. Second, an Intervention Prediction module constructs ICU time-series tensors augmented with the inferred ICD context and predicts four mechanical ventilation states. The proposed model combines (i) multi-branch TCN-based CNN blocks that learn feature-group-specific temporal representations to reduce representation interference, and (ii) an ICD-driven gating mechanism that dynamically reweights numerical time-series features according to diagnostic context, enabling context-adaptive intervention inference. To ensure clinical interpretability, SHAP-based global explanations and LIME-based local explanations are provided in parallel for both modules. Experiments on MIMIC-III demonstrate that the proposed system achieves the best balanced performance under severe imbalance, reaching a Macro AUPRC of 75.2% and an F1 score of 69.8%, while also delivering a Macro AUC of 92.3% comparable to or slightly surpassing strong hybrid baselines. ICD impact analyses further confirm that clinically valid ICD context consistently outperforms random ICD injection, and that admission-level diagnostic context is more effective than ICU-stay-level fixation. These results validate the proposed hierarchical CDSS as a practical and imbalance-robust framework for context-aware ICU intervention prediction.}
 }
 ```
 
@@ -218,113 +226,5 @@ If you find this work useful in your research, please cite the following thesis:
 For questions, issues, or collaboration inquiries, please contact:
 
 **Donghyeon Kim**  
-Email: your.email@example.com
-GitHub: [https://github.com/username](https://github.com/username)
-```
-HINT
-├─ .python-version
-├─ README.md
-├─ artifacts
-│  ├─ checkpoints
-│  ├─ configs
-│  └─ metrics
-├─ configs
-│  ├─ cnn_config.yaml
-│  ├─ config.yaml
-│  ├─ etl_config.yaml
-│  └─ icd_config.yaml
-├─ outputs
-│  └─ 2025-12-05
-│     ├─ 02-17-55
-│     │  └─ .hydra
-│     │     ├─ config.yaml
-│     │     ├─ hydra.yaml
-│     │     └─ overrides.yaml
-│     ├─ 05-58-25
-│     │  └─ .hydra
-│     │     ├─ config.yaml
-│     │     ├─ hydra.yaml
-│     │     └─ overrides.yaml
-│     └─ 05-59-08
-│        └─ .hydra
-│           ├─ config.yaml
-│           ├─ hydra.yaml
-│           └─ overrides.yaml
-├─ pyproject.toml
-├─ src
-│  ├─ hint
-│  │  ├─ app
-│  │  │  ├─ __init__.py
-│  │  │  ├─ factory.py
-│  │  │  └─ main.py
-│  │  ├─ domain
-│  │  │  ├─ __init__.py
-│  │  │  ├─ entities.py
-│  │  │  └─ vo.py
-│  │  ├─ foundation
-│  │  │  ├─ __init__.py
-│  │  │  ├─ configs.py
-│  │  │  ├─ dtos.py
-│  │  │  ├─ exceptions.py
-│  │  │  └─ interfaces.py
-│  │  ├─ infrastructure
-│  │  │  ├─ __init__.py
-│  │  │  ├─ components.py
-│  │  │  ├─ datasource.py
-│  │  │  ├─ networks.py
-│  │  │  ├─ registry.py
-│  │  │  └─ telemetry.py
-│  │  └─ services
-│  │     ├─ __init__.py
-│  │     ├─ etl
-│  │     │  ├─ __init__.py
-│  │     │  ├─ components
-│  │     │  │  ├─ __init__.py
-│  │     │  │  ├─ assembler.py
-│  │     │  │  ├─ labels.py
-│  │     │  │  ├─ notes.py
-│  │     │  │  ├─ outcomes.py
-│  │     │  │  ├─ static.py
-│  │     │  │  ├─ tensor.py
-│  │     │  │  ├─ timeseries.py
-│  │     │  │  └─ ventilation.py
-│  │     │  └─ service.py
-│  │     ├─ icd
-│  │     │  ├─ __init__.py
-│  │     │  └─ service.py
-│  │     └─ training
-│  │        ├─ __init__.py
-│  │        ├─ evaluator.py
-│  │        └─ trainer.py
-│  └─ test
-│     ├─ conftest.py
-│     ├─ e2e
-│     │  └─ test_cli_entrypoint.py
-│     ├─ integration
-│     │  ├─ conftest.py
-│     │  ├─ infrastructure
-│     │  │  └─ test_hdf5_datasource.py
-│     │  ├─ test_model_persistence.py
-│     │  └─ workflows
-│     │     ├─ test_etl_execution.py
-│     │     └─ test_full_training_loop.py
-│     ├─ runner.py
-│     ├─ unit
-│     │  ├─ conftest.py
-│     │  ├─ domain
-│     │  │  └─ test_entities.py
-│     │  ├─ foundation
-│     │  │  ├─ test_configs.py
-│     │  │  └─ test_dtos.py
-│     │  ├─ infrastructure
-│     │  │  ├─ test_networks.py
-│     │  │  └─ test_registry.py
-│     │  └─ services
-│     │     ├─ test_etl.py
-│     │     └─ test_trainer.py
-│     └─ utils
-│        ├─ custom_assertions.py
-│        └─ synthetic_data.py
-└─ uv.lock
-
-```
+Email: eastlighting1@gachon.ac.kr <br>
+GitHub: [https://github.com/eastlighting1](https://github.com/eastlighting1)
