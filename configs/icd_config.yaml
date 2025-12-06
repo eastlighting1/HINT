@@ -5,7 +5,7 @@ model_name: "Charangan/MedBERT"
 # Training
 batch_size: 2048
 lr: 1.0e-5
-epochs: 100
+epochs: 0
 patience: 5
 dropout: 0.3
 
@@ -21,8 +21,8 @@ top_k_labels: 500
 topk_eval: 5
 
 xai_bg_size: 128
-xai_sample_size: 32
-xai_nsamples: "auto"
+xai_sample_size: 5
+xai_nsamples: 200
 
 # Loss / Imbalance
 sampler_alpha: 0.5

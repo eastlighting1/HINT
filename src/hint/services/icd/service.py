@@ -5,98 +5,28 @@ import lime
 import lime.lime_tabular
 import json
 import polars as pl
+from torch.utils.data import DataLoader, WeightedRandomSampler
+import polars as pl
 from torch.utils.data import Dataset, DataLoader, WeightedRandomSampler
 from sklearn.metrics import accuracy_score, f1_score
+from sklearn.preprocessing import LabelEncoder
+from sklearn.model_selection import train_test_split
 from sklearn.preprocessing import LabelEncoder
 from sklearn.model_selection import train_test_split
 from functools import partial
 from pathlib import Path
 from typing import Optional, List, Any, Dict, Tuple, Union
+from typing import Optional, List, Any, Dict, Tuple
 
 from ...foundation.interfaces import TelemetryObserver, Registry, StreamingSource
-from ...foundation.dtos import TensorBatch
 from ...foundation.exceptions import ModelError
 from ...domain.entities import ICDModelEntity
 from ...domain.vo import ICDConfig
 from ...infrastructure.components import CBFocalLoss
 from ...infrastructure.networks import MedBERTClassifier
 from ...infrastructure.components import XGBoostStacker
-
-# -----------------------------------------------------------------------------
-# Helper Classes & Functions
-# -----------------------------------------------------------------------------
-
-class ICDDataset(Dataset):
-    def __init__(self, df, feats, label_col, list_col, cand_col="candidate_indices"):
-        self.X = df[feats].to_numpy(dtype=np.float32, copy=True)
-        self.y = df[label_col].astype(np.int64).to_numpy()
-        self.lst = df[list_col].tolist()
-        if cand_col in df.columns:
-            self.cand = df[cand_col].tolist()
-        else:
-            self.cand = [[int(lbl)] for lbl in self.y]
-
-    def __len__(self):
-        return len(self.y)
-
-    def __getitem__(self, i):
-        num = torch.tensor(self.X[i], dtype=torch.float32)
-        num = torch.nan_to_num(num, nan=0.0, posinf=0.0, neginf=0.0)
-        lab = torch.tensor(self.y[i], dtype=torch.long)
-        return {
-            "num": num,
-            "lab": lab,
-            "lst": self.lst[i],
-            "cand": self.cand[i],
-        }
-
-def custom_collate(batch, tokenizer, max_length):
-    from torch.utils.data.dataloader import default_collate
-    nums, labs, lists, cands = zip(*[(b["num"], b["lab"], b["lst"], b["cand"]) for b in batch])
-
-    texts = []
-    for lst in lists:
-        if isinstance(lst, (list, tuple, np.ndarray)):
-            valid_tokens = [str(t) for t in lst if t]
-            texts.append(" ".join(valid_tokens))
-        else:
-            texts.append("")
-
-    bt = default_collate([{"num": n, "lab": l} for n, l in zip(nums, labs)])
-    bt["lst"] = lists
-    bt["cand"] = cands
-
-    tok = tokenizer(
-        texts,
-        padding=True,
-        truncation=True,
-        return_tensors="pt",
-        max_length=max_length,
-    )
-    bt["input_ids"] = tok["input_ids"]
-    bt["attention_mask"] = tok["attention_mask"]
-    return bt
-
-def _to_python_list(val: Any) -> List[str]:
-    if isinstance(val, np.ndarray):
-        return val.tolist()
-    if isinstance(val, list):
-        return val
-    if isinstance(val, str):
-        try:
-            from ast import literal_eval
-            parsed = literal_eval(val)
-            if isinstance(parsed, (list, tuple)):
-                return list(parsed)
-        except:
-            if val.startswith("[") and val.endswith("]"):
-                return [t.strip(" '\"") for t in val.strip("[]").split(",") if t.strip()]
-            return [val]
-    return []
-
-# -----------------------------------------------------------------------------
-# ICD Service
-# -----------------------------------------------------------------------------
+# [Import Fix] Import data classes from infrastructure
+from ...infrastructure.datasource import ICDDataset, custom_collate, _to_python_list
 
 class ICDService:
     def __init__(
@@ -112,7 +42,6 @@ class ICDService:
         self.registry = registry
         self.observer = observer
         
-        # Entity is None initially, created after data inspection
         self.entity: Optional[ICDModelEntity] = None 
         
         self.train_source = train_source 
@@ -203,14 +132,11 @@ class ICDService:
         df["target_label"] = df["target_label"].astype(np.int64)
 
         # Splitting
-        # Config: test=0.2, val=0.125 (of remaining 80% = 10% total)
-        # 1. Total -> Train+Val (80%), Test (20%)
         try:
             tr_val, te = train_test_split(df, test_size=self.cfg.test_split_size, random_state=42, stratify=df["target_label"])
         except ValueError:
             tr_val, te = train_test_split(df, test_size=self.cfg.test_split_size, random_state=42, stratify=None)
             
-        # 2. Train+Val -> Train (70%), Val (10%)
         try:
             tr, v = train_test_split(tr_val, test_size=self.cfg.val_split_size, random_state=42, stratify=tr_val["target_label"])
         except ValueError:
@@ -235,6 +161,20 @@ class ICDService:
         self.entity = ICDModelEntity(head1, head2, stacker)
         self.entity.to(str(self.device))
         self.observer.log("INFO", f"ICD Service: Starting training on {self.device}...")
+        
+        # 1. Prepare Data
+        tr_df, val_df, test_df, feats, label_col, le = self._prepare_data()
+        
+        num_feats = len(feats)
+        num_classes = len(le.classes_)
+        self.observer.log("INFO", f"ICD Service: Initializing model with num_features={num_feats}, num_classes={num_classes}")
+        
+        head1 = MedBERTClassifier(self.cfg.model_name, num_num=num_feats, num_cls=num_classes)
+        head2 = MedBERTClassifier(self.cfg.model_name, num_num=num_feats, num_cls=num_classes)
+        stacker = XGBoostStacker(self.cfg.xgb_params)
+        
+        self.entity = ICDModelEntity(head1, head2, stacker)
+        self.entity.to(str(self.device))
 
         # 2. Sampler Logic
         target_counts = tr_df[label_col].value_counts()
@@ -261,7 +201,6 @@ class ICDService:
         opt1 = torch.optim.Adam(self.entity.head1.parameters(), lr=self.cfg.lr)
         opt2 = torch.optim.Adam(self.entity.head2.parameters(), lr=self.cfg.lr)
         
-        # Loss
         class_freq = np.array([target_counts.get(i, 1) for i in range(num_classes)])
         loss_fn = CBFocalLoss(class_freq, beta=self.cfg.cb_beta, gamma=self.cfg.focal_gamma, device=str(self.device))
 
@@ -357,11 +296,12 @@ class ICDService:
         self.entity.head1.eval()
         self.entity.head2.eval()
 
-        from ...infrastructure.icd_datasource import custom_collate
         from transformers import AutoTokenizer
         tokenizer = AutoTokenizer.from_pretrained(self.cfg.model_name)
         collate_fn = partial(custom_collate, tokenizer=tokenizer, max_length=self.cfg.max_length)
         
+        dl_val = DataLoader(self.ds_val, batch_size=self.cfg.batch_size, collate_fn=collate_fn, num_workers=self.cfg.num_workers)
+        dl_te = DataLoader(self.ds_test, batch_size=self.cfg.batch_size, collate_fn=collate_fn, num_workers=self.cfg.num_workers)
         dl_val = DataLoader(self.ds_val, batch_size=self.cfg.batch_size, collate_fn=collate_fn, num_workers=self.cfg.num_workers)
         dl_te = DataLoader(self.ds_test, batch_size=self.cfg.batch_size, collate_fn=collate_fn, num_workers=self.cfg.num_workers)
 
@@ -395,21 +335,32 @@ class ICDService:
         sample_mask = sample_batch["attention_mask"][:shap_sample_size]
         x_sample_np = sample_x.numpy()
 
-        # 3. Predict Wrapper
+        # 3. Predict Wrapper with MINI-BATCHING (Fix for OOM)
         def shap_predict_fn(x_shap: np.ndarray) -> np.ndarray:
-            num_samples = x_shap.shape[0]
-            num_tensor = torch.tensor(x_shap, dtype=torch.float32).to(self.device)
-            # For tabular explanation of multi-modal model, we fix text input to the sample's text
-            # This approximation explains the impact of numerical features given fixed text context.
-            ids_tensor = sample_ids[0:1].to(self.device).expand(num_samples, -1)
-            mask_tensor = sample_mask[0:1].to(self.device).expand(num_samples, -1)
+            n_samples = x_shap.shape[0]
+            eval_bs = 512  # Safe batch size
+            probs_list = []
+            
+            if n_samples == 0: return np.array([])
+            
+            for i in range(0, n_samples, eval_bs):
+                batch_x = x_shap[i : i + eval_bs]
+                curr_bs = batch_x.shape[0]
+                
+                num_tensor = torch.tensor(batch_x, dtype=torch.float32).to(self.device)
+                
+                # For multi-modal, fix text to sample text (approx)
+                ids_tensor = sample_ids[0:1].to(self.device).expand(curr_bs, -1)
+                mask_tensor = sample_mask[0:1].to(self.device).expand(curr_bs, -1)
 
-            with torch.no_grad():
-                o1 = self.entity.head1(input_ids=ids_tensor, mask=mask_tensor, numerical=num_tensor)
-                o2 = self.entity.head2(input_ids=ids_tensor, mask=mask_tensor, numerical=num_tensor)
-                avg_logits = (o1 + o2) / 2
-                probs = torch.softmax(avg_logits, dim=-1).cpu().numpy()
-            return probs
+                with torch.no_grad():
+                    o1 = self.entity.head1(input_ids=ids_tensor, mask=mask_tensor, numerical=num_tensor)
+                    o2 = self.entity.head2(input_ids=ids_tensor, mask=mask_tensor, numerical=num_tensor)
+                    avg_logits = (o1 + o2) / 2
+                    batch_probs = torch.softmax(avg_logits, dim=-1).cpu().numpy()
+                    probs_list.append(batch_probs)
+            
+            return np.concatenate(probs_list, axis=0)
 
         # 4. Run SHAP
         self.observer.log("INFO", "ICD Service: Running KernelExplainer...")

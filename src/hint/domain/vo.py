@@ -91,8 +91,8 @@ class ICDConfig(HyperparamVO):
     })
     
     xai_bg_size: int = 128
-    xai_sample_size: int = 32
-    xai_nsamples: Union[str, int] = "auto"
+    xai_sample_size: int = 5
+    xai_nsamples: Union[str, int] = 200
 
 class CNNConfig(HyperparamVO):
     """Configuration for CNN service."""

@@ -52,20 +52,24 @@ class AppFactory:
     def create_icd_service(self) -> ICDService:
         # Load data source
         # Use configured absolute/relative path instead of registry default
+        # Use configured absolute/relative path instead of registry default
         train_path = Path(self.ctx.icd.data_path)
         source = ParquetSource(train_path)
         
+        # [FIXED] Removed 'entity' argument completely.
+        # The service will initialize the entity internally after inspecting data dimensions.
         # [FIX] Do NOT create entity here. Pass None.
         # The service will create it after inspecting data dimensions.
         entity = None 
         
         return ICDService(
-            self.ctx.icd, self.registry, self.observer, entity, 
+            self.ctx.icd, self.registry, self.observer, 
             train_source=source, val_source=source, test_source=source
         )
 
     def create_cnn_services(self) -> tuple[TrainingService, EvaluationService]:
         # Sources
+        # Use configured cache dir (data/cache)
         # Use configured cache dir (data/cache)
         data_dir = Path(self.ctx.cnn.data_cache_dir)
         
@@ -87,6 +91,7 @@ class AppFactory:
             n_num = feat_info.get("n_feats_numeric", 0)
         
         # Entity
+        # Dynamically set channel sizes to avoid shape mismatch errors.
         # Dynamically set channel sizes to avoid shape mismatch errors.
         # Assign all numeric features to the first group (g1) for robust initialization
         net = GFINet_CNN(
