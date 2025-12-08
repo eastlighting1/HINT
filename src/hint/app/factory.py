@@ -52,14 +52,11 @@ class AppFactory:
     def create_icd_service(self) -> ICDService:
         # Load data source
         # Use configured absolute/relative path instead of registry default
-        # Use configured absolute/relative path instead of registry default
         train_path = Path(self.ctx.icd.data_path)
         source = ParquetSource(train_path)
         
         # [FIXED] Removed 'entity' argument completely.
         # The service will initialize the entity internally after inspecting data dimensions.
-        # [FIX] Do NOT create entity here. Pass None.
-        # The service will create it after inspecting data dimensions.
         entity = None 
         
         return ICDService(
@@ -69,7 +66,6 @@ class AppFactory:
 
     def create_cnn_services(self) -> tuple[TrainingService, EvaluationService]:
         # Sources
-        # Use configured cache dir (data/cache)
         # Use configured cache dir (data/cache)
         data_dir = Path(self.ctx.cnn.data_cache_dir)
         
@@ -90,8 +86,32 @@ class AppFactory:
             vocab = feat_info.get("vocab_info", {})
             n_num = feat_info.get("n_feats_numeric", 0)
         
+        # ---------------------------------------------------------------------
+        # [NEW] 근본적인 해결책 적용: 실제 데이터 범위를 확인하여 Config 갱신
+        # ---------------------------------------------------------------------
+        try:
+            self.observer.log("INFO", "Factory: Verifying vocabulary sizes against training data...")
+            # HDF5StreamingSource에 새로 추가한 메서드 호출
+            if hasattr(tr_src, "get_real_vocab_sizes"):
+                real_sizes = tr_src.get_real_vocab_sizes()
+                
+                if real_sizes:
+                    keys = list(vocab.keys())
+                    for i, key in enumerate(keys):
+                        if i < len(real_sizes):
+                            original_size = vocab[key]
+                            real_size = real_sizes[i]
+                            # 데이터에 있는 값이 Config보다 크면 업데이트 (안전 마진 확보)
+                            if real_size > original_size:
+                                self.observer.log("WARNING", f"Adjusting vocab size for '{key}': {original_size} -> {real_size}")
+                                vocab[key] = real_size
+            else:
+                self.observer.log("WARNING", "Factory: 'get_real_vocab_sizes' method missing in Source.")
+        except Exception as e:
+            self.observer.log("WARNING", f"Factory: Could not verify vocab sizes: {e}")
+        # ---------------------------------------------------------------------
+
         # Entity
-        # Dynamically set channel sizes to avoid shape mismatch errors.
         # Dynamically set channel sizes to avoid shape mismatch errors.
         # Assign all numeric features to the first group (g1) for robust initialization
         net = GFINet_CNN(
@@ -100,7 +120,7 @@ class AppFactory:
             g1=list(range(n_num)), 
             g2=[], 
             rest=[], 
-            cat_vocab_sizes=vocab, 
+            cat_vocab_sizes=vocab, # 업데이트된 vocab이 들어갑니다.
             embed_dim=self.ctx.cnn.embed_dim
         )
         entity = InterventionModelEntity(net, self.ctx.cnn.ema_decay)

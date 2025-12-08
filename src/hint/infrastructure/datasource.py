@@ -2,7 +2,7 @@ import h5py
 import torch
 import numpy as np
 import polars as pl
-import pyarrow.parquet as pq # 스트리밍을 위한 PyArrow 추가
+import pyarrow.parquet as pq
 from pathlib import Path
 from typing import Optional, List, Any, Union, Generator, Dict
 from torch.utils.data import Dataset
@@ -32,7 +32,6 @@ def _to_python_list(val: Any) -> List[str]:
             if isinstance(parsed, (list, tuple)):
                 return list(parsed)
         except:
-            # Fallback for simple comma-separated strings or single values
             if val.startswith("[") and val.endswith("]"):
                 return [t.strip(" '\"") for t in val.strip("[]").split(",") if t.strip()]
             return [val]
@@ -47,7 +46,6 @@ def custom_collate(batch, tokenizer, max_length):
     texts = []
     for lst in lists:
         if isinstance(lst, (list, tuple, np.ndarray)):
-            # Filter valid tokens and join
             valid_tokens = [str(t) for t in lst if t]
             texts.append(" ".join(valid_tokens))
         else:
@@ -57,7 +55,6 @@ def custom_collate(batch, tokenizer, max_length):
     bt["lst"] = lists
     bt["cand"] = cands
 
-    # Tokenize the batch of texts
     if tokenizer is not None:
         tok = tokenizer(
             texts,
@@ -71,6 +68,33 @@ def custom_collate(batch, tokenizer, max_length):
     
     return bt
 
+def collate_tensor_batch(batch: List[TensorBatch]) -> TensorBatch:
+    """
+    Custom collate function to stack a list of TensorBatch objects into a single TensorBatch.
+    """
+    x_num = torch.stack([b.x_num for b in batch])
+    y = torch.stack([b.y for b in batch])
+
+    x_cat = None
+    if batch[0].x_cat is not None:
+        x_cat = torch.stack([b.x_cat for b in batch])
+        
+    ids = None
+    if batch[0].ids is not None:
+        ids = torch.stack([b.ids for b in batch])
+        
+    mask = None
+    if batch[0].mask is not None:
+        mask = torch.stack([b.mask for b in batch])
+
+    return TensorBatch(
+        x_num=x_num,
+        x_cat=x_cat,
+        y=y,
+        ids=ids,
+        mask=mask
+    )
+
 # -----------------------------------------------------------------------------
 # Dataset Wrappers
 # -----------------------------------------------------------------------------
@@ -81,7 +105,6 @@ class ICDDataset(Dataset):
     Used by ICDService for training and evaluation.
     """
     def __init__(self, df, feats, label_col, list_col, cand_col="candidate_indices"):
-        # Convert DataFrame parts to numpy/tensors for fast access
         self.X = df[feats].to_numpy(dtype=np.float32, copy=True)
         self.y = df[label_col].astype(np.int64).to_numpy()
         self.lst = df[list_col].tolist()
@@ -89,7 +112,6 @@ class ICDDataset(Dataset):
         if cand_col in df.columns:
             self.cand = df[cand_col].tolist()
         else:
-            # If no candidate info, assume single label is the candidate
             self.cand = [[int(lbl)] for lbl in self.y]
 
     def __len__(self):
@@ -97,7 +119,6 @@ class ICDDataset(Dataset):
 
     def __getitem__(self, i):
         num = torch.tensor(self.X[i], dtype=torch.float32)
-        # Handle NaNs/Infs in numerical features
         num = torch.nan_to_num(num, nan=0.0, posinf=0.0, neginf=0.0)
         lab = torch.tensor(self.y[i], dtype=torch.long)
         
@@ -127,13 +148,45 @@ class HDF5StreamingSource(StreamingSource, Dataset):
             raise DataError(f"HDF5 file not found at {self.h5_path}")
 
         try:
-            # Open briefly to check length
             with h5py.File(self.h5_path, "r") as f:
                 if "X_num" not in f or "X_cat" not in f:
                     raise DataError(f"HDF5 missing required datasets in {self.h5_path}")
                 self._len = len(f["X_num"])
         except Exception as e:
             raise DataError(f"Failed to initialize HDF5 source: {e}")
+
+    def get_real_vocab_sizes(self) -> List[int]:
+        """
+        [근본 해결책]
+        데이터를 스캔하여 각 카테고리 피처별 실제 필요한 vocab size(max index + 1)를 반환합니다.
+        Config에 설정된 vocab size가 이 값보다 작으면 에러가 발생하므로, 
+        모델 초기화 전에 이 메서드로 값을 확인하여 Config를 갱신해야 합니다.
+        """
+        should_close = False
+        if self.h5_file is None:
+            self.h5_file = h5py.File(self.h5_path, "r")
+            should_close = True
+        
+        try:
+            # X_cat shape is typically (N, Num_Features, Time)
+            # We need max across N(dim0) and Time(dim2) to get max index per Feature(dim1)
+            # Caution: This loads the entire dataset into memory. 
+            # If dataset is huge, consider batched processing.
+            
+            # Assuming typical memory fit or HDF5 optimized max:
+            data = self.h5_file["X_cat"][:] 
+            # (Batch, Feat, Time) -> max over Batch and Time
+            max_indices = np.max(data, axis=(0, 2))
+            
+            real_vocab_sizes = (max_indices + 1).tolist()
+            return [int(s) for s in real_vocab_sizes]
+            
+        except Exception as e:
+            print(f"[Warning] Failed to calculate real vocab sizes: {e}")
+            return []
+        finally:
+            if should_close:
+                self.close()
 
     def __len__(self) -> int:
         return self._len
@@ -155,7 +208,6 @@ class HDF5StreamingSource(StreamingSource, Dataset):
         )
 
     def __iter__(self):
-        # Support direct iteration
         for i in range(len(self)):
             yield self[i]
 
@@ -172,7 +224,6 @@ class ParquetSource(StreamingSource):
     def __init__(self, file_path: Path):
         self.file_path = file_path
         if not self.file_path.exists():
-            # Try resolving relative to cwd if absolute path fails
             if not file_path.is_absolute():
                 self.file_path = Path.cwd() / file_path
                 
@@ -180,35 +231,23 @@ class ParquetSource(StreamingSource):
                 raise DataError(f"Data file not found at {self.file_path}")
         
     def load(self) -> pl.DataFrame:
-        """Loads the entire dataset into memory as a Polars DataFrame."""
         try:
             return pl.read_parquet(self.file_path)
         except Exception as e:
             raise DataError(f"Failed to load parquet file: {e}")
 
     def __len__(self) -> int:
-        """Returns the total number of rows efficiently."""
         try:
             return pl.scan_parquet(self.file_path).select(pl.len()).collect().item()
         except Exception as e:
-             # Fallback for non-parquet or error
              return 0
 
     def __iter__(self) -> Generator[Dict[str, Any], None, None]:
-        """
-        True streaming iteration for Parquet files.
-        Reads row-groups/batches from disk to keep memory usage low.
-        """
         try:
-            # Use PyArrow for efficient batch streaming
             parquet_file = pq.ParquetFile(self.file_path)
             
             for batch in parquet_file.iter_batches():
-                # Convert arrow batch to polars for consistent row handling
-                # or just iterate arrow batch directly if faster
                 batch_df = pl.from_arrow(batch)
-                
-                # Yield rows one by one from the batch
                 for row in batch_df.iter_rows(named=True):
                     yield row
                     

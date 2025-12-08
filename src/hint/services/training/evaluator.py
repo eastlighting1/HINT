@@ -13,6 +13,8 @@ from hint.foundation.interfaces import TelemetryObserver, Registry, StreamingSou
 from hint.domain.entities import InterventionModelEntity
 from hint.domain.vo import CNNConfig
 from hint.infrastructure.components import TemperatureScaler
+# [유지] 커스텀 collate 함수 import
+from hint.infrastructure.datasource import collate_tensor_batch
 
 class EvaluationService:
     """
@@ -39,7 +41,13 @@ class EvaluationService:
         self.entity.to(self.device)
         self.entity.network.eval()
         
-        dl_val = DataLoader(val_source, batch_size=self.cfg.batch_size, num_workers=4)
+        # [유지] collate_fn 추가
+        dl_val = DataLoader(
+            val_source, 
+            batch_size=self.cfg.batch_size, 
+            num_workers=4,
+            collate_fn=collate_tensor_batch
+        )
         ts = TemperatureScaler().to(self.device)
         
         logits_list, labels_list = [], []
@@ -61,7 +69,13 @@ class EvaluationService:
         self.entity.to(self.device)
         self.entity.network.eval()
         
-        dl_te = DataLoader(test_source, batch_size=self.cfg.batch_size, num_workers=4)
+        # [유지] collate_fn 추가
+        dl_te = DataLoader(
+            test_source, 
+            batch_size=self.cfg.batch_size, 
+            num_workers=4,
+            collate_fn=collate_tensor_batch
+        )
         all_preds, all_labels = [], []
         
         with torch.no_grad():
@@ -87,7 +101,17 @@ class EvaluationService:
         self.entity.network.eval()
         
         # Load Metadata
-        feat_info = self.registry.load_json("feature_info.json")
+        # [수정] Registry(Metrics)가 아닌 Data Cache Directory에서 직접 로드합니다.
+        # feature_info.json은 Metric이 아니라 Data Artifact이기 때문입니다.
+        feature_info_path = Path(self.cfg.data_cache_dir) / "feature_info.json"
+        
+        if feature_info_path.exists():
+            with open(feature_info_path, "r", encoding="utf-8") as f:
+                feat_info = json.load(f)
+        else:
+            self.observer.log("WARNING", f"Feature info not found at {feature_info_path}. Using empty info.")
+            feat_info = {}
+
         cat_vocab_sizes = feat_info.get("vocab_info", {})
         seq_len = self.cfg.seq_len
         n_cat_feats = len(cat_vocab_sizes)
@@ -105,7 +129,13 @@ class EvaluationService:
         max_samples = 256
         
         # Collect Background
-        dl_val = DataLoader(val_source, batch_size=self.cfg.batch_size, shuffle=False)
+        # [유지] collate_fn 추가
+        dl_val = DataLoader(
+            val_source, 
+            batch_size=self.cfg.batch_size, 
+            shuffle=False,
+            collate_fn=collate_tensor_batch
+        )
         bg_num_list = []
         total_bg = 0
         for batch in dl_val:
@@ -120,7 +150,13 @@ class EvaluationService:
         bg_num = torch.cat(bg_num_list, dim=0)[:max_bg].to(self.device)
 
         # Collect Samples
-        dl_te = DataLoader(test_source, batch_size=self.cfg.batch_size, shuffle=False)
+        # [유지] collate_fn 추가
+        dl_te = DataLoader(
+            test_source, 
+            batch_size=self.cfg.batch_size, 
+            shuffle=False,
+            collate_fn=collate_tensor_batch
+        )
         samp_num_list = []
         total_samp = 0
         for batch in dl_te:
@@ -175,7 +211,13 @@ class EvaluationService:
         max_lime_samples = 2000
         num_explanations = 50
         
-        dl_te = DataLoader(test_source, batch_size=self.cfg.batch_size, shuffle=False)
+        # [유지] collate_fn 추가
+        dl_te = DataLoader(
+            test_source, 
+            batch_size=self.cfg.batch_size, 
+            shuffle=False,
+            collate_fn=collate_tensor_batch
+        )
         tab_rows, tab_labels = [], []
         total_rows = 0
         
@@ -199,26 +241,35 @@ class EvaluationService:
         y_tab = np.concatenate(tab_labels)
         
         # Feature Names
-        base_feats_num = feat_info["base_feats_numeric"]
-        n_feats_num = feat_info["n_feats_numeric"]
-        cat_vocab_sizes = feat_info.get("vocab_info", {})
-        
-        if n_feats_num == len(base_feats_num) * 3:
-            suffixes = ["_obs", "_gap", "_pred"]
-            num_feat_names = [f"{name}{suf}" for suf in suffixes for name in base_feats_num]
-        else:
-            num_feat_names = [f"num_{i}" for i in range(n_feats_num)]
+        # [안전장치] feat_info가 비어있을 경우 대비
+        if "base_feats_numeric" in feat_info:
+            base_feats_num = feat_info["base_feats_numeric"]
+            n_feats_num = feat_info["n_feats_numeric"]
+            cat_vocab_sizes = feat_info.get("vocab_info", {})
             
-        cat_feat_names_last = [f"{name}_last" for name in cat_vocab_sizes.keys()]
-        feat_names_all = num_feat_names + cat_feat_names_last
-        categorical_features_idx = list(range(len(num_feat_names), len(feat_names_all)))
+            if n_feats_num == len(base_feats_num) * 3:
+                suffixes = ["_obs", "_gap", "_pred"]
+                num_feat_names = [f"{name}{suf}" for suf in suffixes for name in base_feats_num]
+            else:
+                num_feat_names = [f"num_{i}" for i in range(n_feats_num)]
+                
+            cat_feat_names_last = [f"{name}_last" for name in cat_vocab_sizes.keys()]
+            feat_names_all = num_feat_names + cat_feat_names_last
+            categorical_features_idx = list(range(len(num_feat_names), len(feat_names_all)))
+        else:
+            # Fallback names
+            self.observer.log("WARNING", "Missing feature info for LIME. Generating generic names.")
+            feat_names_all = [f"feat_{i}" for i in range(X_tab.shape[1])]
+            categorical_features_idx = []
+            cat_vocab_sizes = {}
+            n_feats_num = X_tab.shape[1]
 
         # Predict Function
         def predict_fn(X):
             X = np.atleast_2d(X)
             n = X.shape[0]
             num_part = X[:, :n_feats_num]
-            if n_cat_feats > 0:
+            if n_cat_feats > 0 and (n_feats_num + n_cat_feats <= X.shape[1]):
                 cat_part = X[:, n_feats_num : n_feats_num + n_cat_feats]
             else:
                 cat_part = None

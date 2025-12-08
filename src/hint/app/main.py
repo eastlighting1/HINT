@@ -38,7 +38,9 @@ def main(cfg: DictConfig) -> None:
         # Calibrate & Test
         evaluator.calibrate(trainer.val_src)
         evaluator.evaluate(evaluator.te_src)
-        evaluator.run_xai(evaluator.te_src)
+        
+        # [수정됨] run_xai는 background(val)와 target(test) 데이터 소스 두 개가 필요합니다.
+        evaluator.run_xai(evaluator.val_src, evaluator.te_src)
 
     factory.observer.log("INFO", "Main: Pipeline finished successfully.")
 

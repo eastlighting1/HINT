@@ -7,6 +7,8 @@ from hint.foundation.interfaces import TelemetryObserver, Registry, StreamingSou
 from hint.domain.entities import InterventionModelEntity
 from hint.domain.vo import CNNConfig
 from hint.infrastructure.components import FocalLoss
+# [추가됨] 커스텀 collate 함수를 가져옵니다.
+from hint.infrastructure.datasource import collate_tensor_batch
 
 class TrainingService:
     """
@@ -35,8 +37,23 @@ class TrainingService:
         optimizer = torch.optim.AdamW(self.entity.network.parameters(), lr=self.cfg.lr, weight_decay=1e-5)
         
         # DataLoader wrapper
-        dl_tr = DataLoader(train_source, batch_size=self.cfg.batch_size, shuffle=True, num_workers=4, pin_memory=True)
-        dl_val = DataLoader(val_source, batch_size=self.cfg.batch_size, shuffle=False, num_workers=4)
+        # [수정됨] collate_fn=collate_tensor_batch 추가
+        dl_tr = DataLoader(
+            train_source, 
+            batch_size=self.cfg.batch_size, 
+            shuffle=True, 
+            num_workers=4, 
+            pin_memory=True,
+            collate_fn=collate_tensor_batch 
+        )
+        # [수정됨] collate_fn=collate_tensor_batch 추가
+        dl_val = DataLoader(
+            val_source, 
+            batch_size=self.cfg.batch_size, 
+            shuffle=False, 
+            num_workers=4,
+            collate_fn=collate_tensor_batch
+        )
         
         no_improve = 0
         
@@ -89,16 +106,16 @@ class TrainingService:
         correct = 0
         total = 0
         
-        # Use EMA weights for validation if available context allows, 
-        # else standard weights. entity.ema context manager is complex to pass,
-        # so typically we'd use averaged weights copy. 
-        # For simplicity here:
-        with torch.no_grad():
-            for batch in loader:
-                batch = batch.to(self.device)
-                logits = self.entity.network(batch.x_num, batch.x_cat)
-                preds = logits.argmax(dim=1)
-                correct += (preds == batch.y).sum().item()
-                total += batch.y.size(0)
+        # [수정됨] EMA 파라미터를 사용하여 검증
+        with self.entity.ema.average_parameters():
+            with torch.no_grad():
+                for batch in loader:
+                    batch = batch.to(self.device)
+                    
+                    logits = self.entity.network(batch.x_num, batch.x_cat)
+                    preds = logits.argmax(dim=1)
+                    
+                    correct += (preds == batch.y).sum().item()
+                    total += batch.y.size(0)
                 
         return correct / max(1, total)

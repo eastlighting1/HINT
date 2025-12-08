@@ -83,3 +83,5 @@ class InterventionModelEntity(TrainableEntity):
 
     def to(self, device: str) -> None:
         self.network.to(device)
+        # [수정] EMA 객체의 섀도우 파라미터도 함께 해당 디바이스(GPU)로 이동해야 합니다.
+        self.ema.to(device)
