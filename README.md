@@ -140,17 +140,22 @@ To run everything sequentially (ICD training -> CNN training -> Evaluation):
 uv run hint mode=train
 ```
 
-### 🧪 Running Tests (TBD)
+### 🧪 Running Tests
 
-We care about code quality. Run our test suite to ensure everything is working correctly on your machine.
+The test suite is orchestrated through a Hydra-powered runner that wires logging, coverage, and test selection from `configs/test_config.yaml`.
 
 ```bash
-# Run all unit and integration tests
-uv run python src/test/runner.py
+# Run the full suite with coverage
+uv run python -m src.test.runner
 
-# Run only specific tests (e.g., entity tests)
-uv run python src/test/runner.py test.targets="['src/test/unit/domain']"
+# Skip slower suites, e.g., integration and e2e
+uv run python -m src.test.runner tests.run_integration=false tests.run_e2e=false
 ```
+
+Key testing rules:
+- Use Pathlib for all filesystem operations in tests and utilities.
+- Keep docstrings on every test function/class using the project template (summary, scenario, Test Case ID, Args/Returns).
+- Do not add comments to test files; use logging or docstrings for explanation.
 
 -----
 

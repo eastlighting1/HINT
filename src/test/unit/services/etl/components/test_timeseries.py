@@ -8,13 +8,17 @@ from ...conftest import UnitFixtures
 
 def test_timeseries_aggregation_hourly() -> None:
     """
-    Validates that TimeSeriesAggregator aggregates raw events into hourly mean values.
-    
-    Test Case ID: ETL-TS-01
-    Description:
-        Creates raw CHARTEVENTS.
-        Executes aggregator.
-        Verifies result is grouped by hour and averaged.
+    Verify TimeSeriesAggregator produces hourly mean vitals.
+
+    This test validates that raw chart events are aggregated into hourly windows with averaged values when processed by `TimeSeriesAggregator`.
+    - Test Case ID: ETL-TS-01
+    - Scenario: Aggregate two events within the same hour and confirm resulting mean.
+
+    Args:
+        None
+
+    Returns:
+        None
     """
     logger.info("Starting test: test_timeseries_aggregation_hourly")
 
@@ -28,14 +32,12 @@ def test_timeseries_aggregation_hourly() -> None:
             "proc_dir": str(tmp_path / "processed")
         })
 
-        # Mock CHARTEVENTS
         pl.DataFrame({
             "SUBJECT_ID": [1, 1], "HADM_ID": [10, 10], "ICUSTAY_ID": [100, 100],
             "CHARTTIME": ["2100-01-01 10:15:00", "2100-01-01 10:45:00"],
             "ITEMID": [220045, 220045], "VALUENUM": [80, 100]
         }).write_csv(tmp_path / "raw" / "CHARTEVENTS.csv")
 
-        # Mock Patients for Intime
         pl.DataFrame({
             "SUBJECT_ID": [1], "HADM_ID": [10], "ICUSTAY_ID": [100], "INTIME": ["2100-01-01 10:00:00"]
         }).write_parquet(tmp_path / "processed" / "patients.parquet")
@@ -47,7 +49,6 @@ def test_timeseries_aggregation_hourly() -> None:
         assert out_file.exists()
         
         df = pl.read_parquet(out_file)
-        # Should be 1 row for hour 0 with mean 90
         assert df.height == 1
         assert df["MEAN"][0] == 90.0
 

@@ -11,14 +11,17 @@ from ...unit.conftest import UnitFixtures
 
 def test_etl_pipeline_execution() -> None:
     """
-    Validates the execution of a minimal ETL pipeline workflow.
-    
-    Test Case ID: TS-10
-    Description:
-        Sets up a temporary environment with raw inputs.
-        Configures an ETLService with a subset of components (Static + Assembler).
-        Runs the pipeline.
-        Verifies that expected output Parquet files are created.
+    Verify execution of a minimal ETL workflow using static inputs.
+
+    This test validates that `ETLService` configured with synthetic raw data and a feature assembler writes the expected processed Parquet output into a temporary directory.
+    - Test Case ID: TS-10
+    - Scenario: Run ETL with static extractor and assembler on deterministic inputs.
+
+    Args:
+        None
+
+    Returns:
+        None
     """
     logger.info("Starting test: test_etl_pipeline_execution")
     
@@ -31,7 +34,6 @@ def test_etl_pipeline_execution() -> None:
         logger.debug("Setting up raw data")
         IntegrationFixtures.setup_etl_raw_files(tmp_path / "raw")
         
-        # Create prerequisite files for Assembler
         pl.DataFrame({
             "SUBJECT_ID": [101, 102], "HADM_ID": [1001, 1002], 
             "ICUSTAY_ID": [5001, 5002], "INTIME": ["2150-01-01", "2150-01-01"],
@@ -50,7 +52,6 @@ def test_etl_pipeline_execution() -> None:
             "HOUR_IN": [1], "VENT": [0], "OUTCOME_FLAG": [0]
         }).write_parquet(tmp_path / "processed" / "interventions.parquet")
         
-        # Item map
         pl.DataFrame({
             "MIMIC LABEL": ["Heart Rate"], "LEVEL2": ["heart rate"]
         }).write_csv(tmp_path / "resources" / "itemid_to_variable_map.csv")
@@ -62,7 +63,6 @@ def test_etl_pipeline_execution() -> None:
         mock_observer = MagicMock()
         mock_observer.create_progress.return_value.__enter__.return_value = MagicMock()
 
-        # Assemble pipeline with select components
         components = [
             FeatureAssembler(config, mock_registry, mock_observer)
         ]

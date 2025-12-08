@@ -1,25 +1,27 @@
 import subprocess
 import sys
+from pathlib import Path
 from loguru import logger
 
 def test_cli_help_command() -> None:
     """
-    Validates that the application entry point is executable and responds to basic commands.
-    
-    Test Case ID: TS-12
-    Description:
-        Executes 'src/hint/app/main.py' as a subprocess with the '--help' argument.
-        Verifies that the process exits with code 0.
-        Checks if standard help text (e.g., Hydra info) is present in stdout.
+    Verify CLI entrypoint responds with help output.
+
+    This test validates that invoking `hint` via the main module with `--help` exits successfully and emits usage text indicative of Hydra wiring.
+    - Test Case ID: TS-12
+    - Scenario: Execute CLI help command through Python interpreter.
+
+    Args:
+        None
+
+    Returns:
+        None
     """
     logger.info("Starting test: test_cli_help_command")
-    
-    # Construct command: python src/hint/app/main.py --help
-    # Note: Adjust path relative to where runner is executed (typically project root)
-    script_path = "src/hint/app/main.py"
-    
-    cmd = [sys.executable, script_path, "--help"]
-    
+
+    script_path = Path("src/hint/app/main.py")
+    cmd = [sys.executable, str(script_path), "--help"]
+
     logger.debug(f"Executing command: {' '.join(cmd)}")
     
     try:
@@ -27,7 +29,7 @@ def test_cli_help_command() -> None:
             cmd, 
             capture_output=True, 
             text=True, 
-            check=False # We check manually
+            check=False
         )
         
         logger.debug(f"Exit Code: {result.returncode}")
@@ -36,7 +38,6 @@ def test_cli_help_command() -> None:
             logger.error(f"CLI Error Output: {result.stderr}")
             raise AssertionError(f"CLI exited with code {result.returncode}")
             
-        # Hydra help usually contains 'Powered by Hydra' or usage info
         if "usage" not in result.stdout.lower() and "hydra" not in result.stdout.lower():
             logger.warning("Standard help text not found, but exit code was 0.")
             

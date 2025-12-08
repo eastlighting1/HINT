@@ -6,13 +6,17 @@ from hint.infrastructure.registry import FileSystemRegistry
 
 def test_filesystem_registry_save_load() -> None:
     """
-    Validates saving and loading artifacts using FileSystemRegistry.
-    
-    Test Case ID: INF-REG-01
-    Description:
-        Initializes the registry in a temp directory.
-        Saves a dictionary artifact (simulating a state_dict).
-        Verifies the file exists and can be loaded back.
+    Verify FileSystemRegistry saves and loads artifacts correctly.
+
+    This test validates that `FileSystemRegistry` persists a model state to disk and the saved payload can be reloaded with matching content.
+    - Test Case ID: INF-REG-01
+    - Scenario: Persist and reload a mock model state within a temporary directory.
+
+    Args:
+        None
+
+    Returns:
+        None
     """
     logger.info("Starting test: test_filesystem_registry_save_load")
 

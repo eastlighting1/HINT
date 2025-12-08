@@ -7,13 +7,17 @@ from ..conftest import IntegrationFixtures
 
 def test_hdf5_datasource_read_integrity() -> None:
     """
-    Validates that HDF5StreamingSource can correctly read from a physical HDF5 file.
-    
-    Test Case ID: TS-08
-    Description:
-        Creates a temporary HDF5 file with known shapes.
-        Initializes HDF5StreamingSource.
-        Reads a sample and verifies data types and tensor shapes.
+    Verify HDF5StreamingSource reads numeric and label tensors from disk.
+
+    This test validates that a physical HDF5 file with known shapes can be streamed through `HDF5StreamingSource`, returning tensors with expected dimensionality and data types.
+    - Test Case ID: TS-08
+    - Scenario: Load a single record from a generated HDF5 dataset.
+
+    Args:
+        None
+
+    Returns:
+        None
     """
     logger.info("Starting test: test_hdf5_datasource_read_integrity")
     
@@ -33,8 +37,6 @@ def test_hdf5_datasource_read_integrity() -> None:
         sample = source[0]
         
         logger.debug(f"Verifying x_num shape. Expected: ({n_feat}, {seq_len})")
-        # Note: Transpose behavior might depend on implementation, assuming (C, T) or (T, C)
-        # Based on typical PyTorch CNN input (C, L), let's check dimensionality
         assert sample.x_num.dim() == 2, "x_num should be 2D tensor"
         assert sample.y.dim() == 0, "y should be scalar tensor"
         

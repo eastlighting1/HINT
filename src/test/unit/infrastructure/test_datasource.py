@@ -8,13 +8,17 @@ from hint.infrastructure.datasource import HDF5StreamingSource, ParquetSource
 
 def test_hdf5_streaming_source_getitem() -> None:
     """
-    Validates data retrieval from HDF5StreamingSource.
-    
-    Test Case ID: INF-DS-01
-    Description:
-        Creates a temporary HDF5 file.
-        Reads a sample using the source class.
-        Verifies the shape and type of the returned TensorBatch components.
+    Verify HDF5StreamingSource returns tensors with expected shapes.
+
+    This test validates that an HDF5 file containing numeric, categorical, labels, and IDs can be read through `HDF5StreamingSource`, returning tensors with the correct layout.
+    - Test Case ID: INF-DS-01
+    - Scenario: Read a single sample from a temporary HDF5 dataset.
+
+    Args:
+        None
+
+    Returns:
+        None
     """
     logger.info("Starting test: test_hdf5_streaming_source_getitem")
 
@@ -41,13 +45,17 @@ def test_hdf5_streaming_source_getitem() -> None:
 
 def test_parquet_source_loading() -> None:
     """
-    Validates initialization and length checking of ParquetSource.
-    
-    Test Case ID: INF-DS-02
-    Description:
-        Creates a temporary Parquet file using Polars.
-        Initializes ParquetSource.
-        Verifies the reported length matches the row count.
+    Confirm ParquetSource reports the correct dataset length.
+
+    This test validates that `ParquetSource` can read a simple Parquet file and exposes the expected length value to consumers.
+    - Test Case ID: INF-DS-02
+    - Scenario: Load a synthetic Parquet file and compare reported rows.
+
+    Args:
+        None
+
+    Returns:
+        None
     """
     logger.info("Starting test: test_parquet_source_loading")
     import polars as pl

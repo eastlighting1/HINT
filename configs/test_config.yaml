@@ -1,27 +1,33 @@
-defaults:  
-  - _self_  
+defaults:
+  - _self_
 
-hydra:  
-  run:  
-    dir: artifacts/tests/${now:%Y-%m-%d}/${now:%H-%M-%S}  
-  output_subdir: null  
+hydra:
+  run:
+    dir: artifacts/tests/${now:%Y-%m-%d}/${now:%H-%M-%S}
+  output_subdir: null
 
-test:  
-  scopes:  
-    - unit  
-    - integration  
-    - e2e  
-  
-  paths:  
-    source: "src/hint"  
-    tests: "src/test"  
-    resources: "resources"  
-    template: "test_coverage_template.html"  
-  
-  coverage:  
-    data_file: ".coverage"  
-    json_report: "coverage.json"  
-    
-  thresholds:  
-    complexity_risk: 10  
-    coverage_risk: 50
+tests:
+  run_unit: true
+  run_integration: true
+  run_e2e: true
+
+paths:
+  test_root: "src/test"
+  src_root: "src/hint"
+  resources_root: "resources"
+  report_template: "test_coverage_template.html"
+
+logging:
+  level: "INFO"
+
+coverage:
+  targets:
+    - "src/hint"
+  omit: []
+  branch: true
+  config: "pyproject.toml"
+  reports:
+    term: true
+    xml: "coverage.xml"
+    html: "coverage_html"
+    json: "coverage.json"

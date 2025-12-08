@@ -24,7 +24,6 @@ class IntegrationFixtures:
         """
         logger.debug(f"Creating dummy HDF5 file at {path}")
         with h5py.File(path, 'w') as f:
-            # Random data generation
             x_num = np.random.randn(num_samples, seq_len, n_features).astype(np.float32)
             x_cat = np.random.randint(0, 5, (num_samples, seq_len, 2)).astype(np.int64)
             y = np.random.randint(0, 4, (num_samples,)).astype(np.int64)
@@ -44,17 +43,16 @@ class IntegrationFixtures:
             raw_dir: Directory to place raw files.
         """
         logger.debug(f"Populating raw directory at {raw_dir}")
-        
-        # 1. DIAGNOSES_ICD
         pl.DataFrame({
             "SUBJECT_ID": [101, 102],
             "HADM_ID": [1001, 1002],
             "ICD9_CODE": ["4280", "25000"]
         }).write_csv(raw_dir / "DIAGNOSES_ICD.csv")
-        
-        # 2. Patients (Created as pre-processed parquet for this stage usually, or raw)
-        # Assuming the pipeline expects some inputs in processed/ for assembler
-        pass 
+        pl.DataFrame({
+            "SUBJECT_ID": [101, 102],
+            "GENDER": ["M", "F"],
+            "DOB": ["2100-01-01", "2100-01-02"]
+        }).write_csv(raw_dir / "PATIENTS.csv")
 
     @staticmethod
     def get_integrated_etl_config(tmp_path: Path) -> ETLConfig:

@@ -8,13 +8,17 @@ from ...conftest import UnitFixtures
 
 def test_static_extractor_filtering() -> None:
     """
-    Validates that StaticExtractor filters patients based on age and LOS.
-    
-    Test Case ID: ETL-STA-01
-    Description:
-        Creates ADMISSIONS and PATIENTS and ICUSTAYS raw files.
-        Executes StaticExtractor.
-        Verifies that only valid patients are saved to patients.parquet.
+    Verify StaticExtractor filters patient records by configured thresholds.
+
+    This test validates that StaticExtractor ingests raw patient tables, applies minimum age constraints, and writes filtered records to the processed directory.
+    - Test Case ID: ETL-STA-01
+    - Scenario: Run static extraction on synthetic raw CSV inputs with a minimum age requirement.
+
+    Args:
+        None
+
+    Returns:
+        None
     """
     logger.info("Starting test: test_static_extractor_filtering")
 
@@ -29,7 +33,6 @@ def test_static_extractor_filtering() -> None:
             "min_age": 18
         })
 
-        # Mock Raw Files
         pl.DataFrame({"SUBJECT_ID": [1], "DOB": ["2050-01-01"], "GENDER": ["M"]}).write_csv(tmp_path / "raw" / "PATIENTS.csv")
         pl.DataFrame({"SUBJECT_ID": [1], "HADM_ID": [10], "ADMITTIME": ["2100-01-01"], "DISCHTIME": ["2100-01-05"], "ETHNICITY": ["W"], "ADMISSION_TYPE": ["E"], "INSURANCE": ["P"]}).write_csv(tmp_path / "raw" / "ADMISSIONS.csv")
         pl.DataFrame({"SUBJECT_ID": [1], "HADM_ID": [10], "ICUSTAY_ID": [100], "INTIME": ["2100-01-01 10:00:00"], "OUTTIME": ["2100-01-03 10:00:00"]}).write_csv(tmp_path / "raw" / "ICUSTAYS.csv")

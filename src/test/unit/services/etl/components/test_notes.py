@@ -8,13 +8,17 @@ from ...conftest import UnitFixtures
 
 def test_note_tokenizer_execution() -> None:
     """
-    Validates that NoteTokenizer processes text notes and generates token IDs.
-    
-    Test Case ID: ETL-NOT-01
-    Description:
-        Sets up raw NOTEEVENTS file.
-        Executes NoteTokenizer.
-        Verifies that text is cleaned and tokenized into integer lists.
+    Verify NoteTokenizer converts raw notes into tokenized outputs.
+
+    This test validates that `NoteTokenizer` reads raw note text, tokenizes the content, and writes processed Parquet output containing token ID lists.
+    - Test Case ID: ETL-NOT-01
+    - Scenario: Tokenize a single synthetic NOTEEVENTS record.
+
+    Args:
+        None
+
+    Returns:
+        None
     """
     logger.info("Starting test: test_note_tokenizer_execution")
 
@@ -40,7 +44,6 @@ def test_note_tokenizer_execution() -> None:
         assert out_file.exists()
         
         df = pl.read_parquet(out_file)
-        # Check if INPUT_IDS column exists and is list type
         assert "INPUT_IDS" in df.columns
         assert isinstance(df["INPUT_IDS"][0], list)
 

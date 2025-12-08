@@ -8,14 +8,17 @@ from ....conftest import TestFixtures
 
 def test_ventilation_tagger_marks_vent_correctly() -> None:
     """
-    Validates that VentilationTagger correctly derives VENT flags based on item IDs.
-    
-    Test Case ID: ETL-01
-    Description:
-        Sets up temporary resources and processed directories.
-        Creates dummy 'itemid_to_variable_map.csv' and 'vitals_labs.parquet'.
-        Creates an initial 'interventions.parquet' with mixed timestamps.
-        Executes the tagger and verifies that 'VENT' column is updated correctly (1 for match, 0 otherwise).
+    Verify VentilationTagger derives VENT flags from item IDs.
+
+    This test validates that VentilationTagger reads mapping and vitals files to label intervention rows with the correct ventilation indicator for matching timestamps.
+    - Test Case ID: ETL-01
+    - Scenario: Generate ventilation labels for synthetic intervention records using mocked resources.
+
+    Args:
+        None
+
+    Returns:
+        None
     """
     logger.info("Starting test: test_ventilation_tagger_marks_vent_correctly")
 

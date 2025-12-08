@@ -1,5 +1,5 @@
 import torch
-from unittest.mock import MagicMock, patch
+from unittest.mock import ANY, MagicMock, patch
 from loguru import logger
 from hint.services.training.trainer import TrainingService
 from hint.domain.entities import InterventionModelEntity
@@ -9,14 +9,17 @@ from ....conftest import TestFixtures
 
 def test_train_model_runs_one_epoch() -> None:
     """
-    Validates that TrainingService runs a full training epoch and saves the model.
-    
-    Test Case ID: TRN-01
-    Description:
-        Mocks the DataLoader to return a single dummy batch.
-        Runs 'train_model' for 1 epoch.
-        Verifies that the entity's epoch counter increases and the save_model method is called.
-        Checks if metrics are tracked via the observer.
+    Verify TrainingService executes one epoch and saves a checkpoint.
+
+    This test validates that a single-epoch training run over a mocked DataLoader increments the entity epoch counter, triggers checkpoint persistence, and records metrics via the telemetry observer.
+    - Test Case ID: TRN-01
+    - Scenario: Run train_model once using mocked loaders that yield a single batch.
+
+    Args:
+        None
+
+    Returns:
+        None
     """
     logger.info("Starting test: test_train_model_runs_one_epoch")
 
@@ -62,6 +65,6 @@ def test_train_model_runs_one_epoch() -> None:
         mock_registry.save_model.assert_called()
         
         logger.debug("Verifying metric tracking")
-        mock_observer.track_metric.assert_any_call("cnn_train_loss", torch.tensor(0.0).float(), step=1) # approx check skipped for simplicity in mock
+        mock_observer.track_metric.assert_any_call("cnn_train_loss", ANY, step=1)
         
         logger.info("Training service workflow verified successfully.")

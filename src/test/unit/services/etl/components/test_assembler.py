@@ -8,13 +8,17 @@ from ...conftest import UnitFixtures
 
 def test_feature_assembler_execution() -> None:
     """
-    Validates the execution logic of FeatureAssembler.
-    
-    Test Case ID: ETL-ASM-01
-    Description:
-        Sets up required input files (patients, vitals, interventions).
-        Executes the assembler.
-        Verifies that the output dataset parquet file is created and has expected columns.
+    Verify FeatureAssembler writes combined feature dataset.
+
+    This test validates that FeatureAssembler consumes synthetic patient, vitals, interventions, and mapping files to produce a processed Parquet dataset with transformed feature columns.
+    - Test Case ID: ETL-ASM-01
+    - Scenario: Assemble features from minimal source files in a temporary workspace.
+
+    Args:
+        None
+
+    Returns:
+        None
     """
     logger.info("Starting test: test_feature_assembler_execution")
 
@@ -30,7 +34,6 @@ def test_feature_assembler_execution() -> None:
             "resources_dir": str(tmp_path / "resources")
         })
 
-        # Mock Inputs
         pl.DataFrame({
             "SUBJECT_ID": [1], "HADM_ID": [10], "ICUSTAY_ID": [100], 
             "INTIME": ["2100-01-01"], "AGE": [30], "STAY_HOURS": [48],
@@ -51,7 +54,6 @@ def test_feature_assembler_execution() -> None:
             "MIMIC LABEL": ["HR"], "LEVEL2": ["heart rate"]
         }).write_csv(tmp_path / "resources" / "itemid_to_variable_map.csv")
         
-        # Write dummy raw ICD file
         pl.DataFrame({"SUBJECT_ID": [1], "HADM_ID": [10], "ICD9_CODE": ["428"]}).write_csv(tmp_path / "raw" / "DIAGNOSES_ICD.csv")
 
         assembler = FeatureAssembler(config, MagicMock(), MagicMock())

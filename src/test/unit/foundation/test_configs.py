@@ -5,10 +5,17 @@ from hint.foundation.dtos import AppContext
 
 def test_load_app_context_valid_yaml() -> None:
     """
-    Validates that AppContext is correctly constructed from a Hydra DictConfig.
-    
-    Test Case ID: FND-01
-    Description: Creates a sample OmegaConf dictionary and verifies mapping to AppContext.
+    Verify AppContext creation from a populated Hydra configuration.
+
+    This test validates `load_app_context` when it receives a complete OmegaConf mapping for ETL, ICD, and CNN settings, ensuring the resulting `AppContext` carries the expected values.
+    - Test Case ID: FND-01
+    - Scenario: Build AppContext from complete Hydra configuration.
+
+    Args:
+        None
+
+    Returns:
+        None
     """
     logger.info("Starting test: test_load_app_context_valid_yaml")
     

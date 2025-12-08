@@ -6,10 +6,17 @@ from ..conftest import UnitFixtures
 
 def test_etl_config_immutability() -> None:
     """
-    Validates that ETLConfig enforces immutability.
-    
-    Test Case ID: VO-01
-    Description: Attempts to modify a frozen field in ETLConfig and verifies that a ValidationError is raised.
+    Verify ETLConfig rejects mutation of frozen fields.
+
+    This test validates that attempting to reassign immutable attributes on `ETLConfig` raises `ValidationError`, preserving configuration integrity.
+    - Test Case ID: VO-01
+    - Scenario: Mutate a frozen ETL configuration attribute after creation.
+
+    Args:
+        None
+
+    Returns:
+        None
     """
     logger.info("Starting test: test_etl_config_immutability")
     
@@ -23,10 +30,17 @@ def test_etl_config_immutability() -> None:
 
 def test_cnn_config_defaults() -> None:
     """
-    Validates that CNNConfig initializes with correct default values.
-    
-    Test Case ID: VO-02
-    Description: Checks default values for batch_size, learning rate, and excluded columns.
+    Confirm CNNConfig initializes with expected default hyperparameters.
+
+    This test validates default values such as batch size, learning rate, and excluded columns to guarantee predictable initialization.
+    - Test Case ID: VO-02
+    - Scenario: Instantiate CNNConfig with minimal paths and inspect defaults.
+
+    Args:
+        None
+
+    Returns:
+        None
     """
     logger.info("Starting test: test_cnn_config_defaults")
     
@@ -45,10 +59,17 @@ def test_cnn_config_defaults() -> None:
 
 def test_etl_config_exact_level2_list() -> None:
     """
-    Validates that ETLConfig populates the exact_level2_104 list by default.
-    
-    Test Case ID: VO-03
-    Description: Ensures that the list of vital signs is not empty and contains expected values.
+    Ensure ETLConfig populates the default exact_level2_104 list.
+
+    This test validates that `ETLConfig` seeds the vital sign list with expected entries such as `heart rate`, indicating required schema coverage.
+    - Test Case ID: VO-03
+    - Scenario: Construct ETLConfig with minimal paths and inspect default vital sign list.
+
+    Args:
+        None
+
+    Returns:
+        None
     """
     logger.info("Starting test: test_etl_config_exact_level2_list")
     

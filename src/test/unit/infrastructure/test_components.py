@@ -4,13 +4,17 @@ from hint.infrastructure.components import FocalLoss, TemperatureScaler
 
 def test_focal_loss_reduction() -> None:
     """
-    Validates that FocalLoss correctly reduces to a scalar value.
-    
-    Test Case ID: INF-COMP-01
-    Description:
-        Initializes FocalLoss with specific gamma and class count.
-        Computes loss for random logits and targets.
-        Verifies that the result is a 0-dimensional scalar and is greater than zero.
+    Verify FocalLoss returns a positive scalar when applied to logits.
+
+    This test validates that `FocalLoss` with configured gamma and class count produces a zero-dimensional tensor and yields a positive value for random logits and targets.
+    - Test Case ID: INF-COMP-01
+    - Scenario: Compute focal loss on synthetic logits to confirm reduction behavior.
+
+    Args:
+        None
+
+    Returns:
+        None
     """
     logger.info("Starting test: test_focal_loss_reduction")
     
@@ -31,13 +35,17 @@ def test_focal_loss_reduction() -> None:
 
 def test_temperature_scaler_scaling() -> None:
     """
-    Validates that TemperatureScaler correctly scales logits by the temperature parameter.
-    
-    Test Case ID: INF-COMP-02
-    Description:
-        Sets the temperature parameter manually.
-        Passes a known logit tensor.
-        Verifies that the output matches the expected scaled values.
+    Confirm TemperatureScaler scales logits using the configured temperature.
+
+    This test validates that manually setting the temperature produces logits divided by that temperature, ensuring calibration behaves predictably.
+    - Test Case ID: INF-COMP-02
+    - Scenario: Apply temperature scaling to a known tensor and compare with expected output.
+
+    Args:
+        None
+
+    Returns:
+        None
     """
     logger.info("Starting test: test_temperature_scaler_scaling")
     

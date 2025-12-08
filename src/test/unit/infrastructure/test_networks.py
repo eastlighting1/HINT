@@ -4,13 +4,17 @@ from hint.infrastructure.networks import GFINet_CNN
 
 def test_gfinet_cnn_forward_shape() -> None:
     """
-    Validates the output shape of the GFINet_CNN model during a forward pass.
-    
-    Test Case ID: INF-NET-01
-    Description:
-        Constructs a GFINet_CNN model with specific channel configurations and mock vocabulary sizes.
-        Passes random tensors representing numeric and categorical features.
-        Verifies that the output tensor has the expected shape (Batch Size, Num Classes).
+    Verify GFINet_CNN returns logits with the expected batch and class dimensions.
+
+    This test validates that GFINet_CNN constructed with minimal numeric and categorical features produces an output shaped `(batch, num_classes)` after a forward pass.
+    - Test Case ID: INF-NET-01
+    - Scenario: Execute a forward pass using synthetic numeric and categorical tensors.
+
+    Args:
+        None
+
+    Returns:
+        None
     """
     logger.info("Starting test: test_gfinet_cnn_forward_shape")
 
