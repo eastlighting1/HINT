@@ -1,0 +1,27 @@
+defaults:  
+  - _self_  
+
+hydra:  
+  run:  
+    dir: artifacts/tests/${now:%Y-%m-%d}/${now:%H-%M-%S}  
+  output_subdir: null  
+
+test:  
+  scopes:  
+    - unit  
+    - integration  
+    - e2e  
+  
+  paths:  
+    source: "src/hint"  
+    tests: "src/test"  
+    resources: "resources"  
+    template: "test_coverage_template.html"  
+  
+  coverage:  
+    data_file: ".coverage"  
+    json_report: "coverage.json"  
+    
+  thresholds:  
+    complexity_risk: 10  
+    coverage_risk: 50
