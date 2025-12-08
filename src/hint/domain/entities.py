@@ -25,14 +25,12 @@ class ICDModelEntity(TrainableEntity):
         super().__init__("icd_ensemble")
         self.head1 = head1
         self.head2 = head2
-        self.stacker = stacker # XGBoost wrapper
+        self.stacker = stacker
         
     def state_dict(self) -> Dict[str, Any]:
         return {
             "head1": self.head1.state_dict(),
             "head2": self.head2.state_dict(),
-            # XGBoost model handling is done separately via Registry usually,
-            # or wrapped here if serializable.
             "best_metric": self.best_metric,
             "epoch": self.epoch
         }
@@ -54,18 +52,17 @@ class InterventionModelEntity(TrainableEntity):
         self.network = network
         self.ema = ExponentialMovingAverage(network.parameters(), decay=ema_decay)
         self.temperature: float = 1.0
-        self.thresholds: Optional[Any] = None # numpy array
+        self.thresholds: Optional[Any] = None
 
     def update_ema(self) -> None:
         self.ema.update(self.network.parameters())
 
     def state_dict(self) -> Dict[str, Any]:
         with self.ema.average_parameters():
-            # Save EMA weights as the primary state
             net_state = self.network.state_dict()
             
         return {
-            "network": net_state, # EMA averaged weights
+            "network": net_state,
             "temperature": self.temperature,
             "thresholds": self.thresholds,
             "best_metric": self.best_metric,
@@ -78,10 +75,8 @@ class InterventionModelEntity(TrainableEntity):
         self.thresholds = state.get("thresholds", None)
         self.best_metric = state.get("best_metric", 0.0)
         self.epoch = state.get("epoch", 0)
-        # Reset EMA to current weights upon load
         self.ema = ExponentialMovingAverage(self.network.parameters(), decay=0.999) 
 
     def to(self, device: str) -> None:
         self.network.to(device)
-        # [수정] EMA 객체의 섀도우 파라미터도 함께 해당 디바이스(GPU)로 이동해야 합니다.
         self.ema.to(device)

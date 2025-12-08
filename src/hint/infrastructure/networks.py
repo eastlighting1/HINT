@@ -3,10 +3,6 @@ import torch.nn as nn
 from typing import List, Sequence, Optional, Dict
 from transformers import AutoModel
 
-# -------------------------------------------------------------------
-# CNN Components (Ported from CNN.py)
-# -------------------------------------------------------------------
-
 class DilatedResidualBlock(nn.Module):
     def __init__(self, in_c: int, out_c: int, kernel: int, stride: int, dilation: int, dropout: float) -> None:
         super().__init__()
@@ -145,10 +141,6 @@ class GFINet_CNN(nn.Module):
         features = torch.cat([gated_num, p_cat], dim=1)
         return self.head(features)
 
-# -------------------------------------------------------------------
-# ICD Components (Ported from ICD.py)
-# -------------------------------------------------------------------
-
 class MedBERTClassifier(nn.Module):
     """
     BERT-based classifier head for ICD coding.
@@ -167,8 +159,7 @@ class MedBERTClassifier(nn.Module):
             pooled = out.pooler_output
         else:
             pooled = out.last_hidden_state.mean(dim=1)
-        
-        # Concatenate BERT embedding with numerical features
+
         x = torch.cat((pooled, numerical), dim=1)
         return self.fc(self.dp(x))
 

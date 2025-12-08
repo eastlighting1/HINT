@@ -1,34 +1,38 @@
-import torch
-import numpy as np
-import shap
-import lime
-import lime.lime_tabular
 import json
-import polars as pl
-from torch.utils.data import DataLoader, WeightedRandomSampler
-import polars as pl
-from torch.utils.data import Dataset, DataLoader, WeightedRandomSampler
-from sklearn.metrics import accuracy_score, f1_score
-from sklearn.preprocessing import LabelEncoder
-from sklearn.model_selection import train_test_split
-from sklearn.preprocessing import LabelEncoder
-from sklearn.model_selection import train_test_split
 from functools import partial
 from pathlib import Path
-from typing import Optional, List, Any, Dict, Tuple, Union
-from typing import Optional, List, Any, Dict, Tuple
+from typing import Optional, List, Any, Dict
 
-from ...foundation.interfaces import TelemetryObserver, Registry, StreamingSource
-from ...foundation.exceptions import ModelError
+import lime
+import lime.lime_tabular
+import numpy as np
+import polars as pl
+import shap
+import torch
+from sklearn.metrics import accuracy_score
+from sklearn.model_selection import train_test_split
+from sklearn.preprocessing import LabelEncoder
+from torch.utils.data import DataLoader, WeightedRandomSampler
+
 from ...domain.entities import ICDModelEntity
 from ...domain.vo import ICDConfig
-from ...infrastructure.components import CBFocalLoss
-from ...infrastructure.networks import MedBERTClassifier
-from ...infrastructure.components import XGBoostStacker
-# [Import Fix] Import data classes from infrastructure
+from ...foundation.interfaces import TelemetryObserver, Registry, StreamingSource
+from ...infrastructure.components import CBFocalLoss, XGBoostStacker
 from ...infrastructure.datasource import ICDDataset, custom_collate, _to_python_list
+from ...infrastructure.networks import MedBERTClassifier
 
 class ICDService:
+    """
+    Train and explain the ICD coding models for structured and text inputs.
+
+    Args:
+        config: ICD configuration loaded from Hydra.
+        registry: Registry used to persist artifacts.
+        observer: Telemetry observer for logging and progress.
+        train_source: Optional streaming source for training data.
+        val_source: Optional streaming source for validation data.
+        test_source: Optional streaming source for test data.
+    """
     def __init__(
         self, 
         config: ICDConfig,
@@ -53,34 +57,30 @@ class ICDService:
         self.le = None
 
     def _prepare_data(self):
-        self.observer.log("INFO", "ICD Service: Loading data...")
-        
-        with self.observer.console.status("[bold green]Loading Parquet file...") as status:
-            df_pl = self.train_source.load()
-            df = df_pl.to_pandas()
-        
-        self.observer.log("INFO", f"ICD Service: Loaded {len(df)} rows. Starting preprocessing...")
+        self.observer.log("INFO", "ICD Service: Loading data from training source.")
 
-        # Parsing ICD Codes
+        df_pl = self.train_source.load()
+        df = df_pl.to_pandas()
+
+        self.observer.log("INFO", f"ICD Service: Loaded {len(df)} rows. Parsing ICD codes.")
+
         total_steps = len(df)
         clean_labels = []
-        
+
         with self.observer.create_progress("Preprocessing ICD Codes", total=total_steps) as progress:
             task = progress.add_task("Parsing", total=total_steps)
             raw_codes = df["ICD9_CODES"].tolist()
             for val in raw_codes:
                 clean_labels.append(_to_python_list(val))
                 progress.advance(task)
-                
-        df["label_list"] = clean_labels
 
+        df["label_list"] = clean_labels
         df["raw_label"] = df["label_list"].apply(lambda lst: lst[0] if len(lst) > 0 else None)
         df["raw_label"] = df["raw_label"].fillna("__MISSING__")
 
-        # Label Encoder
         vc = df["raw_label"].value_counts()
         top_k = self.cfg.top_k_labels
-        
+
         if top_k and vc.shape[0] > top_k:
             keep = set(vc.head(top_k).index.tolist())
             df["raw_label_filtered"] = df["raw_label"].where(df["raw_label"].isin(keep), "__OTHER__")
@@ -90,28 +90,30 @@ class ICDService:
             le = LabelEncoder()
             df["raw_label_filtered"] = df["raw_label"]
             df["target_label"] = le.fit_transform(df["raw_label"])
-            
+
         self.le = le
         self.observer.log("INFO", f"ICD Service: Final classes={len(le.classes_)}")
 
-        # Candidates
         all_names = list(le.classes_)
         class_set = set(all_names)
         has_other = "__OTHER__" in class_set
-        
+
         label_lists = df["label_list"].tolist()
         filtered_labels = df["raw_label_filtered"].tolist()
         candidate_names = []
         candidate_indices = []
-        
+
         with self.observer.create_progress("Generating Candidates", total=total_steps) as progress:
             task = progress.add_task("Candidates", total=total_steps)
             for codes, backup in zip(label_lists, filtered_labels):
                 out = []
                 for c in codes:
-                    if c in class_set: out.append(c)
-                    elif has_other: out.append("__OTHER__")
-                if not out: out = [backup]
+                    if c in class_set:
+                        out.append(c)
+                    elif has_other:
+                        out.append("__OTHER__")
+                if not out:
+                    out = [backup]
                 unique_cands = list(set(out))
                 candidate_names.append(unique_cands)
                 candidate_indices.append(le.transform(unique_cands).tolist())
@@ -120,23 +122,33 @@ class ICDService:
         df["candidate_names"] = candidate_names
         df["candidate_indices"] = candidate_indices
 
-        # Feature Selection
-        drop_cols = ["SUBJECT_ID", "HADM_ID", "ICUSTAY_ID", "HOUR_IN", "ICD9_CODES", "target_label", "label_list", 
-                     "raw_label", "raw_label_filtered", "candidate_names", "candidate_indices", "VENT_CLASS"]
+        drop_cols = [
+            "SUBJECT_ID",
+            "HADM_ID",
+            "ICUSTAY_ID",
+            "HOUR_IN",
+            "ICD9_CODES",
+            "target_label",
+            "label_list",
+            "raw_label",
+            "raw_label_filtered",
+            "candidate_names",
+            "candidate_indices",
+            "VENT_CLASS",
+        ]
         feats = [c for c in df.select_dtypes("number").columns if c not in drop_cols]
         self.feats = feats
-        
+
         for f_name in feats:
             df[f_name] = df[f_name].replace([np.inf, -np.inf], np.nan).fillna(0.0).astype(np.float32)
-        
+
         df["target_label"] = df["target_label"].astype(np.int64)
 
-        # Splitting
         try:
             tr_val, te = train_test_split(df, test_size=self.cfg.test_split_size, random_state=42, stratify=df["target_label"])
         except ValueError:
             tr_val, te = train_test_split(df, test_size=self.cfg.test_split_size, random_state=42, stratify=None)
-            
+
         try:
             tr, v = train_test_split(tr_val, test_size=self.cfg.val_split_size, random_state=42, stratify=tr_val["target_label"])
         except ValueError:
@@ -146,43 +158,25 @@ class ICDService:
         return tr, v, te, feats, "target_label", le
 
     def train(self) -> None:
-        # 1. Prepare Data
         tr_df, val_df, test_df, feats, label_col, le = self._prepare_data()
-        
-        # Lazy Entity Initialization based on ACTUAL data dimensions
+
         num_feats = len(feats)
         num_classes = len(le.classes_)
         self.observer.log("INFO", f"ICD Service: Initializing model with num_features={num_feats}, num_classes={num_classes}")
-        
+
         head1 = MedBERTClassifier(self.cfg.model_name, num_num=num_feats, num_cls=num_classes)
         head2 = MedBERTClassifier(self.cfg.model_name, num_num=num_feats, num_cls=num_classes)
         stacker = XGBoostStacker(self.cfg.xgb_params)
-        
+
         self.entity = ICDModelEntity(head1, head2, stacker)
         self.entity.to(str(self.device))
         self.observer.log("INFO", f"ICD Service: Starting training on {self.device}...")
-        
-        # 1. Prepare Data
-        tr_df, val_df, test_df, feats, label_col, le = self._prepare_data()
-        
-        num_feats = len(feats)
-        num_classes = len(le.classes_)
-        self.observer.log("INFO", f"ICD Service: Initializing model with num_features={num_feats}, num_classes={num_classes}")
-        
-        head1 = MedBERTClassifier(self.cfg.model_name, num_num=num_feats, num_cls=num_classes)
-        head2 = MedBERTClassifier(self.cfg.model_name, num_num=num_feats, num_cls=num_classes)
-        stacker = XGBoostStacker(self.cfg.xgb_params)
-        
-        self.entity = ICDModelEntity(head1, head2, stacker)
-        self.entity.to(str(self.device))
 
-        # 2. Sampler Logic
         target_counts = tr_df[label_col].value_counts()
         class_weights_map = {cls: 1.0 / (count ** self.cfg.sampler_alpha) for cls, count in target_counts.items()}
         sample_weights = torch.tensor(tr_df[label_col].map(class_weights_map).values, dtype=torch.double)
         sampler = WeightedRandomSampler(weights=sample_weights, num_samples=len(sample_weights), replacement=True)
-        
-        # 3. Create Datasets & DataLoaders
+
         from transformers import AutoTokenizer
         tokenizer = AutoTokenizer.from_pretrained(self.cfg.model_name)
         collate_fn = partial(custom_collate, tokenizer=tokenizer, max_length=self.cfg.max_length)
@@ -190,28 +184,37 @@ class ICDService:
         ds_tr = ICDDataset(tr_df, feats, label_col, "label_list")
         ds_val = ICDDataset(val_df, feats, label_col, "label_list")
         ds_test = ICDDataset(test_df, feats, label_col, "label_list")
-        
+
         self.ds_val = ds_val
         self.ds_test = ds_test
 
-        dl_tr = DataLoader(ds_tr, batch_size=self.cfg.batch_size, sampler=sampler, collate_fn=collate_fn, num_workers=self.cfg.num_workers)
-        dl_val = DataLoader(ds_val, batch_size=self.cfg.batch_size, collate_fn=collate_fn, num_workers=self.cfg.num_workers)
-        
-        # Optimizers
+        dl_tr = DataLoader(
+            ds_tr,
+            batch_size=self.cfg.batch_size,
+            sampler=sampler,
+            collate_fn=collate_fn,
+            num_workers=self.cfg.num_workers,
+        )
+        dl_val = DataLoader(
+            ds_val,
+            batch_size=self.cfg.batch_size,
+            collate_fn=collate_fn,
+            num_workers=self.cfg.num_workers,
+        )
+
         opt1 = torch.optim.Adam(self.entity.head1.parameters(), lr=self.cfg.lr)
         opt2 = torch.optim.Adam(self.entity.head2.parameters(), lr=self.cfg.lr)
-        
+
         class_freq = np.array([target_counts.get(i, 1) for i in range(num_classes)])
         loss_fn = CBFocalLoss(class_freq, beta=self.cfg.cb_beta, gamma=self.cfg.focal_gamma, device=str(self.device))
 
-        # Training Loop
         for epoch in range(1, self.cfg.epochs + 1):
             self.entity.epoch = epoch
             self._train_epoch(epoch, dl_tr, opt1, opt2, loss_fn)
             val_acc = self._validate_and_stack(epoch, dl_val)
-            
+
             self.observer.track_metric("icd_val_acc", val_acc, step=epoch)
-            
+
             if val_acc > self.entity.best_metric:
                 self.entity.best_metric = val_acc
                 self.registry.save_model(self.entity.state_dict(), "icd_model", "best")
@@ -274,7 +277,6 @@ class ICDService:
         X_val_ens = np.vstack(val_logits_list)
         y_val_ens = np.concatenate(val_labels_list)
         
-        # PCA & XGBoost Stacking
         if self.entity.stacker.pca is None:
             X_pca = self.entity.stacker.fit_pca(X_val_ens, self.cfg.pca_components)
         else:
@@ -286,6 +288,9 @@ class ICDService:
         return float(accuracy_score(y_val_ens, preds))
 
     def run_xai(self) -> None:
+        """
+        Run SHAP and LIME explanations for the trained ICD ensemble.
+        """
         self.observer.log("INFO", "ICD Service: Starting XAI pipeline...")
         
         if not hasattr(self, 'ds_val') or not hasattr(self, 'ds_test'):
@@ -302,10 +307,7 @@ class ICDService:
         
         dl_val = DataLoader(self.ds_val, batch_size=self.cfg.batch_size, collate_fn=collate_fn, num_workers=self.cfg.num_workers)
         dl_te = DataLoader(self.ds_test, batch_size=self.cfg.batch_size, collate_fn=collate_fn, num_workers=self.cfg.num_workers)
-        dl_val = DataLoader(self.ds_val, batch_size=self.cfg.batch_size, collate_fn=collate_fn, num_workers=self.cfg.num_workers)
-        dl_te = DataLoader(self.ds_test, batch_size=self.cfg.batch_size, collate_fn=collate_fn, num_workers=self.cfg.num_workers)
 
-        # 1. Collect Background (SHAP)
         bg_num_list = []
         bg_sample_count = 0
         shap_bg_size = self.cfg.xai_bg_size
@@ -322,7 +324,6 @@ class ICDService:
         bg_num_tensor = torch.cat(bg_num_list, dim=0)[:shap_bg_size]
         bg_lime = bg_num_tensor.numpy()
 
-        # 2. Collect Test Samples
         try:
             sample_batch = next(iter(dl_te))
         except StopIteration:
@@ -335,10 +336,9 @@ class ICDService:
         sample_mask = sample_batch["attention_mask"][:shap_sample_size]
         x_sample_np = sample_x.numpy()
 
-        # 3. Predict Wrapper with MINI-BATCHING (Fix for OOM)
         def shap_predict_fn(x_shap: np.ndarray) -> np.ndarray:
             n_samples = x_shap.shape[0]
-            eval_bs = 512  # Safe batch size
+            eval_bs = 512
             probs_list = []
             
             if n_samples == 0: return np.array([])
@@ -348,8 +348,7 @@ class ICDService:
                 curr_bs = batch_x.shape[0]
                 
                 num_tensor = torch.tensor(batch_x, dtype=torch.float32).to(self.device)
-                
-                # For multi-modal, fix text to sample text (approx)
+
                 ids_tensor = sample_ids[0:1].to(self.device).expand(curr_bs, -1)
                 mask_tensor = sample_mask[0:1].to(self.device).expand(curr_bs, -1)
 
@@ -362,7 +361,6 @@ class ICDService:
             
             return np.concatenate(probs_list, axis=0)
 
-        # 4. Run SHAP
         self.observer.log("INFO", "ICD Service: Running KernelExplainer...")
         explainer = shap.KernelExplainer(shap_predict_fn, bg_lime)
         shap_values = explainer.shap_values(x_sample_np, nsamples=self.cfg.xai_nsamples)
@@ -370,7 +368,6 @@ class ICDService:
         np.save(self.registry.dirs["metrics"] / "icd_shap_values.npy", shap_values)
         self.observer.log("INFO", "ICD Service: SHAP completed.")
 
-        # 5. Run LIME
         self.observer.log("INFO", "ICD Service: Running LIME...")
         class_names = list(self.le.classes_) if self.le else [str(i) for i in range(len(bg_lime[0]))]
         
@@ -381,7 +378,6 @@ class ICDService:
             mode="classification"
         )
         
-        # Explain first instance
         inst_num = sample_x[0].numpy()
         lime_explanation = lime_exp.explain_instance(
             data_row=inst_num,

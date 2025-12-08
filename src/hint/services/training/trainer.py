@@ -7,7 +7,6 @@ from hint.foundation.interfaces import TelemetryObserver, Registry, StreamingSou
 from hint.domain.entities import InterventionModelEntity
 from hint.domain.vo import CNNConfig
 from hint.infrastructure.components import FocalLoss
-# [추가됨] 커스텀 collate 함수를 가져옵니다.
 from hint.infrastructure.datasource import collate_tensor_batch
 
 class TrainingService:
@@ -35,9 +34,8 @@ class TrainingService:
         self.entity.network.train()
         
         optimizer = torch.optim.AdamW(self.entity.network.parameters(), lr=self.cfg.lr, weight_decay=1e-5)
-        
-        # DataLoader wrapper
-        # [수정됨] collate_fn=collate_tensor_batch 추가
+
+        self.observer.log("INFO", f"TrainingService: Starting training for {self.cfg.epochs} epochs on {self.device}.")
         dl_tr = DataLoader(
             train_source, 
             batch_size=self.cfg.batch_size, 
@@ -46,7 +44,6 @@ class TrainingService:
             pin_memory=True,
             collate_fn=collate_tensor_batch 
         )
-        # [수정됨] collate_fn=collate_tensor_batch 추가
         dl_val = DataLoader(
             val_source, 
             batch_size=self.cfg.batch_size, 
@@ -61,14 +58,13 @@ class TrainingService:
             self.entity.epoch = epoch
             self._train_epoch(epoch, dl_tr, optimizer)
             
-            # Validation
             val_acc = self._validate(dl_val)
             self.observer.track_metric("cnn_val_acc", val_acc, step=epoch)
             
             if val_acc > self.entity.best_metric + 1e-6:
                 self.entity.best_metric = val_acc
                 no_improve = 0
-                self.entity.update_ema() # Ensure EMA is up to date
+                self.entity.update_ema()
                 self.registry.save_model(self.entity.state_dict(), "cnn_model", "best")
                 self.observer.log("INFO", f"CNN Service: Saved best model acc={val_acc:.4f} at epoch {epoch}")
             else:
@@ -76,6 +72,7 @@ class TrainingService:
                 if no_improve >= self.cfg.patience:
                     self.observer.log("WARNING", "CNN Service: Early stopping triggered.")
                     break
+        self.observer.log("INFO", f"TrainingService: Training complete with best validation accuracy {self.entity.best_metric:.4f}.")
 
     def _train_epoch(self, epoch: int, loader: DataLoader, optimizer: torch.optim.Optimizer) -> None:
         self.entity.network.train()
@@ -106,7 +103,6 @@ class TrainingService:
         correct = 0
         total = 0
         
-        # [수정됨] EMA 파라미터를 사용하여 검증
         with self.entity.ema.average_parameters():
             with torch.no_grad():
                 for batch in loader:

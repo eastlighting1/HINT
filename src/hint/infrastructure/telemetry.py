@@ -1,65 +1,76 @@
 import logging
 from pathlib import Path
-from typing import Any, Optional, Dict
+from typing import Optional, Dict
+
+from hydra.core.hydra_config import HydraConfig
+from loguru import logger as loguru_logger
 from rich.console import Console
 from rich.logging import RichHandler
 from rich.progress import Progress, SpinnerColumn, TextColumn, BarColumn, TimeRemainingColumn
 
 from ..foundation.interfaces import TelemetryObserver
 
+
 class RichTelemetryObserver(TelemetryObserver):
     """
-    Telemetry observer using Rich for console output and standard logging for files.
-    Fixed: Prevent duplicate logs by disabling propagation.
+    Telemetry observer that prints structured logs to the terminal with Rich
+    and mirrors the same messages to the Hydra job log via loguru.
     """
-    def __init__(self, log_dir: Optional[Path] = None):
-        # 1. 단일 Console 객체 생성
+
+    def __init__(self) -> None:
         self.console = Console()
         self.metrics: Dict[str, list] = {}
-        
-        # Setup Logger
-        self.logger = logging.getLogger("hint")
-        self.logger.setLevel(logging.INFO)
-        
-        # [Critical Fix] 중복 출력 방지: 상위 로거(Hydra/Root)로 전파 금지
-        self.logger.propagate = False
-        
-        # 기존 핸들러 제거 (중복 방지)
-        self.logger.handlers = []
-        
-        # 2. Console Handler (Rich) - 터미널용 깔끔한 출력
-        # markup=True: 로그 메시지의 색상 코드 해석
-        # enable_link_path=False: 경로 링크 비활성화 (지저분함 방지)
-        ch = RichHandler(
-            console=self.console, 
-            show_time=True, 
-            show_path=False, 
+        self.console_logger = self._build_console_logger()
+        self.file_logger = self._build_file_logger()
+
+    def _build_console_logger(self) -> logging.Logger:
+        logger = logging.getLogger("hint.console")
+        logger.handlers.clear()
+        logger.setLevel(logging.INFO)
+        handler = RichHandler(
+            console=self.console,
+            show_time=True,
+            show_path=False,
             markup=True,
-            enable_link_path=False
+            enable_link_path=False,
         )
-        self.logger.addHandler(ch)
-        
-        # 3. File Handler - 파일용 상세 출력 (타임스탬프 포함)
-        if log_dir:
-            log_dir.mkdir(parents=True, exist_ok=True)
-            fh = logging.FileHandler(log_dir / "hint.log", encoding='utf-8')
-            # 파일에는 날짜/시간/레벨 등 상세 정보 기록
-            formatter = logging.Formatter('[%(asctime)s][%(name)s][%(levelname)s] - %(message)s')
-            fh.setFormatter(formatter)
-            self.logger.addHandler(fh)
+        logger.addHandler(handler)
+        logger.propagate = False
+        return logger
+
+    def _resolve_hydra_log_file(self) -> Optional[Path]:
+        try:
+            hydra_cfg = HydraConfig.get()
+            output_dir = Path(hydra_cfg.runtime.output_dir)
+            preferred = output_dir / "main.log"
+            if preferred.exists():
+                return preferred
+            app_log = output_dir / f"{hydra_cfg.job.name}.log"
+            if app_log.exists():
+                return app_log
+            existing = sorted(output_dir.glob("*.log"))
+            if existing:
+                return existing[0]
+        except Exception:
+            return None
+        return None
+
+    def _build_file_logger(self):
+        loguru_logger.remove()
+        log_path = self._resolve_hydra_log_file()
+        if log_path is not None:
+            loguru_logger.add(
+                log_path,
+                level="INFO",
+                enqueue=True,
+                format="[{time:YYYY-MM-DD HH:mm:ss}][{level}][{name}] {message}",
+            )
+        return loguru_logger.bind(channel="hint")
 
     def log(self, level: str, message: str) -> None:
-        lvl = level.upper()
-        if lvl == "INFO":
-            self.logger.info(message)
-        elif lvl == "WARNING":
-            self.logger.warning(message)
-        elif lvl == "ERROR":
-            self.logger.error(message)
-        elif lvl == "DEBUG":
-            self.logger.debug(message)
-        else:
-            self.logger.info(f"[{lvl}] {message}")
+        normalized = level.upper()
+        self.console_logger.log(getattr(logging, normalized, logging.INFO), message)
+        self.file_logger.log(normalized, message)
 
     def track_metric(self, name: str, value: float, step: int) -> None:
         if name not in self.metrics:
@@ -68,8 +79,14 @@ class RichTelemetryObserver(TelemetryObserver):
 
     def create_progress(self, desc: str, total: int) -> Progress:
         """
-        Returns a configured Rich Progress object.
-        transient=True: 완료 시 사라짐 (로그 가독성 확보)
+        Create a Rich progress display for multi-step tasks.
+
+        Args:
+            desc: Description to show in the progress header.
+            total: Number of steps in the task.
+
+        Returns:
+            Configured Rich Progress instance.
         """
         return Progress(
             SpinnerColumn(),
@@ -78,5 +95,5 @@ class RichTelemetryObserver(TelemetryObserver):
             TextColumn("[progress.percentage]{task.percentage:>3.0f}%"),
             TimeRemainingColumn(),
             console=self.console,
-            transient=True
+            transient=True,
         )

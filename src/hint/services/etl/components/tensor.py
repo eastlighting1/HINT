@@ -20,9 +20,6 @@ class TensorConverter(PipelineComponent):
     def execute(self) -> None:
         self.observer.log("INFO", "TensorConverter: Starting preprocessing pipeline...")
         
-        # [Path Fix] Use explicit path from config or default to processed folder
-        # data_path in CNNConfig is usually "data/processed/dataset_123_inferred.parquet" (or answer)
-        # We enforce reading from the result of previous step.
         input_path = Path("data/processed/dataset_123_answer.parquet")
         
         if not input_path.exists():

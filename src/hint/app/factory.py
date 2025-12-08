@@ -16,7 +16,6 @@ from ..services.icd.service import ICDService
 from ..services.training.trainer import TrainingService
 from ..services.training.evaluator import EvaluationService
 
-# ETL Components
 from ..services.etl.components.static import StaticExtractor
 from ..services.etl.components.timeseries import TimeSeriesAggregator
 from ..services.etl.components.outcomes import OutcomesBuilder
@@ -34,7 +33,7 @@ class AppFactory:
     def __init__(self, hydra_cfg: DictConfig):
         self.ctx = load_app_context(hydra_cfg)
         self.registry = FileSystemRegistry(hydra_cfg.get("logging", {}).get("artifacts_dir", "artifacts"))
-        self.observer = RichTelemetryObserver(Path(hydra_cfg.get("logging", {}).get("core_logs_dir", "logs")))
+        self.observer = RichTelemetryObserver()
 
     def create_etl_service(self) -> ETLService:
         components = [
@@ -50,48 +49,33 @@ class AppFactory:
         return ETLService(self.ctx.etl, self.ctx.cnn, components, self.observer)
 
     def create_icd_service(self) -> ICDService:
-        # Load data source
-        # Use configured absolute/relative path instead of registry default
         train_path = Path(self.ctx.icd.data_path)
         source = ParquetSource(train_path)
-        
-        # [FIXED] Removed 'entity' argument completely.
-        # The service will initialize the entity internally after inspecting data dimensions.
-        entity = None 
-        
+
         return ICDService(
             self.ctx.icd, self.registry, self.observer, 
             train_source=source, val_source=source, test_source=source
         )
 
     def create_cnn_services(self) -> tuple[TrainingService, EvaluationService]:
-        # Sources
-        # Use configured cache dir (data/cache)
         data_dir = Path(self.ctx.cnn.data_cache_dir)
         
         tr_src = HDF5StreamingSource(data_dir / "train.h5", self.ctx.cnn.seq_len)
         val_src = HDF5StreamingSource(data_dir / "val.h5", self.ctx.cnn.seq_len)
         te_src = HDF5StreamingSource(data_dir / "test.h5", self.ctx.cnn.seq_len)
         
-        # Feature info for model build
-        # We need to know input dimensions to initialize GFINet correctly
         feature_info_path = data_dir / "feature_info.json"
         if not feature_info_path.exists():
-             # Fallback if not running full pipeline or file missing
              vocab = {}
-             n_num = 123 * 3 # Estimate
+             n_num = 123 * 3
         else:
             with open(feature_info_path, 'r') as f:
                 feat_info = json.load(f)
             vocab = feat_info.get("vocab_info", {})
             n_num = feat_info.get("n_feats_numeric", 0)
         
-        # ---------------------------------------------------------------------
-        # [NEW] 근본적인 해결책 적용: 실제 데이터 범위를 확인하여 Config 갱신
-        # ---------------------------------------------------------------------
         try:
             self.observer.log("INFO", "Factory: Verifying vocabulary sizes against training data...")
-            # HDF5StreamingSource에 새로 추가한 메서드 호출
             if hasattr(tr_src, "get_real_vocab_sizes"):
                 real_sizes = tr_src.get_real_vocab_sizes()
                 
@@ -101,7 +85,6 @@ class AppFactory:
                         if i < len(real_sizes):
                             original_size = vocab[key]
                             real_size = real_sizes[i]
-                            # 데이터에 있는 값이 Config보다 크면 업데이트 (안전 마진 확보)
                             if real_size > original_size:
                                 self.observer.log("WARNING", f"Adjusting vocab size for '{key}': {original_size} -> {real_size}")
                                 vocab[key] = real_size
@@ -109,18 +92,14 @@ class AppFactory:
                 self.observer.log("WARNING", "Factory: 'get_real_vocab_sizes' method missing in Source.")
         except Exception as e:
             self.observer.log("WARNING", f"Factory: Could not verify vocab sizes: {e}")
-        # ---------------------------------------------------------------------
 
-        # Entity
-        # Dynamically set channel sizes to avoid shape mismatch errors.
-        # Assign all numeric features to the first group (g1) for robust initialization
         net = GFINet_CNN(
             in_chs=[n_num, 0, 0], 
             n_cls=4, 
             g1=list(range(n_num)), 
             g2=[], 
-            rest=[], 
-            cat_vocab_sizes=vocab, # 업데이트된 vocab이 들어갑니다.
+            rest=[],
+            cat_vocab_sizes=vocab,
             embed_dim=self.ctx.cnn.embed_dim
         )
         entity = InterventionModelEntity(net, self.ctx.cnn.ema_decay)
@@ -130,7 +109,6 @@ class AppFactory:
         trainer = TrainingService(self.ctx.cnn, self.registry, self.observer, entity, device)
         evaluator = EvaluationService(self.ctx.cnn, self.registry, self.observer, entity, device)
         
-        # Patch sources into services
         trainer.tr_src = tr_src
         trainer.val_src = val_src
         evaluator.te_src = te_src

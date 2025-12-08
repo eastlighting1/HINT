@@ -86,7 +86,6 @@ class TimeSeriesAggregator(PipelineComponent):
             .collect()
         )
         
-        # Explicit path saving
         vitals_labs.write_parquet(proc_dir / "vitals_labs.parquet")
         self.observer.log("INFO", "TimeSeriesAggregator: Saved vitals_labs.parquet")
 

@@ -18,8 +18,8 @@ class TensorBatch:
     x_num: torch.Tensor
     x_cat: Optional[torch.Tensor]
     y: torch.Tensor
-    ids: Optional[torch.Tensor] = None # For input_ids (BERT) or StayIDs
-    mask: Optional[torch.Tensor] = None # For attention_mask
+    ids: Optional[torch.Tensor] = None
+    mask: Optional[torch.Tensor] = None
     
     def to(self, device: str) -> 'TensorBatch':
         return TensorBatch(

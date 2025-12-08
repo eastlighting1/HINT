@@ -12,10 +12,6 @@ from ..foundation.interfaces import StreamingSource
 from ..foundation.dtos import TensorBatch
 from ..foundation.exceptions import DataError
 
-# -----------------------------------------------------------------------------
-# Helper Functions (Shared Data Utilities)
-# -----------------------------------------------------------------------------
-
 def _to_python_list(val: Any) -> List[str]:
     """
     Helper to ensure value is a python list of strings.
@@ -95,10 +91,6 @@ def collate_tensor_batch(batch: List[TensorBatch]) -> TensorBatch:
         mask=mask
     )
 
-# -----------------------------------------------------------------------------
-# Dataset Wrappers
-# -----------------------------------------------------------------------------
-
 class ICDDataset(Dataset):
     """
     Dataset wrapper for combined numerical features and ICD code lists.
@@ -129,10 +121,6 @@ class ICDDataset(Dataset):
             "cand": self.cand[i],
         }
 
-# -----------------------------------------------------------------------------
-# Streaming Sources (Infrastructure Layer)
-# -----------------------------------------------------------------------------
-
 class HDF5StreamingSource(StreamingSource, Dataset):
     """
     Streaming source for pre-windowed ICU time-series stored in HDF5 files.
@@ -157,10 +145,10 @@ class HDF5StreamingSource(StreamingSource, Dataset):
 
     def get_real_vocab_sizes(self) -> List[int]:
         """
-        [근본 해결책]
-        데이터를 스캔하여 각 카테고리 피처별 실제 필요한 vocab size(max index + 1)를 반환합니다.
-        Config에 설정된 vocab size가 이 값보다 작으면 에러가 발생하므로, 
-        모델 초기화 전에 이 메서드로 값을 확인하여 Config를 갱신해야 합니다.
+        Scan the categorical tensor to derive the maximum index per feature.
+
+        Returns:
+            Vocabulary sizes derived from the stored categorical tensor.
         """
         should_close = False
         if self.h5_file is None:
@@ -168,14 +156,7 @@ class HDF5StreamingSource(StreamingSource, Dataset):
             should_close = True
         
         try:
-            # X_cat shape is typically (N, Num_Features, Time)
-            # We need max across N(dim0) and Time(dim2) to get max index per Feature(dim1)
-            # Caution: This loads the entire dataset into memory. 
-            # If dataset is huge, consider batched processing.
-            
-            # Assuming typical memory fit or HDF5 optimized max:
             data = self.h5_file["X_cat"][:] 
-            # (Batch, Feat, Time) -> max over Batch and Time
             max_indices = np.max(data, axis=(0, 2))
             
             real_vocab_sizes = (max_indices + 1).tolist()
@@ -239,8 +220,8 @@ class ParquetSource(StreamingSource):
     def __len__(self) -> int:
         try:
             return pl.scan_parquet(self.file_path).select(pl.len()).collect().item()
-        except Exception as e:
-             return 0
+        except Exception:
+            return 0
 
     def __iter__(self) -> Generator[Dict[str, Any], None, None]:
         try:

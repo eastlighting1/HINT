@@ -10,14 +10,12 @@ class ETLConfig(HyperparamVO):
     raw_dir: str = "./data/raw"
     proc_dir: str = "./data/processed"
     resources_dir: str = "./resources"
-    
-    # Cohort Settings
+
     min_los_icu_days: float = 0.0
     min_duration_hours: int = 0
     max_duration_hours: int = 999999
     min_age: int = 0
-    
-    # Constants ported from make_data.py
+
     input_window_h: int = 6
     gap_h: int = 6
     pred_window_h: int = 4

@@ -4,10 +4,10 @@ data:
   resources_dir: "resources"
 
 cohort:
-  min_los_icu_days: 0.0
-  min_duration_hours: 0
-  max_duration_hours: 999999
-  min_age: 0
+  min_los_icu_days: 1.0
+  min_duration_hours: 24
+  max_duration_hours: 240
+  min_age: 15
 
 processing:
   input_window_h: 6

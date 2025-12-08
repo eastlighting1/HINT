@@ -11,13 +11,11 @@ from ..foundation.exceptions import ConfigurationError
 class FileSystemRegistry(Registry):
     """
     Implementation of Registry that stores artifacts on the local file system.
-    Updated to handle absolute paths or paths outside artifacts dir.
     """
     def __init__(self, base_dir: Union[str, Path]):
         self.base_dir = Path(base_dir)
         self.base_dir.mkdir(parents=True, exist_ok=True)
-        
-        # Subdirectories structure
+
         self.dirs = {
             "checkpoints": self.base_dir / "checkpoints",
             "data": self.base_dir / "data",
@@ -34,12 +32,11 @@ class FileSystemRegistry(Registry):
         """
         if isinstance(name, Path) or "/" in str(name) or "\\" in str(name):
             path = Path(name)
-            # Ensure parent directory exists for write operations
             if not path.parent.exists() and path.parent != Path('.'):
                 try:
                     path.parent.mkdir(parents=True, exist_ok=True)
                 except OSError:
-                    pass # Ignore if permission issue, let saver fail
+                    pass
             return path
         return self.dirs[category] / name
 
@@ -57,7 +54,6 @@ class FileSystemRegistry(Registry):
         path = self._resolve_path(filename, "checkpoints")
         
         if not path.exists():
-            # Fallback search in default dir if absolute path failed
             fallback = self.dirs["checkpoints"] / filename
             if fallback.exists():
                 path = fallback

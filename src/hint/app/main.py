@@ -15,32 +15,29 @@ def main(cfg: DictConfig) -> None:
     factory = AppFactory(cfg)
     mode = cfg.get("mode", "train")
     
-    factory.observer.log("INFO", f"Main: Starting HINT pipeline in mode='{mode}'")
+    factory.observer.log("INFO", f"Main: Starting HINT pipeline in mode='{mode}'.")
 
-    # 1. ETL Pipeline
     if mode in ["all", "etl"]:
+        factory.observer.log("INFO", "Main: Launching ETL pipeline stage.")
         etl_service = factory.create_etl_service()
         etl_service.run_pipeline()
+        factory.observer.log("INFO", "Main: ETL pipeline stage completed.")
 
-    # 2. ICD Pipeline
     if mode in ["all", "train", "icd"]:
+        factory.observer.log("INFO", "Main: Launching ICD training stage.")
         icd_service = factory.create_icd_service()
         icd_service.train()
         icd_service.run_xai()
+        factory.observer.log("INFO", "Main: ICD training stage completed.")
 
-    # 3. CNN Pipeline
     if mode in ["all", "train", "cnn"]:
+        factory.observer.log("INFO", "Main: Launching CNN training stage.")
         trainer, evaluator = factory.create_cnn_services()
-        
-        # Train
         trainer.train_model(trainer.tr_src, trainer.val_src)
-        
-        # Calibrate & Test
         evaluator.calibrate(trainer.val_src)
         evaluator.evaluate(evaluator.te_src)
-        
-        # [수정됨] run_xai는 background(val)와 target(test) 데이터 소스 두 개가 필요합니다.
         evaluator.run_xai(evaluator.val_src, evaluator.te_src)
+        factory.observer.log("INFO", "Main: CNN training stage completed.")
 
     factory.observer.log("INFO", "Main: Pipeline finished successfully.")
 

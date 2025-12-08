@@ -17,7 +17,6 @@ class StaticExtractor(PipelineComponent):
         raw_dir = Path(self.cfg.raw_dir)
         proc_dir = Path(self.cfg.proc_dir)
         
-        # Ensure output directory exists
         proc_dir.mkdir(parents=True, exist_ok=True)
         
         self.observer.log("INFO", "StaticExtractor: Loading raw tables...")
@@ -46,7 +45,6 @@ class StaticExtractor(PipelineComponent):
         def between_closed(expr: pl.Expr, left: pl.Expr, right: pl.Expr) -> pl.Expr:
             return expr.is_not_null() & left.is_not_null() & right.is_not_null() & (expr >= left) & (expr <= right)
 
-        # 1. Process ICUSTAYS with explicit aliases to prevent optimization issues
         icu_fp = find_raw_file("ICUSTAYS")
         icu_raw = (
             pl.scan_csv(icu_fp, infer_schema_length=0)
@@ -70,7 +68,6 @@ class StaticExtractor(PipelineComponent):
             .select(["SUBJECT_ID", "HADM_ID", "ICUSTAY_ID", "INTIME", "OUTTIME", "LOS_ICU", "STAY_HOURS"])
         )
 
-        # 2. Process ADMISSIONS
         adm_fp = find_raw_file("ADMISSIONS")
         adm = (
             pl.scan_csv(adm_fp, infer_schema_length=0)
@@ -82,7 +79,6 @@ class StaticExtractor(PipelineComponent):
             .select(["SUBJECT_ID", "HADM_ID", "ADMITTIME", "DISCHTIME", "DEATHTIME", "ETHNICITY", "ADMISSION_TYPE", "INSURANCE"])
         )
 
-        # 3. Process PATIENTS
         pat_fp = find_raw_file("PATIENTS")
         pat = (
             pl.scan_csv(pat_fp, infer_schema_length=0)
@@ -93,7 +89,6 @@ class StaticExtractor(PipelineComponent):
             .select(["SUBJECT_ID", "DOB", "DOD"])
         )
 
-        # Join and Filter
         df = (
             icu.join(adm, on=["SUBJECT_ID", "HADM_ID"], how="inner")
             .join(pat, on="SUBJECT_ID", how="inner")

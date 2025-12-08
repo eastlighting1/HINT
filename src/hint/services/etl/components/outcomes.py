@@ -29,11 +29,10 @@ class OutcomesBuilder(PipelineComponent):
         all_flags: List[pl.DataFrame] = []
         files = list(raw_dir.glob("OUTPUTEVENTS.csv.gz"))
         if not files:
-             # Try uncompressed
-             files = list(raw_dir.glob("OUTPUTEVENTS.csv"))
-             if not files:
-                 self.observer.log("WARNING", "OutcomesBuilder: No OUTPUTEVENTS found.")
-                 return
+            files = list(raw_dir.glob("OUTPUTEVENTS.csv"))
+            if not files:
+                self.observer.log("WARNING", "OutcomesBuilder: No OUTPUTEVENTS found.")
+                return
 
         for fname in files:
             ev = (

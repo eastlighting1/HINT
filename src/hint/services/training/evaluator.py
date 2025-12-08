@@ -13,7 +13,6 @@ from hint.foundation.interfaces import TelemetryObserver, Registry, StreamingSou
 from hint.domain.entities import InterventionModelEntity
 from hint.domain.vo import CNNConfig
 from hint.infrastructure.components import TemperatureScaler
-# [유지] 커스텀 collate 함수 import
 from hint.infrastructure.datasource import collate_tensor_batch
 
 class EvaluationService:
@@ -41,7 +40,6 @@ class EvaluationService:
         self.entity.to(self.device)
         self.entity.network.eval()
         
-        # [유지] collate_fn 추가
         dl_val = DataLoader(
             val_source, 
             batch_size=self.cfg.batch_size, 
@@ -69,7 +67,6 @@ class EvaluationService:
         self.entity.to(self.device)
         self.entity.network.eval()
         
-        # [유지] collate_fn 추가
         dl_te = DataLoader(
             test_source, 
             batch_size=self.cfg.batch_size, 
@@ -100,9 +97,6 @@ class EvaluationService:
         self.entity.to(self.device)
         self.entity.network.eval()
         
-        # Load Metadata
-        # [수정] Registry(Metrics)가 아닌 Data Cache Directory에서 직접 로드합니다.
-        # feature_info.json은 Metric이 아니라 Data Artifact이기 때문입니다.
         feature_info_path = Path(self.cfg.data_cache_dir) / "feature_info.json"
         
         if feature_info_path.exists():
@@ -116,20 +110,25 @@ class EvaluationService:
         seq_len = self.cfg.seq_len
         n_cat_feats = len(cat_vocab_sizes)
 
-        # 1. SHAP (Numeric Only)
         self._run_shap_numeric(val_source, test_source, n_cat_feats, seq_len)
 
-        # 2. LIME (Tabular)
         self._run_lime_tabular(test_source, feat_info, n_cat_feats, seq_len)
 
     def _run_shap_numeric(self, val_source, test_source, n_cat_feats, seq_len):
+        """
+        Generate SHAP values using numeric features while holding categorical inputs constant.
+
+        Args:
+            val_source: Validation data source used to build the SHAP background set.
+            test_source: Test data source used to sample records for explanation.
+            n_cat_feats: Number of categorical features in the dataset.
+            seq_len: Sequence length used by the CNN model.
+        """
         self.observer.log("INFO", "EvaluationService: Computing numeric-only SHAP...")
         
         max_bg = 128
         max_samples = 256
         
-        # Collect Background
-        # [유지] collate_fn 추가
         dl_val = DataLoader(
             val_source, 
             batch_size=self.cfg.batch_size, 
@@ -149,8 +148,6 @@ class EvaluationService:
             
         bg_num = torch.cat(bg_num_list, dim=0)[:max_bg].to(self.device)
 
-        # Collect Samples
-        # [유지] collate_fn 추가
         dl_te = DataLoader(
             test_source, 
             batch_size=self.cfg.batch_size, 
@@ -166,7 +163,6 @@ class EvaluationService:
             
         samp_num = torch.cat(samp_num_list, dim=0)[:max_samples].to(self.device)
 
-        # Wrapper Class
         class ProbWrapperNumOnly(nn.Module):
             def __init__(self, base_model, temp, n_cat, length):
                 super().__init__()
@@ -193,13 +189,22 @@ class EvaluationService:
         shap_data = {
             "background_num": bg_num.detach().cpu().numpy().tolist(),
             "sample_num": samp_num.detach().cpu().numpy().tolist(),
-            "shap_values": [s.tolist() for s in shap_values], # List of arrays
+            "shap_values": [s.tolist() for s in shap_values],
             "class_names": self.CLASS_NAMES
         }
         self.registry.save_json(shap_data, "cnn_shap_values.json")
         self.observer.log("INFO", "EvaluationService: SHAP values saved.")
 
     def _run_lime_tabular(self, test_source, feat_info, n_cat_feats, seq_len):
+        """
+        Generate LIME explanations on flattened tabular views of the latest timestep.
+
+        Args:
+            test_source: Test data source providing samples for explanation.
+            feat_info: Metadata describing numeric and categorical feature names.
+            n_cat_feats: Number of categorical features in the dataset.
+            seq_len: Sequence length used by the CNN model.
+        """
         try:
             from lime.lime_tabular import LimeTabularExplainer
         except ImportError:
@@ -211,7 +216,6 @@ class EvaluationService:
         max_lime_samples = 2000
         num_explanations = 50
         
-        # [유지] collate_fn 추가
         dl_te = DataLoader(
             test_source, 
             batch_size=self.cfg.batch_size, 
@@ -240,8 +244,6 @@ class EvaluationService:
         X_tab = np.vstack(tab_rows)
         y_tab = np.concatenate(tab_labels)
         
-        # Feature Names
-        # [안전장치] feat_info가 비어있을 경우 대비
         if "base_feats_numeric" in feat_info:
             base_feats_num = feat_info["base_feats_numeric"]
             n_feats_num = feat_info["n_feats_numeric"]
@@ -257,14 +259,12 @@ class EvaluationService:
             feat_names_all = num_feat_names + cat_feat_names_last
             categorical_features_idx = list(range(len(num_feat_names), len(feat_names_all)))
         else:
-            # Fallback names
             self.observer.log("WARNING", "Missing feature info for LIME. Generating generic names.")
             feat_names_all = [f"feat_{i}" for i in range(X_tab.shape[1])]
             categorical_features_idx = []
             cat_vocab_sizes = {}
             n_feats_num = X_tab.shape[1]
 
-        # Predict Function
         def predict_fn(X):
             X = np.atleast_2d(X)
             n = X.shape[0]
@@ -277,7 +277,6 @@ class EvaluationService:
             num_seq = np.repeat(num_part[:, :, None], seq_len, axis=2).astype(np.float32)
             
             if cat_part is not None:
-                # Clip to vocab
                 cat_part_int = np.rint(cat_part).astype(np.int64)
                 cat_part_clipped_list = []
                 for idx, (name, vocab_size) in enumerate(cat_vocab_sizes.items()):
