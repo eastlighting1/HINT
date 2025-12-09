@@ -6,7 +6,7 @@ from src.hint.services.training.trainer import TrainingService
 from src.hint.domain.entities import InterventionModelEntity
 from src.hint.domain.vo import CNNConfig
 from src.hint.foundation.dtos import TensorBatch
-from src.test.conftest import TestFixtures  # Fixed Import
+from src.test.conftest import TestFixtures # [Fix] Correct import
 
 class MockNet(nn.Module):
     def __init__(self):
@@ -18,10 +18,6 @@ class MockNet(nn.Module):
         return self.fc(x_pooled)
 
 def test_train_model_runs_one_epoch() -> None:
-    """
-    Validates that TrainingService runs a full training epoch.
-    Test Case ID: TRN-01
-    """
     logger.info("Starting test: test_train_model_runs_one_epoch")
 
     mock_registry = TestFixtures.get_mock_registry()

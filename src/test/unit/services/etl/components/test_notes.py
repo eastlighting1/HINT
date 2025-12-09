@@ -1,5 +1,7 @@
 import polars as pl
 import tempfile
+import gzip
+import shutil
 from pathlib import Path
 from unittest.mock import MagicMock
 from loguru import logger
@@ -15,10 +17,18 @@ def test_note_tokenizer_execution() -> None:
         config = UnitFixtures.get_minimal_etl_config().model_copy(update={
             "raw_dir": str(tmp_path / "raw"), "proc_dir": str(tmp_path / "processed")
         })
+        
+        csv_path = tmp_path / "raw" / "NOTEEVENTS.csv"
+        # [Fix] Add CHARTTIME column required by tokenizer
         pl.DataFrame({
-            "SUBJECT_ID": [1], "HADM_ID": [10], "CHARTDATE": ["2100-01-01"],
+            "SUBJECT_ID": [1], "HADM_ID": [10], 
+            "CHARTDATE": ["2100-01-01"], "CHARTTIME": ["2100-01-01 12:00:00"],
             "TEXT": ["Patient is stable."]
-        }).write_csv(tmp_path / "raw" / "NOTEEVENTS.csv")
+        }).write_csv(csv_path)
+        
+        with open(csv_path, 'rb') as f_in:
+            with gzip.open(str(csv_path) + ".gz", 'wb') as f_out:
+                shutil.copyfileobj(f_in, f_out)
 
         tokenizer = NoteTokenizer(config, MagicMock(), MagicMock())
         tokenizer.execute()

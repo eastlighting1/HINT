@@ -13,8 +13,9 @@ def test_label_generator_execution() -> None:
         (tmp_path / "processed").mkdir()
         config = UnitFixtures.get_minimal_etl_config().model_copy(update={"proc_dir": str(tmp_path / "processed")})
         
+        # [Fix] Added HADM_ID column
         pl.DataFrame({
-            "SUBJECT_ID": [1]*10, "ICUSTAY_ID": [100]*10,
+            "SUBJECT_ID": [1]*10, "ICUSTAY_ID": [100]*10, "HADM_ID": [10]*10,
             "HOUR_IN": list(range(10)),
             "VENT": [0, 0, 0, 1, 1, 1, 0, 0, 0, 0],
             "V__hr": [80]*10

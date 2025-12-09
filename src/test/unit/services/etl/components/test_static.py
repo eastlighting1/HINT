@@ -15,9 +15,15 @@ def test_static_extractor_filtering() -> None:
         config = UnitFixtures.get_minimal_etl_config().model_copy(update={
             "raw_dir": str(tmp_path / "raw"), "proc_dir": str(tmp_path / "processed"), "min_age": 18
         })
-        pl.DataFrame({"SUBJECT_ID": [1], "DOB": ["2050-01-01"], "GENDER": ["M"]}).write_csv(tmp_path / "raw" / "PATIENTS.csv")
-        pl.DataFrame({"SUBJECT_ID": [1], "HADM_ID": [10], "ADMITTIME": ["2100-01-01"], "DISCHTIME": ["2100-01-05"], "ETHNICITY": ["W"], "ADMISSION_TYPE": ["E"], "INSURANCE": ["P"]}).write_csv(tmp_path / "raw" / "ADMISSIONS.csv")
-        pl.DataFrame({"SUBJECT_ID": [1], "HADM_ID": [10], "ICUSTAY_ID": [100], "INTIME": ["2100-01-01 10:00:00"], "OUTTIME": ["2100-01-03 10:00:00"]}).write_csv(tmp_path / "raw" / "ICUSTAYS.csv")
+        pl.DataFrame({"SUBJECT_ID": [1], "DOB": ["2050-01-01 00:00:00"], "GENDER": ["M"]}).write_csv(tmp_path / "raw" / "PATIENTS.csv")
+        pl.DataFrame({"SUBJECT_ID": [1], "HADM_ID": [10], "ADMITTIME": ["2100-01-01 00:00:00"], "DISCHTIME": ["2100-01-05 00:00:00"], "ETHNICITY": ["W"], "ADMISSION_TYPE": ["E"], "INSURANCE": ["P"]}).write_csv(tmp_path / "raw" / "ADMISSIONS.csv")
+        
+        # [Fix] Add FIRST_CAREUNIT and LOS columns required by extractor
+        pl.DataFrame({
+            "SUBJECT_ID": [1], "HADM_ID": [10], "ICUSTAY_ID": [100], 
+            "INTIME": ["2100-01-01 10:00:00"], "OUTTIME": ["2100-01-03 10:00:00"],
+            "LOS": [2.0], "FIRST_CAREUNIT": ["MICU"]
+        }).write_csv(tmp_path / "raw" / "ICUSTAYS.csv")
 
         extractor = StaticExtractor(config, MagicMock(), MagicMock())
         extractor.execute()

@@ -25,7 +25,6 @@ def test_feature_assembler_execution() -> None:
             "resources_dir": str(tmp_path / "resources")
         })
 
-        # Patients
         pl.DataFrame({
             "SUBJECT_ID": [1], "HADM_ID": [10], "ICUSTAY_ID": [100], 
             "INTIME": ["2100-01-01 00:00:00"], 
@@ -35,17 +34,16 @@ def test_feature_assembler_execution() -> None:
             pl.col("INTIME").str.to_datetime(strict=False)
         ).write_parquet(tmp_path / "processed" / "patients.parquet")
 
-        # Vitals with HOURS_IN match
+        # [Fix] Renamed HOURS_IN -> HOUR_IN to match component expectation
         pl.DataFrame({
             "SUBJECT_ID": [1], "HADM_ID": [10], "ICUSTAY_ID": [100], 
-            "HOURS_IN": [0], # Fixed column name
+            "HOUR_IN": [0], 
             "LABEL": ["HR"], "MEAN": [80.0]
         }).write_parquet(tmp_path / "processed" / "vitals_labs_mean.parquet")
 
-        # Interventions with HOURS_IN match
         pl.DataFrame({
             "SUBJECT_ID": [1], "HADM_ID": [10], "ICUSTAY_ID": [100], 
-            "HOURS_IN": [0], # Fixed column name
+            "HOUR_IN": [0], 
             "VENT": [0], "OUTCOME_FLAG": [0]
         }).write_parquet(tmp_path / "processed" / "interventions.parquet")
 
