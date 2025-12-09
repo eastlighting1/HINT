@@ -1,117 +1,325 @@
-from pathlib import Path
-from typing import List
-
+import sys
+import ast
+import importlib
+import inspect
+import coverage
 import hydra
-import pytest
-from hydra.core.hydra_config import HydraConfig
-from hydra.utils import get_original_cwd
-from loguru import logger
+import traceback
+from pathlib import Path
+from datetime import datetime
+from typing import List, Dict, Any, Tuple
 from omegaconf import DictConfig
+from loguru import logger
 from rich.console import Console
+from rich.progress import Progress, SpinnerColumn, TextColumn, BarColumn, TimeElapsedColumn
+from rich.logging import RichHandler
+from jinja2 import Environment, FileSystemLoader
 
-
-def _setup_logging(cfg: DictConfig) -> Console:
+class TestRunner:
     """
-    Configure Loguru sinks for file and console output without conflicting with Rich.
-
-    Args:
-        cfg: Hydra configuration for the test runner.
-
-    Returns:
-        Console instance bound to the logger.
+    Custom test orchestration engine replacing pytest.
+    Handles test discovery, execution, coverage measurement, and detailed reporting.
     """
-    logger.remove()
-    console = Console()
-    level = cfg.logging.level
-    run_dir = Path(HydraConfig.get().runtime.output_dir)
-    log_file = run_dir / "tests.log"
-    log_file.parent.mkdir(parents=True, exist_ok=True)
-    logger.add(lambda msg: console.print(msg, end=""), level=level, enqueue=True)
-    logger.add(
-        log_file,
-        format="{time:YYYY-MM-DD HH:mm:ss} | {level} | {message}",
-        level="DEBUG",
-        enqueue=True,
-    )
-    logger.info("Logging configured for console and file outputs.")
-    logger.debug("Log file path resolved to {}", log_file)
-    return console
 
+    def __init__(self, cfg: DictConfig):
+        self.cfg = cfg
+        self.console = Console()
+        self.cov = coverage.Coverage(
+            source=["src/hint"], 
+            omit=["*/test/*", "*/site-packages/*"],
+            branch=True
+        )
+        self.results: List[Dict[str, Any]] = []
+        self._setup_logging()
 
-def _selected_test_paths(cfg: DictConfig) -> List[str]:
-    """
-    Build the list of test paths based on Hydra configuration flags.
+    def _setup_logging(self) -> None:
+        logger.remove()
+        
+        logger.add(
+            RichHandler(console=self.console, show_time=False, show_path=False),
+            format="{message}",
+            level=self.cfg.logging.level
+        )
 
-    Args:
-        cfg: Hydra configuration for the test runner.
+        try:
+            hydra_dir = Path(hydra.core.hydra_config.HydraConfig.get().runtime.output_dir)
+            log_file = hydra_dir / "test_runner.log"
+            logger.add(
+                log_file,
+                format="{time:YYYY-MM-DD HH:mm:ss} | {level} | {message}",
+                level="DEBUG",
+                rotation="10 MB"
+            )
+            logger.info(f"Logging initialized. Log file: {log_file}")
+        except Exception:
+            pass
 
-    Returns:
-        List of filesystem paths to pass into pytest.
-    """
-    project_root = Path(get_original_cwd())
-    test_root = project_root / cfg.paths.test_root
-    paths: List[Path] = []
-    if cfg.tests.run_unit:
-        paths.append(test_root / "unit")
-    if cfg.tests.run_integration:
-        paths.append(test_root / "integration")
-    if cfg.tests.run_e2e:
-        paths.append(test_root / "e2e")
-    return [str(path) for path in paths if path.exists()]
+    def discover_tests(self, search_dirs: List[Path]) -> List[Path]:
+        test_files = []
+        for d in search_dirs:
+            if d.exists():
+                logger.info(f"Discovering tests in {d}")
+                test_files.extend(list(d.rglob("test_*.py")))
+            else:
+                logger.warning(f"Test directory not found: {d}")
+        return sorted(test_files)
 
+    def _get_module_name(self, file_path: Path) -> str:
+        try:
+            rel_path = file_path.relative_to(Path.cwd())
+            return ".".join(rel_path.with_suffix("").parts)
+        except ValueError:
+            return file_path.stem
 
-def _build_pytest_args(cfg: DictConfig) -> List[str]:
-    """
-    Construct pytest arguments including coverage and reporting options.
+    def run_tests(self, test_files: List[Path]) -> bool:
+        self.cov.start()
+        logger.info(f"Starting execution of {len(test_files)} test files...")
+        
+        all_passed = True
+        
+        if str(Path.cwd()) not in sys.path:
+            sys.path.insert(0, str(Path.cwd()))
 
-    Args:
-        cfg: Hydra configuration for the test runner.
+        with Progress(
+            SpinnerColumn(),
+            TextColumn("[progress.description]{task.description}"),
+            BarColumn(),
+            TextColumn("{task.percentage:>3.0f}%"),
+            TimeElapsedColumn(),
+            console=self.console,
+            transient=False 
+        ) as progress:
+            total_task = progress.add_task("[cyan]Running Test Suites...", total=len(test_files))
 
-    Returns:
-        List of pytest CLI arguments.
-    """
-    args: List[str] = []
-    args.extend(_selected_test_paths(cfg))
-    for target in cfg.coverage.targets:
-        args.append(f"--cov={target}")
-    if cfg.coverage.branch:
-        args.append("--cov-branch")
-    config_path = cfg.coverage.config
-    if config_path:
-        args.append(f"--cov-config={config_path}")
-    reports = cfg.coverage.reports
-    if reports.term:
-        args.append("--cov-report=term-missing")
-    run_dir = Path(HydraConfig.get().runtime.output_dir)
-    if reports.xml:
-        args.append(f"--cov-report=xml:{run_dir / reports.xml}")
-    if reports.html:
-        args.append(f"--cov-report=html:{run_dir / reports.html}")
-    if reports.json:
-        args.append(f"--cov-report=json:{run_dir / reports.json}")
-    return args
+            for test_file in test_files:
+                progress.update(total_task, description=f"Processing {test_file.name}")
+                
+                module_name = self._get_module_name(test_file)
+                
+                try:
+                    if module_name in sys.modules:
+                        mod = importlib.reload(sys.modules[module_name])
+                    else:
+                        mod = importlib.import_module(module_name)
+                        
+                except Exception as e:
+                    all_passed = False
+                    logger.critical(f"Failed to import module {module_name}: {e}")
+                    self.results.append({
+                        "file": test_file.name, "case": "Import", "status": "ERROR", 
+                        "error": str(e), "traceback": traceback.format_exc()
+                    })
+                    progress.advance(total_task)
+                    continue
 
+                functions = inspect.getmembers(mod, inspect.isfunction)
+                test_funcs = [(n, f) for n, f in functions if n.startswith("test_")]
+                
+                for name, func in test_funcs:
+                    logger.debug(f"Running test case: {name}")
+                    try:
+                        func()
+                        self.results.append({
+                            "file": test_file.name, "case": name, "status": "PASS", "error": None
+                        })
+                    except AssertionError as e:
+                        all_passed = False
+                        logger.error(f"Assertion Failed: {name} - {e}")
+                        self.results.append({
+                            "file": test_file.name, "case": name, "status": "FAIL", 
+                            "error": str(e), "traceback": traceback.format_exc()
+                        })
+                    except Exception as e:
+                        all_passed = False
+                        logger.error(f"Test Error: {name} - {e}")
+                        self.results.append({
+                            "file": test_file.name, "case": name, "status": "ERROR", 
+                            "error": str(e), "traceback": traceback.format_exc()
+                        })
+
+                progress.advance(total_task)
+
+        self.cov.stop()
+        self.cov.save()
+        logger.info("Test execution completed.")
+        return all_passed
+
+    def _calc_complexity(self, source_code: str) -> int:
+        """
+        Calculate Cyclomatic Complexity using AST.
+        Starts at 1. Adds 1 for each control flow branch (if, for, while, etc.).
+        """
+        complexity = 1
+        try:
+            tree = ast.parse(source_code)
+            for node in ast.walk(tree):
+                if isinstance(node, (ast.If, ast.For, ast.AsyncFor, ast.While, 
+                                     ast.With, ast.AsyncWith, ast.ExceptHandler, 
+                                     ast.Assert, ast.comprehension)):
+                    complexity += 1
+                elif isinstance(node, (ast.BoolOp)):
+                    complexity += len(node.values) - 1
+        except Exception:
+            pass 
+        return complexity
+
+    def generate_report(self) -> None:
+        """
+        Generate HTML report with real coverage data and source code analysis.
+        """
+        logger.info("Generating quality report...")
+        
+        timestamp = datetime.now().strftime("%Y_%m_%d_%H_%M_%S")
+        report_dir = Path("artifacts")
+        report_dir.mkdir(exist_ok=True, parents=True)
+        report_path = report_dir / f"report_{timestamp}.html"
+
+        # 1. Collect Data
+        files_list = []
+        payload_json = {}
+        total_missed_lines = 0
+        risky_files_count = 0
+        
+        try:
+            # Refresh coverage data
+            self.cov.load()
+            measured_files = self.cov.get_data().measured_files()
+            
+            for file_path in measured_files:
+                path_obj = Path(file_path)
+                
+                # Try to make path relative to CWD for display
+                try:
+                    display_name = str(path_obj.relative_to(Path.cwd()))
+                except ValueError:
+                    display_name = path_obj.name
+
+                # Analysis: (filename, statements, excluded, missing, missing_branch_arcs)
+                try:
+                    analysis = self.cov.analysis2(file_path)
+                    executable = analysis[1]
+                    missing = analysis[3]
+                    
+                    n_stmts = len(executable)
+                    n_miss = len(missing)
+                    n_cover = n_stmts - n_miss
+                    cov_pct = round((n_cover / n_stmts * 100), 1) if n_stmts > 0 else 100.0
+                    
+                    total_missed_lines += n_miss
+
+                    # Read Source
+                    with open(file_path, "r", encoding="utf-8") as f:
+                        source_code = f.read()
+                    
+                    complexity = self._calc_complexity(source_code)
+                    
+                    # Determine Risk (Cov < 50% AND Complexity >= 5)
+                    is_risky = cov_pct < 50.0 and complexity >= 5
+                    if is_risky:
+                        risky_files_count += 1
+
+                    # Add to Files List (for Table/Heatmap)
+                    files_list.append({
+                        "name": display_name,
+                        "statements": n_stmts,
+                        "missed": n_miss,
+                        "coverage": cov_pct,
+                        "complexity": complexity
+                    })
+
+                    # Build Payload for Source Viewer
+                    source_lines = []
+                    for idx, line_content in enumerate(source_code.splitlines(), start=1):
+                        hit_status = None # Neutral
+                        if idx in executable:
+                            hit_status = idx not in missing
+                        
+                        source_lines.append({
+                            "ln": idx,
+                            "ct": line_content,
+                            "hit": hit_status
+                        })
+                    
+                    payload_json[display_name] = {
+                        "source": source_lines,
+                        "classes": [], # Future: AST extract classes
+                        "methods": []  # Future: AST extract methods
+                    }
+
+                except Exception as e:
+                    logger.warning(f"Could not analyze file {display_name}: {e}")
+                    continue
+
+            # Sort files by coverage (ascending) to highlight issues
+            files_list.sort(key=lambda x: x['coverage'])
+
+            # Global Coverage
+            global_cov = self.cov.report(file=None)
+            
+        except Exception as e:
+            logger.error(f"Error during coverage analysis: {e}")
+            global_cov = 0.0
+
+        # 2. Render Template
+        template_dir = Path("resources")
+        if not (template_dir / "test_coverage_template.html").exists():
+            template_dir = Path(".") 
+            
+        try:
+            env = Environment(loader=FileSystemLoader(template_dir))
+            template = env.get_template("test_coverage_template.html")
+            
+            passed = len([r for r in self.results if r['status'] == 'PASS'])
+            failed = len([r for r in self.results if r['status'] != 'PASS'])
+
+            summary = {
+                "total": len(self.results),
+                "passed": passed,
+                "failed": failed,
+                "coverage": round(global_cov, 2),
+                "risky_files": risky_files_count,
+                "missed_lines": total_missed_lines,
+                "total_files": len(files_list),
+                "trend": 0 # Placeholder
+            }
+            
+            html_out = template.render(
+                title="HINT Test Report",
+                generated_at=timestamp,
+                summary=summary,
+                results=self.results,
+                files=files_list,        # [Fixed] Populated list
+                payload_json=payload_json # [Fixed] Populated dictionary
+            )
+            
+            with open(report_path, "w", encoding="utf-8") as f:
+                f.write(html_out)
+                
+            logger.info(f"Report generated successfully: {report_path}")
+            
+        except Exception as e:
+            logger.error(f"Failed to generate HTML report: {e}")
+            logger.debug(traceback.format_exc())
 
 @hydra.main(version_base=None, config_path="../../configs", config_name="test_config")
 def main(cfg: DictConfig) -> None:
-    """
-    Hydra entrypoint that configures logging and dispatches pytest with coverage.
+    runner = TestRunner(cfg)
+    project_root = Path.cwd()
+    test_root = project_root / cfg.paths.test_root
+    
+    target_dirs = []
+    if cfg.tests.run_unit: target_dirs.append(test_root / "unit")
+    if cfg.tests.run_integration: target_dirs.append(test_root / "integration")
+    if cfg.tests.run_e2e: target_dirs.append(test_root / "e2e")
+    if not target_dirs: target_dirs = [test_root]
 
-    Args:
-        cfg: Hydra configuration object loaded from test_config.yaml.
-    """
-    _setup_logging(cfg)
-    pytest_args = _build_pytest_args(cfg)
-    if not pytest_args:
-        logger.warning("No test paths were selected; defaulting to src/test.")
-        project_root = Path(get_original_cwd())
-        pytest_args.append(str(project_root / "src" / "test"))
-    logger.info("Starting pytest with arguments: {}", pytest_args)
-    exit_code = pytest.main(pytest_args)
-    if exit_code != 0:
-        logger.error("Pytest reported failures with exit code {}", exit_code)
-    raise SystemExit(exit_code)
+    test_files = runner.discover_tests(target_dirs)
+    if not test_files:
+        sys.exit(1)
 
+    success = runner.run_tests(test_files)
+    runner.generate_report()
+    sys.exit(0 if success else 1)
 
 if __name__ == "__main__":
     main()
