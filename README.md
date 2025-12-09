@@ -11,7 +11,7 @@
 
 **A Hierarchical Clinical Decision Support System (CDSS) for ICU Mechanical Ventilation Prediction**
 
-[📖 Introduction](#-introduction) • [🧠 Core Architecture](#-core-architecture) • [⚡ Quick Start](#-quick-start-with-uv) • [🛠️ Usage Guide](#-usage-guide) • [📊 Benchmarks](#-benchmarks--performance)
+[📖 Introduction](#-introduction) • [🧠 Core Architecture](#-core-architecture) • [⚡ Quick Start](#-quick-start-with-uv) • [🛠️ Usage Guide](#-usage-guide) • [🧪 Testing](#-testing) • [📊 Benchmarks](#-benchmarks--performance)
 
 </div>
 
@@ -24,17 +24,18 @@ Welcome to the **HINT** repository!
 **HINT** stands for *Hierarchical ICD-aware Network for Time-series Intervention*. It is a cutting-edge Clinical Decision Support System (CDSS) developed to assist clinicians in the Intensive Care Unit (ICU) by predicting the need for **mechanical ventilation interventions**.
 
 ### 🏥 Why is this important?
+
 In the ICU, a patient's condition changes rapidly. Clinicians must process massive amounts of data—vital signs (heart rate, SpO2) and lab results—in real-time. However, existing AI models often fail to connect these "low-level" signals with the patient's "high-level" diagnosis (ICD codes), leading to suboptimal predictions.
 
 **HINT solves this by thinking like a doctor:** it first understands the patient's underlying diagnosis (even if records are incomplete!) and then uses that context to interpret the fluctuating vital signs more accurately.
 
 ### ✨ Key Features at a Glance
 
-* **Hierarchical Thinking**: A two-stage pipeline that separates *diagnosis inference* from *event prediction*, mimicking clinical reasoning.
-* **Robust to Noisy Data**: Uses **Partial Label Learning** with MedBERT. Even if the medical records are messy or incomplete, HINT can infer the probable diagnosis.
-* **Context-Aware**: It doesn't just look at the numbers. An **ICD-Conditioned Gating Mechanism** dynamically adjusts which vital signs are most important based on the patient's specific disease.
-* **Imbalance Expert**: Designed for rare events. It uses specialized loss functions (Focal Loss) to accurately predict critical moments like `Onset` (starting ventilation) or `Weaning` (stopping it).
-* **Explainable (XAI)**: It's not a black box. HINT provides **SHAP** and **LIME** analyses so clinicians can understand *why* a prediction was made.
+- **Hierarchical Thinking**: A two-stage pipeline that separates *diagnosis inference* from *event prediction*, mimicking clinical reasoning.
+- **Robust to Noisy Data**: Uses **Partial Label Learning** with MedBERT. Even if the medical records are messy or incomplete, HINT can infer the probable diagnosis.
+- **Context-Aware**: It doesn't just look at the numbers. An **ICD-Conditioned Gating Mechanism** dynamically adjusts which vital signs are most important based on the patient's specific disease.
+- **Imbalance Expert**: Designed for rare events. It uses specialized loss functions (Focal Loss) to accurately predict critical moments like `Onset` (starting ventilation) or `Weaning` (stopping it).
+- **Explainable (XAI)**: It's not a black box. HINT provides **SHAP** and **LIME** analyses so clinicians can understand *why* a prediction was made.
 
 ---
 
@@ -43,20 +44,24 @@ In the ICU, a patient's condition changes rapidly. Clinicians must process massi
 The system is built upon a **Domain-Driven Design (DDD)** architecture, ensuring that the code is as robust as the model itself.
 
 ### Stage 1: Automated ICD Coding Module
+
 Before looking at the time-series, HINT understands the patient.
--   **Input**: Static data (age, gender) & Candidate ICD-9 code sets.
--   **Tech Stack**: `MedBERT` (Text Encoder) + `XGBoost` (Stacking).
--   **Output**: A dense "Context Vector" representing the patient's admission-level diagnosis.
+
+- **Input**: Static data (age, gender) & Candidate ICD-9 code sets.
+- **Tech Stack**: `MedBERT` (Text Encoder) + `XGBoost` (Stacking).
+- **Output**: A dense "Context Vector" representing the patient's admission-level diagnosis.
 
 ### Stage 2: Intervention Prediction Module (GFINet)
+
 This is where the magic happens. The model combines the context from Stage 1 with real-time monitoring data.
--   **Input**:
-    -   **Time-Series Tensor**: (Values, Mask, Time-Delta) for 30+ vital signs.
-    -   **Context Vector**: Output from Stage 1.
--   **Tech Stack**:
-    -   **Group-wise TCN**: Analyzes temporal patterns efficiently.
-    -   **Gating Mechanism**: Fuses diagnosis context to re-weight time-series features.
--   **Output**: Probabilities for 4 states (`ONSET`, `WEAN`, `STAY ON`, `STAY OFF`).
+
+- **Input**:
+  - **Time-Series Tensor**: (Values, Mask, Time-Delta) for 30+ vital signs.
+  - **Context Vector**: Output from Stage 1.
+- **Tech Stack**:
+  - **Group-wise TCN**: Analyzes temporal patterns efficiently.
+  - **Gating Mechanism**: Fuses diagnosis context to re-weight time-series features.
+- **Output**: Probabilities for 4 states (`ONSET`, `WEAN`, `STAY ON`, `STAY OFF`).
 
 <div align="center">
   <img width="850" alt="HINT Architecture Diagram" src="https://github.com/user-attachments/assets/85fde6e4-3800-4bd2-8983-e33a504cd72d" />
@@ -71,59 +76,67 @@ This is where the magic happens. The model combines the context from Stage 1 wit
 We use **[uv](https://github.com/astral-sh/uv)**, a blazing fast Python package manager. If you haven't used it before, you'll love the speed!
 
 ### 1. Prerequisites
--   **Python 3.10+**
--   **CUDA 11.8+** (Highly recommended for GPU acceleration)
--   **MIMIC-III Access**: You need credentialed access from [PhysioNet](https://physionet.org/content/mimiciii/).
+
+- **Python 3.10+**
+- **CUDA 11.8+** (Highly recommended for GPU acceleration)
+- **MIMIC-III Access**: You need credentialed access from [PhysioNet](https://physionet.org/content/mimiciii/).
 
 ### 2. Installation
+
 Clone the repo and let `uv` handle the rest. No need to manually create virtual environments.
 
 ```bash
 # 1. Clone the repository
-git clone [https://github.com/eastlighting1/HINT.git](https://github.com/eastlighting1/HINT.git)
+git clone https://github.com/eastlighting1/HINT.git
 cd HINT
 
 # 2. Sync dependencies (This creates a virtualenv and installs everything)
 uv sync
 ```
 
-### 3. Data Setup (Crucial Step!)
+### 3. Data Setup
 
 Since we cannot distribute MIMIC-III data, please place your downloaded CSV files in a folder.
 
 ```bash
 # Example directory structure
 mkdir -p data/mimic3/raw
-
-# ... Place ADMISSIONS.csv, CHARTEVENTS.csv, etc. inside data/mimic3/raw
+# Place ADMISSIONS.csv, CHARTEVENTS.csv, etc. inside data/mimic3/raw
 ```
-
-Now, run the **ETL Pipeline**. This will clean the data and generate the tensors needed for training.
-
-```bash
-# Run the ETL process using uv
-uv run hint mode=etl data.raw_dir="./data/mimic3/raw"
-```
-
-> **Tip**: The processed data (HDF5 tensors) will be saved in the `artifacts/` folder by default.
 
 -----
 
 ## 🛠️ Usage Guide
 
-HINT is configured using **Hydra**. This means you can easily override any setting directly from the command line without changing the code.
+HINT is configured using **Hydra**. This allows you to orchestrate the entire pipeline via the command line interface (CLI) exposed by `src/hint/app/main.py`.
 
-### 🏃 Training the Diagnosis Model (Stage 1)
+The basic command structure is:
 
-First, we train the module that learns to predict ICD codes from partial labels.
+```bash
+uv run hint mode=[etl|icd|cnn|train] [overrides]
+```
+
+### 1️⃣ ETL Pipeline (Data Processing)
+
+Cleans the raw CSV data and generates HDF5 tensors.
+
+```bash
+uv run hint mode=etl data.raw_dir="./data/mimic3/raw"
+```
+
+> **Output**: Processed artifacts are saved in `artifacts/data/` by default.
+
+### 2️⃣ Diagnosis Inference (Stage 1)
+
+Trains the ICD coding module to learn patient representations.
 
 ```bash
 uv run hint mode=icd
 ```
 
-### 🏃 Training the Intervention Model (Stage 2)
+### 3️⃣ Intervention Prediction (Stage 2)
 
-Next, train the main GFINet (CNN) model. You can adjust hyperparameters on the fly:
+Trains the GFINet (CNN) model using the output from Stage 1. You can dynamically override hyperparameters.
 
 ```bash
 uv run hint mode=cnn \
@@ -132,30 +145,45 @@ uv run hint mode=cnn \
     cnn.optimizer.lr=0.001
 ```
 
-### 🔄 Full Pipeline Execution
+### 4️⃣ Full Pipeline
 
-To run everything sequentially (ICD training -> CNN training -> Evaluation):
+Executes the complete workflow sequentially (ICD -> CNN -> Evaluation).
 
 ```bash
 uv run hint mode=train
 ```
 
-### 🧪 Running Tests
+-----
 
-The test suite is orchestrated through a Hydra-powered runner that wires logging, coverage, and test selection from `configs/test_config.yaml`.
+## 🧪 Testing
+
+We use a custom **Hydra-powered Test Runner** (`src/test/runner.py`) instead of running `pytest` directly. This ensures that the test environment shares the same configuration context as the main application.
+
+### Running the Full Suite
+
+To run all tests (Unit, Integration, E2E) with coverage report:
 
 ```bash
-# Run the full suite with coverage
 uv run python -m src.test.runner
-
-# Skip slower suites, e.g., integration and e2e
-uv run python -m src.test.runner tests.run_integration=false tests.run_e2e=false
 ```
 
-Key testing rules:
-- Use Pathlib for all filesystem operations in tests and utilities.
-- Keep docstrings on every test function/class using the project template (summary, scenario, Test Case ID, Args/Returns).
-- Do not add comments to test files; use logging or docstrings for explanation.
+### Selective Testing
+
+The test configuration is controlled by `configs/test_config.yaml`. You can skip slow-running integration or E2E tests using CLI overrides:
+
+```bash
+# Run ONLY Unit Tests (Fast)
+uv run python -m src.test.runner tests.run_integration=false tests.run_e2e=false
+
+# Run Unit + Integration Tests
+uv run python -m src.test.runner tests.run_e2e=false
+```
+
+### 📝 Test Strategy
+
+- **Unit Tests**: `src/test/unit/` – Isolated tests for entities, value objects, and components.
+- **Integration Tests**: `src/test/integration/` – Tests interacting with HDF5 files and model persistence.
+- **E2E Tests**: `src/test/e2e/` – Full pipeline validation.
 
 -----
 
@@ -164,11 +192,11 @@ Key testing rules:
 HINT has been rigorously evaluated on the MIMIC-III dataset. It specifically excels in the **Macro AUPRC** metric, which is the most critical metric for imbalanced medical data.
 
 | Model Architecture | Macro AUC | **Macro AUPRC** | F1 Score |
-| :--- | :---: | :---: | :---: |
-| **Random Forest** | 81.6 | 43.9 | 52.4 |
-| **LSTM-GNN** | 85.2 | 48.0 | 60.6 |
-| **MTS-GCNN** | 91.9 | 52.5 | 60.6 |
-| **HINT (Ours)** | **92.3** | **75.2** | **69.8** |
+| :----------------- | :-------: | :-------------: | :------: |
+| **Random Forest**  |   81.6    |      43.9       |   52.4   |
+| **LSTM-GNN**       |   85.2    |      48.0       |   60.6   |
+| **MTS-GCNN**       |   91.9    |      52.5       |   60.6   |
+| **HINT (Ours)**    | **92.3**  |   **75.2**      | **69.8** |
 
 > **📈 Result:** HINT improves the AUPRC by **+22.7%** compared to the strongest baseline (MTS-GCNN). This means significantly fewer false alarms for clinicians.
 
@@ -179,22 +207,30 @@ HINT has been rigorously evaluated on the MIMIC-III dataset. It specifically exc
 We follow a strict **DDD (Domain-Driven Design)** pattern to keep things organized.
 
 ```text
-src/hint/
-├── app/                  # 🏁 Entry points
-│   ├── main.py           # The main CLI orchestrator
-│   └── factory.py        # Dependency Injection setup
-├── domain/               # 💎 Core Business Logic
-│   ├── entities.py       # State models (TrainableEntity)
-│   └── vo.py             # Value Objects (Immutable configs)
-├── foundation/           # 🧱 Basic building blocks (DTOs, Exceptions)
-├── infrastructure/       # 🔌 External Adapters
-│   ├── datasource.py     # HDF5 & Parquet data loaders
-│   ├── networks.py       # PyTorch Models (GFINet, MedBERT)
-│   └── telemetry.py      # Logging & Metrics (Rich/WandB)
-└── services/             # 💼 Application Services
-    ├── etl/              # Data Processing Pipeline
-    ├── icd/              # ICD Coding Service
-    └── training/         # Intervention Training Service
+src/
+├── hint/
+│   ├── app/                  # 🏁 Entry Points
+│   │   ├── main.py           # CLI Argument Parser & Dispatcher
+│   │   └── factory.py        # System Initialization
+│   ├── domain/               # 🧠 Core Logic & States
+│   │   ├── entities.py       # Trainable Model States (Checkpoints)
+│   │   └── vo.py             # Hyperparameter Configurations
+│   ├── foundation/           # 🧱 Shared Utilities
+│   │   ├── configs.py        # Hydra Configuration Schemas
+│   │   └── dtos.py           # Tensor Data Structures
+│   ├── infrastructure/       # 🔌 Deep Learning Backend
+│   │   ├── datasource.py     # Data Loaders (HDF5 & Parquet)
+│   │   ├── networks.py       # Neural Network Architectures (PyTorch)
+│   │   └── telemetry.py      # Experiment Tracking (WandB/Rich)
+│   └── services/             # 🚀 Execution Pipelines
+│       ├── etl/              # Preprocessing & Tensor Generation
+│       ├── icd/              # Stage 1: Representation Learning (MedBERT)
+│       └── training/         # Stage 2: Temporal Prediction Loop (GFINet)
+└── test/                     # 🧪 Test Suite
+    ├── runner.py             # Custom Test Runner (Hydra-aware)
+    ├── unit/                 # Component-level Logic Tests
+    ├── integration/          # Data Flow & I/O Verification
+    └── e2e/                  # Full Training Pipeline Tests
 ```
 
 -----
@@ -223,12 +259,10 @@ abstract = {Intensive Care Units generate massive volumes of heterogeneous clini
 
 ## 📮 Contact & Support
 
-We love hearing from the community! If you have questions, run into issues, or just want to discuss medical AI:
+We love hearing from the community\! If you have questions, run into issues, or just want to discuss medical AI:
 
-  * **Author**: Donghyeon Kim
-  * **Email**: eastlighting1@gachon.ac.kr
-  * **GitHub Issues**: Please open an issue if you find a bug!
+- **Author**: Donghyeon Kim
+- **Email**: eastlighting1@gachon.ac.kr
+- **GitHub Issues**: Please open an issue if you find a bug\!
 
-Happy Coding! 🚀
-````
-
+Happy Coding\! 🚀
