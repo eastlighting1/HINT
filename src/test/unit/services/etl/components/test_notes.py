@@ -19,17 +19,24 @@ def test_note_tokenizer_execution() -> None:
         })
         
         csv_path = tmp_path / "raw" / "NOTEEVENTS.csv"
-        # [Fix] Add CHARTTIME column required by tokenizer
+        # [Fix] Added ISERROR column (required for filtering) and CHARTTIME
         pl.DataFrame({
             "SUBJECT_ID": [1], "HADM_ID": [10], 
             "CHARTDATE": ["2100-01-01"], "CHARTTIME": ["2100-01-01 12:00:00"],
-            "TEXT": ["Patient is stable."]
+            "TEXT": ["Patient is stable."],
+            "ISERROR": [None] 
         }).write_csv(csv_path)
         
         with open(csv_path, 'rb') as f_in:
             with gzip.open(str(csv_path) + ".gz", 'wb') as f_out:
                 shutil.copyfileobj(f_in, f_out)
+        
+        # Create ICUSTAYS for the join filter
+        pl.DataFrame({
+            "HADM_ID": [10], "ICUSTAY_ID": [100],
+            "OUTTIME": ["2100-01-02 12:00:00"]
+        }).write_csv(tmp_path / "raw" / "ICUSTAYS.csv.gz")
 
         tokenizer = NoteTokenizer(config, MagicMock(), MagicMock())
         tokenizer.execute()
-        assert (tmp_path / "processed" / "notes_tokenized.parquet").exists()
+        assert (tmp_path / "processed" / "notes_sentences.csv").exists()

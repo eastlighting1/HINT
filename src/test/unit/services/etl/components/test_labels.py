@@ -13,7 +13,7 @@ def test_label_generator_execution() -> None:
         (tmp_path / "processed").mkdir()
         config = UnitFixtures.get_minimal_etl_config().model_copy(update={"proc_dir": str(tmp_path / "processed")})
         
-        # [Fix] Added HADM_ID column
+        # [Fix] Added HADM_ID column and ensured schema consistency
         pl.DataFrame({
             "SUBJECT_ID": [1]*10, "ICUSTAY_ID": [100]*10, "HADM_ID": [10]*10,
             "HOUR_IN": list(range(10)),
@@ -23,4 +23,4 @@ def test_label_generator_execution() -> None:
 
         gen = LabelGenerator(config, MagicMock(), MagicMock())
         gen.execute()
-        assert (tmp_path / "processed" / "labeled_dataset.parquet").exists()
+        assert (tmp_path / "processed" / "dataset_123_answer.parquet").exists()

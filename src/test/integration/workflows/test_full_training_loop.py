@@ -13,7 +13,6 @@ from src.test.unit.conftest import UnitFixtures
 def test_full_training_loop_integration() -> None:
     """
     Validates the full training loop with real data sources and entity updates.
-    
     Test Case ID: TS-11
     """
     logger.info("Starting test: test_full_training_loop_integration")
@@ -24,18 +23,18 @@ def test_full_training_loop_integration() -> None:
         val_path = tmp_path / "val.h5"
         
         seq_len = 10
+        # Create valid HDF5 files with correct keys
         for path in [train_path, val_path]:
             with h5py.File(path, 'w') as f:
-                f.create_dataset("x_num", data=np.random.randn(10, seq_len, 5).astype(np.float32))
-                f.create_dataset("x_cat", data=np.random.randint(0, 5, (10, seq_len, 2)).astype(np.int64))
+                f.create_dataset("X_num", data=np.random.randn(10, seq_len, 5).astype(np.float32))
+                f.create_dataset("X_cat", data=np.random.randint(0, 5, (10, seq_len, 2)).astype(np.int64))
                 f.create_dataset("y", data=np.random.randint(0, 4, (10,)).astype(np.int64))
-                f.create_dataset("ids", data=np.arange(10).astype(np.int64))
+                f.create_dataset("sid", data=np.arange(10).astype(np.int64))
                 f.create_dataset("mask", data=np.ones((10, seq_len)).astype(np.float32))
         
         cnn_config = UnitFixtures.get_minimal_cnn_config()
         cnn_config = cnn_config.model_copy(update={"batch_size": 4, "epochs": 1})
         
-        # [Fix] Pass seq_len
         train_src = HDF5StreamingSource(train_path, seq_len)
         val_src = HDF5StreamingSource(val_path, seq_len)
         
@@ -44,8 +43,10 @@ def test_full_training_loop_integration() -> None:
                 super().__init__()
                 self.fc = torch.nn.Linear(5, 4)
             def forward(self, x_num, x_cat):
-                x_pooled = x_num.mean(dim=2)
-                return self.fc(x_pooled)
+                # [Fix] Mean over sequence dimension (dim=1) to match input features (5)
+                # Input shape: (Batch, Seq, Feat) -> (4, 10, 5)
+                x_pooled = x_num.mean(dim=1) # -> (4, 5)
+                return self.fc(x_pooled)     # -> (4, 4)
 
         entity = InterventionModelEntity(CompatMockNet())
         

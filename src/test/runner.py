@@ -7,7 +7,7 @@ import hydra
 import traceback
 from pathlib import Path
 from datetime import datetime
-from typing import List, Dict, Any
+from typing import List, Dict, Any, Tuple
 from omegaconf import DictConfig
 from loguru import logger
 from rich.console import Console
@@ -15,72 +15,10 @@ from rich.progress import Progress, SpinnerColumn, TextColumn, BarColumn, TimeEl
 from rich.logging import RichHandler
 from jinja2 import Environment, FileSystemLoader
 
-# --- [Helper Class for Function Analysis] ---
-class FunctionAnalyzer(ast.NodeVisitor):
-    """
-    AST Visitor to extract methods, calculate their complexity, 
-    and map their line ranges.
-    """
-    def __init__(self, executable_lines: set, missing_lines: set):
-        self.methods = []
-        self.executable_lines = executable_lines
-        self.missing_lines = missing_lines
-
-    def _calc_complexity(self, node):
-        complexity = 1
-        for child in ast.walk(node):
-            if isinstance(child, (ast.If, ast.For, ast.AsyncFor, ast.While, 
-                                  ast.With, ast.AsyncWith, ast.ExceptHandler, 
-                                  ast.Assert, ast.comprehension)):
-                complexity += 1
-            elif isinstance(child, ast.BoolOp):
-                complexity += len(child.values) - 1
-        return complexity
-
-    def visit_FunctionDef(self, node):
-        self._process_function(node)
-        self.generic_visit(node)
-
-    def visit_AsyncFunctionDef(self, node):
-        self._process_function(node)
-        self.generic_visit(node)
-
-    def _process_function(self, node):
-        start_line = node.lineno
-        # End line approximation (AST usually has end_lineno in Python 3.8+)
-        end_line = getattr(node, 'end_lineno', start_line)
-        
-        # Calculate Complexity
-        complexity = self._calc_complexity(node)
-
-        # Calculate Local Coverage for this function
-        func_exec_lines = {l for l in self.executable_lines if start_line <= l <= end_line}
-        func_miss_lines = {l for l in self.missing_lines if start_line <= l <= end_line}
-        
-        total = len(func_exec_lines)
-        miss = len(func_miss_lines)
-        cov_pct = round(((total - miss) / total * 100), 1) if total > 0 else 100.0
-
-        # Determine Risk Status based on thresholds
-        # Rule: High Complexity (>5) AND Low Coverage (<80%) = Risk
-        status = "safe"
-        if complexity >= 5 and cov_pct < 80:
-            status = "risk"
-        elif complexity >= 10: # Even if covered, very high complexity is a warning
-            status = "warning"
-
-        self.methods.append({
-            "name": node.name,
-            "line": start_line,
-            "end_line": end_line,
-            "complexity": complexity,
-            "coverage": cov_pct,
-            "status": status
-        })
-
 class TestRunner:
     """
     Custom test orchestration engine replacing pytest.
+    Handles test discovery, execution, coverage measurement, AST analysis, and report generation.
     """
 
     def __init__(self, cfg: DictConfig):
@@ -96,11 +34,25 @@ class TestRunner:
 
     def _setup_logging(self) -> None:
         logger.remove()
+        
         logger.add(
             RichHandler(console=self.console, show_time=False, show_path=False),
             format="{message}",
             level=self.cfg.logging.level
         )
+
+        try:
+            hydra_dir = Path(hydra.core.hydra_config.HydraConfig.get().runtime.output_dir)
+            log_file = hydra_dir / "test_runner.log"
+            logger.add(
+                log_file,
+                format="{time:YYYY-MM-DD HH:mm:ss} | {level} | {message}",
+                level="DEBUG",
+                rotation="10 MB"
+            )
+            logger.info(f"Logging initialized. Log file: {log_file}")
+        except Exception:
+            pass
 
     def discover_tests(self, search_dirs: List[Path]) -> List[Path]:
         test_files = []
@@ -124,6 +76,7 @@ class TestRunner:
         logger.info(f"Starting execution of {len(test_files)} test files...")
         
         all_passed = True
+        
         if str(Path.cwd()) not in sys.path:
             sys.path.insert(0, str(Path.cwd()))
 
@@ -140,6 +93,7 @@ class TestRunner:
 
             for test_file in test_files:
                 progress.update(total_task, description=f"Processing {test_file.name}")
+                
                 module_name = self._get_module_name(test_file)
                 
                 try:
@@ -147,6 +101,7 @@ class TestRunner:
                         mod = importlib.reload(sys.modules[module_name])
                     else:
                         mod = importlib.import_module(module_name)
+                        
                 except Exception as e:
                     all_passed = False
                     logger.critical(f"Failed to import module {module_name}: {e}")
@@ -161,17 +116,22 @@ class TestRunner:
                 test_funcs = [(n, f) for n, f in functions if n.startswith("test_")]
                 
                 for name, func in test_funcs:
+                    logger.debug(f"Running test case: {name}")
                     try:
                         func()
-                        self.results.append({"file": test_file.name, "case": name, "status": "PASS", "error": None})
+                        self.results.append({
+                            "file": test_file.name, "case": name, "status": "PASS", "error": None
+                        })
                     except AssertionError as e:
                         all_passed = False
+                        logger.error(f"Assertion Failed: {name} - {e}")
                         self.results.append({
                             "file": test_file.name, "case": name, "status": "FAIL", 
                             "error": str(e), "traceback": traceback.format_exc()
                         })
                     except Exception as e:
                         all_passed = False
+                        logger.error(f"Test Error: {name} - {e}")
                         self.results.append({
                             "file": test_file.name, "case": name, "status": "ERROR", 
                             "error": str(e), "traceback": traceback.format_exc()
@@ -181,10 +141,55 @@ class TestRunner:
 
         self.cov.stop()
         self.cov.save()
+        logger.info("Test execution completed.")
         return all_passed
+
+    def _calc_complexity(self, source_code: str) -> int:
+        complexity = 1
+        try:
+            tree = ast.parse(source_code)
+            for node in ast.walk(tree):
+                if isinstance(node, (ast.If, ast.For, ast.AsyncFor, ast.While, 
+                                     ast.With, ast.AsyncWith, ast.ExceptHandler, 
+                                     ast.Assert, ast.comprehension)):
+                    complexity += 1
+                elif isinstance(node, (ast.BoolOp)):
+                    complexity += len(node.values) - 1
+        except Exception:
+            pass 
+        return complexity
+
+    def _analyze_ast_structure(self, source_code: str) -> Tuple[List[Dict], List[Dict]]:
+        classes = []
+        methods = []
+        try:
+            tree = ast.parse(source_code)
+            for node in ast.walk(tree):
+                if isinstance(node, ast.ClassDef):
+                    classes.append({"name": node.name, "line": node.lineno})
+                elif isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
+                    complexity = 1
+                    for child in ast.walk(node):
+                        if isinstance(child, (ast.If, ast.For, ast.AsyncFor, ast.While, 
+                                              ast.With, ast.AsyncWith, ast.ExceptHandler, 
+                                              ast.Assert, ast.comprehension)):
+                            complexity += 1
+                        elif isinstance(child, (ast.BoolOp)):
+                            complexity += len(child.values) - 1
+                    
+                    methods.append({
+                        "name": node.name,
+                        "line": node.lineno,
+                        "end_line": node.end_lineno,
+                        "complexity": complexity
+                    })
+        except Exception:
+            pass
+        return classes, methods
 
     def generate_report(self) -> None:
         logger.info("Generating quality report...")
+        
         timestamp = datetime.now().strftime("%Y_%m_%d_%H_%M_%S")
         report_dir = Path("artifacts")
         report_dir.mkdir(exist_ok=True, parents=True)
@@ -207,35 +212,25 @@ class TestRunner:
                     display_name = path_obj.name
 
                 try:
-                    # 1. Coverage Analysis
                     analysis = self.cov.analysis2(file_path)
-                    executable = set(analysis[1])
-                    missing = set(analysis[3])
+                    executable = analysis[1]
+                    missing = analysis[3]
                     
                     n_stmts = len(executable)
                     n_miss = len(missing)
                     n_cover = n_stmts - n_miss
                     cov_pct = round((n_cover / n_stmts * 100), 1) if n_stmts > 0 else 100.0
+                    
                     total_missed_lines += n_miss
 
-                    # 2. Source & AST Analysis
                     with open(file_path, "r", encoding="utf-8") as f:
                         source_code = f.read()
                     
-                    # Analyze functions (Method Extraction & Complexity)
-                    analyzer = FunctionAnalyzer(executable, missing)
-                    try:
-                        tree = ast.parse(source_code)
-                        analyzer.visit(tree)
-                    except Exception:
-                        pass # Ignore parsing errors for non-python syntax
-
-                    # Calculate File Complexity (Sum of functions or simplified)
-                    file_complexity = sum(m['complexity'] for m in analyzer.methods) if analyzer.methods else 1
+                    file_complexity = self._calc_complexity(source_code)
                     
-                    # Determine File Risk
                     is_risky = cov_pct < 50.0 and file_complexity >= 5
-                    if is_risky: risky_files_count += 1
+                    if is_risky:
+                        risky_files_count += 1
 
                     files_list.append({
                         "name": display_name,
@@ -245,7 +240,28 @@ class TestRunner:
                         "complexity": file_complexity
                     })
 
-                    # Build Payload
+                    ast_classes, ast_methods = self._analyze_ast_structure(source_code)
+                    
+                    enriched_methods = []
+                    for m in ast_methods:
+                        m_lines = set(range(m["line"], m["end_line"] + 1))
+                        m_exec = m_lines.intersection(executable)
+                        m_miss = m_lines.intersection(missing)
+                        
+                        m_cov = 100.0
+                        if m_exec:
+                            m_cov = round(((len(m_exec) - len(m_miss)) / len(m_exec)) * 100, 1)
+                        
+                        status = "safe"
+                        if m_cov < 50.0 and m["complexity"] >= 5:
+                            status = "risk"
+                        elif m["complexity"] >= 10:
+                            status = "warning"
+                            
+                        m["coverage"] = m_cov
+                        m["status"] = status
+                        enriched_methods.append(m)
+
                     source_lines = []
                     for idx, line_content in enumerate(source_code.splitlines(), start=1):
                         hit_status = None
@@ -260,8 +276,8 @@ class TestRunner:
                     
                     payload_json[display_name] = {
                         "source": source_lines,
-                        "classes": [], 
-                        "methods": analyzer.methods # Now contains real data!
+                        "classes": ast_classes,
+                        "methods": enriched_methods
                     }
 
                 except Exception as e:
@@ -269,13 +285,16 @@ class TestRunner:
                     continue
 
             files_list.sort(key=lambda x: x['coverage'])
-            global_cov = self.cov.report(file=None)
+
+            try:
+                global_cov = self.cov.report(file=None)
+            except Exception:
+                global_cov = 0.0
             
         except Exception as e:
             logger.error(f"Error during coverage analysis: {e}")
             global_cov = 0.0
 
-        # Render Template
         template_dir = Path("resources")
         if not (template_dir / "test_coverage_template.html").exists():
             template_dir = Path(".") 
@@ -295,7 +314,7 @@ class TestRunner:
                 "risky_files": risky_files_count,
                 "missed_lines": total_missed_lines,
                 "total_files": len(files_list),
-                "trend": 0 
+                "trend": 0
             }
             
             html_out = template.render(

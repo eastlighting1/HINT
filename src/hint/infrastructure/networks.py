@@ -60,9 +60,10 @@ class GFINet_CNN(nn.Module):
         self.embed_dim = embed_dim
         dilations = [2**i for i in range(layers)]
 
-        self.register_buffer("g1", torch.tensor(g1))
-        self.register_buffer("g2", torch.tensor(g2))
-        self.register_buffer("rest", torch.tensor(rest))
+        # [Fix] Use torch.as_tensor to handle both list and tensor inputs without warning
+        self.register_buffer("g1", torch.as_tensor(g1, dtype=torch.long))
+        self.register_buffer("g2", torch.as_tensor(g2, dtype=torch.long))
+        self.register_buffer("rest", torch.as_tensor(rest, dtype=torch.long))
 
         def build_tcn_stack(in_dim: int, out_dim: int) -> nn.Sequential:
             base: List[nn.Module] = [

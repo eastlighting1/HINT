@@ -34,13 +34,18 @@ def test_feature_assembler_execution() -> None:
             pl.col("INTIME").str.to_datetime(strict=False)
         ).write_parquet(tmp_path / "processed" / "patients.parquet")
 
-        # [Fix] Renamed HOURS_IN -> HOUR_IN to match component expectation
+        # [Fix] Renamed HOUR_IN -> HOURS_IN. 
+        # The component code expects "HOURS_IN" in the input file and renames it to "HOUR_IN".
         pl.DataFrame({
             "SUBJECT_ID": [1], "HADM_ID": [10], "ICUSTAY_ID": [100], 
-            "HOUR_IN": [0], 
+            "HOURS_IN": [0], 
             "LABEL": ["HR"], "MEAN": [80.0]
         }).write_parquet(tmp_path / "processed" / "vitals_labs_mean.parquet")
 
+        # [Fix] Consistent naming (though intervention might use HOUR_IN, keeping consistent is safer)
+        # Based on assemblers code: vitals uses HOURS_IN, intervs uses HOUR_IN in provided code.
+        # But let's check assembler.py: `vent_df = intervs.select(["...HOUR_IN..."])`.
+        # So interventions.parquet needs "HOUR_IN".
         pl.DataFrame({
             "SUBJECT_ID": [1], "HADM_ID": [10], "ICUSTAY_ID": [100], 
             "HOUR_IN": [0], 

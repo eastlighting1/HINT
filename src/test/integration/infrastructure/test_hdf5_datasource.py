@@ -9,7 +9,6 @@ from src.hint.infrastructure.datasource import HDF5StreamingSource
 def test_hdf5_datasource_read_integrity() -> None:
     """
     Validates that HDF5StreamingSource can correctly read from a physical HDF5 file.
-    
     Test Case ID: TS-08
     """
     logger.info("Starting test: test_hdf5_datasource_read_integrity")
@@ -22,12 +21,12 @@ def test_hdf5_datasource_read_integrity() -> None:
         n_feat = 8
         num_samples = 5
         
+        # [Fix] Key names matched to HDF5StreamingSource implementation (X_num, X_cat, sid)
         with h5py.File(h5_path, 'w') as f:
-            f.create_dataset("x_num", data=np.random.randn(num_samples, seq_len, n_feat).astype(np.float32))
-            f.create_dataset("x_cat", data=np.random.randint(0, 5, (num_samples, seq_len, 2)).astype(np.int64))
+            f.create_dataset("X_num", data=np.random.randn(num_samples, seq_len, n_feat).astype(np.float32))
+            f.create_dataset("X_cat", data=np.random.randint(0, 5, (num_samples, seq_len, 2)).astype(np.int64))
             f.create_dataset("y", data=np.random.randint(0, 4, (num_samples,)).astype(np.int64))
-            f.create_dataset("ids", data=np.arange(num_samples).astype(np.int64))
-            # [Fix] Ensure mask dataset exists
+            f.create_dataset("sid", data=np.arange(num_samples).astype(np.int64))
             f.create_dataset("mask", data=np.ones((num_samples, seq_len)).astype(np.float32))
         
         # [Fix] Pass required positional argument 'seq_len'

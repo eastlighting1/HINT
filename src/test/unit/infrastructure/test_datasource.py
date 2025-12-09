@@ -16,14 +16,16 @@ def test_hdf5_streaming_source_getitem() -> None:
     with tempfile.TemporaryDirectory() as tmp_dir:
         h5_path = Path(tmp_dir) / "test.h5"
         
+        # [Fix] Use correct key names: 'X_num' (Capital), 'sid' (not ids)
         with h5py.File(h5_path, "w") as f:
-            f.create_dataset("x_num", data=np.random.randn(5, 10, 4))
-            f.create_dataset("x_cat", data=np.random.randint(0, 5, (5, 10, 2)))
+            f.create_dataset("X_num", data=np.random.randn(5, 10, 4))
+            f.create_dataset("X_cat", data=np.random.randint(0, 5, (5, 10, 2)))
             f.create_dataset("y", data=np.array([0, 1, 0, 1, 0]))
-            f.create_dataset("ids", data=np.arange(5))
+            f.create_dataset("sid", data=np.arange(5))
             f.create_dataset("mask", data=np.ones((5, 10))) 
 
-        source = HDF5StreamingSource(h5_path)
+        # [Fix] Added seq_len argument
+        source = HDF5StreamingSource(h5_path, seq_len=10)
         
         sample = source[0]
         assert isinstance(sample.x_num, torch.Tensor)

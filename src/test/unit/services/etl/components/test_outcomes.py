@@ -26,20 +26,19 @@ def test_outcomes_builder_flagging() -> None:
         })
         with gzip.open(tmp_path / "raw" / "ICUSTAYS.csv.gz", "wb") as f:
             icu_df.write_csv(f)
-
-        pl.DataFrame({
+            
+        # [Fix] Create OUTPUTEVENTS.csv.gz (Required source for OutcomesBuilder)
+        out_df = pl.DataFrame({
             "SUBJECT_ID": [1], "HADM_ID": [10], "ICUSTAY_ID": [100],
-            "INTIME": ["2100-01-01 00:00:00"], "DOD": ["2100-01-03 02:00:00"], "DISCHTIME": [None]
-        }).write_parquet(tmp_path / "processed" / "patients.parquet")
-        
-        # Match lengths for valid DataFrame creation
-        pl.DataFrame({
-            "SUBJECT_ID": [1, 1, 1, 1], "HADM_ID": [10, 10, 10, 10], "ICUSTAY_ID": [100, 100, 100, 100],
-            "HOUR_IN": [48, 49, 50, 51]
-        }).write_parquet(tmp_path / "processed" / "interventions.parquet")
+            "CHARTTIME": ["2100-01-01 12:00:00"], # Should be within stay
+            "ITEMID": [999]
+        })
+        with gzip.open(tmp_path / "raw" / "OUTPUTEVENTS.csv.gz", "wb") as f:
+            out_df.write_csv(f)
 
         builder = OutcomesBuilder(config, MagicMock(), MagicMock())
         builder.execute()
         
         df = pl.read_parquet(tmp_path / "processed" / "interventions.parquet")
         assert "OUTCOME_FLAG" in df.columns
+        assert df.height > 0

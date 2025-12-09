@@ -27,6 +27,11 @@ def test_timeseries_aggregation_hourly() -> None:
             "ITEMID": [220045, 220045], "VALUENUM": [80, 100]
         }).write_csv(tmp_path / "raw" / "CHARTEVENTS.csv")
         
+        # [Fix] Create dummy LABEVENTS.csv (Required by Aggregator)
+        pl.DataFrame({
+            "SUBJECT_ID": [], "HADM_ID": [], "ITEMID": [], "CHARTTIME": [], "VALUENUM": []
+        }).write_csv(tmp_path / "raw" / "LABEVENTS.csv")
+        
         # [Fix] Create dummy ICUSTAYS.csv.gz required by TimeSeriesAggregator
         icu_df = pl.DataFrame({
             "SUBJECT_ID": [1], "HADM_ID": [10], "ICUSTAY_ID": [100],
