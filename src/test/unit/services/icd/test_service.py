@@ -6,11 +6,14 @@ from hint.domain.vo import ICDConfig
 
 def test_icd_service_train_step() -> None:
     """
-    Verify ICDService wiring honors configuration and network presence.
+    [One-line Summary] Verify ICDService wiring honors configuration and network presence.
 
-    This test validates that ICDService constructed with mocked dependencies exposes the configured batch size and accepts a mocked network entity suitable for training routines.
-    - Test Case ID: SVC-ICD-01
-    - Scenario: Initialize ICDService with mocked registry, observer, and network entity.
+    [Description]
+    Initialize ICDService with mocked registry and observer, attach a mock network entity, and
+    assert the configuration carries through to the service for downstream training routines.
+
+    Test Case ID: SVC-ICD-01
+    Scenario: Initialize ICDService with mocked registry, observer, and network entity.
 
     Args:
         None

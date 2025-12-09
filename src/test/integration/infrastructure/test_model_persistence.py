@@ -6,11 +6,14 @@ from hint.infrastructure.registry import FileSystemRegistry
 
 def test_model_persistence_cycle() -> None:
     """
-    Validate saving and loading a model entity through the registry.
+    [One-line Summary] Validate registry save/load preserves model weights and metadata.
 
-    This test ensures a model checkpoint written by `FileSystemRegistry` can be loaded into a new entity with matching predictions and metadata.
-    - Test Case ID: TS-09
-    - Scenario: Persist and restore a model state within a temporary artifacts directory.
+    [Description]
+    Save an InterventionModelEntity via FileSystemRegistry, reload it into a fresh entity, and confirm
+    predictions and epoch metadata match to prove the persistence cycle is lossless.
+
+    Test Case ID: TS-09
+    Scenario: Persist and restore a model state within a temporary artifacts directory.
 
     Args:
         None

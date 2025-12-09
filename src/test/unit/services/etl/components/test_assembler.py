@@ -8,8 +8,20 @@ from src.test.unit.conftest import UnitFixtures
 
 def test_feature_assembler_execution() -> None:
     """
-    Validates the execution logic of FeatureAssembler.
+    [One-line Summary] Validate FeatureAssembler produces dataset parquet from prepared inputs.
+
+    [Description]
+    Build minimal patient, vitals, intervention, mapping, and diagnosis data in a temporary
+    workspace, execute the FeatureAssembler, and confirm it writes the processed dataset.
+
     Test Case ID: ETL-ASM-01
+    Scenario: Execute assembler using harmonized time columns across vitals and interventions.
+
+    Args:
+        None
+
+    Returns:
+        None
     """
     logger.info("Starting test: test_feature_assembler_execution")
 
@@ -34,18 +46,14 @@ def test_feature_assembler_execution() -> None:
             pl.col("INTIME").str.to_datetime(strict=False)
         ).write_parquet(tmp_path / "processed" / "patients.parquet")
 
-        # [Fix] Renamed HOUR_IN -> HOURS_IN. 
-        # The component code expects "HOURS_IN" in the input file and renames it to "HOUR_IN".
+        logger.info("Writing vitals_labs_mean with HOURS_IN to match assembler expectations.")
         pl.DataFrame({
             "SUBJECT_ID": [1], "HADM_ID": [10], "ICUSTAY_ID": [100], 
             "HOURS_IN": [0], 
             "LABEL": ["HR"], "MEAN": [80.0]
         }).write_parquet(tmp_path / "processed" / "vitals_labs_mean.parquet")
 
-        # [Fix] Consistent naming (though intervention might use HOUR_IN, keeping consistent is safer)
-        # Based on assemblers code: vitals uses HOURS_IN, intervs uses HOUR_IN in provided code.
-        # But let's check assembler.py: `vent_df = intervs.select(["...HOUR_IN..."])`.
-        # So interventions.parquet needs "HOUR_IN".
+        logger.info("Writing interventions parquet with HOUR_IN join key for assembler.")
         pl.DataFrame({
             "SUBJECT_ID": [1], "HADM_ID": [10], "ICUSTAY_ID": [100], 
             "HOUR_IN": [0], 

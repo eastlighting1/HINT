@@ -5,11 +5,14 @@ from loguru import logger
 
 def test_cli_help_command() -> None:
     """
-    Verify CLI entrypoint responds with help output.
+    [One-line Summary] Verify CLI entrypoint responds with help output.
 
-    This test validates that invoking `hint` via the main module with `--help` exits successfully and emits usage text indicative of Hydra wiring.
-    - Test Case ID: TS-12
-    - Scenario: Execute CLI help command through Python interpreter.
+    [Description]
+    Invoke the `hint` main module with `--help`, assert a zero exit code, and check that usage
+    or Hydra wording appears in stdout to confirm CLI wiring is available.
+
+    Test Case ID: TS-12
+    Scenario: Execute CLI help command through Python interpreter.
 
     Args:
         None

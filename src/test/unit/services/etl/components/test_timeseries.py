@@ -8,6 +8,22 @@ from src.hint.services.etl.components.timeseries import TimeSeriesAggregator
 from src.test.unit.conftest import UnitFixtures
 
 def test_timeseries_aggregation_hourly() -> None:
+    """
+    [One-line Summary] Validate TimeSeriesAggregator produces hourly vitals parquet.
+
+    [Description]
+    Build minimal chart events, companion resource mappings, and ICU stay metadata, then run
+    the aggregator to ensure it writes the expected vitals_labs_mean parquet output.
+
+    Test Case ID: ETL-TS-01
+    Scenario: Aggregate time series inputs with matching ICU stays and verify output file creation.
+
+    Args:
+        None
+
+    Returns:
+        None
+    """
     logger.info("Starting test: test_timeseries_aggregation_hourly")
     with tempfile.TemporaryDirectory() as tmp_dir:
         tmp_path = Path(tmp_dir)
@@ -27,12 +43,12 @@ def test_timeseries_aggregation_hourly() -> None:
             "ITEMID": [220045, 220045], "VALUENUM": [80, 100]
         }).write_csv(tmp_path / "raw" / "CHARTEVENTS.csv")
         
-        # [Fix] Create dummy LABEVENTS.csv (Required by Aggregator)
+        logger.info("Adding placeholder LABEVENTS dataset required by aggregator.")
         pl.DataFrame({
             "SUBJECT_ID": [], "HADM_ID": [], "ITEMID": [], "CHARTTIME": [], "VALUENUM": []
         }).write_csv(tmp_path / "raw" / "LABEVENTS.csv")
         
-        # [Fix] Create dummy ICUSTAYS.csv.gz required by TimeSeriesAggregator
+        logger.info("Creating ICU stay metadata to align chart events.")
         icu_df = pl.DataFrame({
             "SUBJECT_ID": [1], "HADM_ID": [10], "ICUSTAY_ID": [100],
             "INTIME": ["2100-01-01 10:00:00"], "OUTTIME": ["2100-01-03 10:00:00"]

@@ -2,18 +2,28 @@ import sys
 import ast
 import importlib
 import inspect
+import traceback
+from datetime import datetime
+from pathlib import Path
+from typing import Any, Dict, List, Optional, Tuple
+
 import coverage
 import hydra
-import traceback
-from pathlib import Path
-from datetime import datetime
-from typing import List, Dict, Any, Tuple
-from omegaconf import DictConfig
-from loguru import logger
-from rich.console import Console
-from rich.progress import Progress, SpinnerColumn, TextColumn, BarColumn, TimeElapsedColumn
-from rich.logging import RichHandler
+from hydra.core.hydra_config import HydraConfig
 from jinja2 import Environment, FileSystemLoader
+from loguru import logger
+from omegaconf import DictConfig
+from rich.console import Console
+from rich.progress import (
+    BarColumn,
+    Progress,
+    SpinnerColumn,
+    TextColumn,
+    TimeElapsedColumn,
+)
+
+from src.test.utils.logging import configure_test_logging
+from src.test.utils.seeding import set_global_seed
 
 class TestRunner:
     """
@@ -24,35 +34,37 @@ class TestRunner:
     def __init__(self, cfg: DictConfig):
         self.cfg = cfg
         self.console = Console()
+        self.log_file_path = self._resolve_log_file_path()
+        self._setup_logging()
+        self._seed_value = int(self.cfg.seeding.seed)
+        set_global_seed(self._seed_value)
+        logger.info(f"Global seed initialized to {self._seed_value}")
         self.cov = coverage.Coverage(
-            source=["src/hint"], 
-            omit=["*/test/*", "*/site-packages/*"],
-            branch=True
+            source=list(self.cfg.coverage.targets),
+            omit=list(self.cfg.coverage.omit),
+            branch=bool(self.cfg.coverage.branch),
+            config_file=self.cfg.coverage.config,
         )
         self.results: List[Dict[str, Any]] = []
-        self._setup_logging()
 
     def _setup_logging(self) -> None:
-        logger.remove()
-        
-        logger.add(
-            RichHandler(console=self.console, show_time=False, show_path=False),
-            format="{message}",
-            level=self.cfg.logging.level
+        self.console = configure_test_logging(
+            log_file_path=self.log_file_path,
+            level=self.cfg.logging.level,
+            console=self.console,
         )
+        logger.info("Logging initialized for test execution.")
 
+    def _resolve_log_file_path(self) -> Optional[Path]:
         try:
-            hydra_dir = Path(hydra.core.hydra_config.HydraConfig.get().runtime.output_dir)
-            log_file = hydra_dir / "test_runner.log"
-            logger.add(
-                log_file,
-                format="{time:YYYY-MM-DD HH:mm:ss} | {level} | {message}",
-                level="DEBUG",
-                rotation="10 MB"
-            )
-            logger.info(f"Logging initialized. Log file: {log_file}")
+            hydra_dir = Path(HydraConfig.get().runtime.output_dir)
+            logs_dir = hydra_dir / "logs"
+            file_name = getattr(self.cfg.logging, "file_name", None)
+            if not file_name:
+                return None
+            return logs_dir / file_name
         except Exception:
-            pass
+            return None
 
     def discover_tests(self, search_dirs: List[Path]) -> List[Path]:
         test_files = []

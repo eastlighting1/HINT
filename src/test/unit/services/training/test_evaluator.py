@@ -6,11 +6,14 @@ from hint.domain.entities import InterventionModelEntity
 
 def test_evaluator_metrics_calculation() -> None:
     """
-    Verify EvaluationService initializes with injected dependencies.
+    [One-line Summary] Verify EvaluationService initializes with injected dependencies.
 
-    This test validates that EvaluationService accepts mocked registry, observer, and entity instances while preserving the configured device for later evaluation work.
-    - Test Case ID: TRN-EVAL-01
-    - Scenario: Construct evaluation service with minimal mocks and inspect attributes.
+    [Description]
+    Construct EvaluationService using mocked registry, observer, and entity instances while
+    asserting the configured device is preserved for downstream evaluation calls.
+
+    Test Case ID: TRN-EVAL-01
+    Scenario: Construct evaluation service with minimal mocks and inspect attributes.
 
     Args:
         None

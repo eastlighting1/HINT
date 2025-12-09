@@ -7,6 +7,22 @@ from src.test.unit.conftest import UnitFixtures
 from src.test.conftest import TestFixtures
 
 def test_ventilation_tagger_marks_vent_correctly() -> None:
+    """
+    [One-line Summary] Ensure VentilationTagger marks ventilation rows based on vitals inputs.
+
+    [Description]
+    Create minimal resources and processed parquet files with ventilator labels, run the
+    VentilationTagger, and confirm the matching intervention row receives a VENT flag.
+
+    Test Case ID: ETL-VENT-01
+    Scenario: Execute ventilation tagging with aligned HOURS_IN/HOUR_IN columns across vitals and interventions.
+
+    Args:
+        None
+
+    Returns:
+        None
+    """
     logger.info("Starting test: test_ventilation_tagger_marks_vent_correctly")
     with tempfile.TemporaryDirectory() as tmp_dir:
         tmp_path = Path(tmp_dir)
@@ -23,19 +39,13 @@ def test_ventilation_tagger_marks_vent_correctly() -> None:
             "ITEMID": [445, 999], "MIMIC LABEL": ["Ventilator", "Other"], "LINKSTO": ["chartevents", "chartevents"]
         }).write_csv(res_dir / "itemid_to_variable_map.csv")
 
-        # [Fix] Use HOUR_IN if component renames it before usage, OR check component logic.
-        # Component logic: Reads vitals_labs (which usually has HOURS_IN), renames HOURS_IN -> HOUR_IN.
-        # So inputs should have HOURS_IN.
-        # But wait, error said "unable to find column HOUR_IN". 
-        # The component code joins `iv` (interventions) using `HOUR_IN`.
-        # So `interventions.parquet` MUST have `HOUR_IN`.
-        
+        logger.info("Writing vitals_labs with HOURS_IN to support tagger renaming logic.")
         pl.DataFrame({
             "SUBJECT_ID": [101], "HADM_ID": [1001], "ICUSTAY_ID": [5001],
             "HOURS_IN": [10], "LABEL": ["Ventilator"], "VALUENUM": [1]
         }).write_parquet(proc_dir / "vitals_labs.parquet")
 
-        # [Fix] interventions must have HOUR_IN (singular) to match join key
+        logger.info("Writing interventions parquet with HOUR_IN join key for VENT tagging.")
         pl.DataFrame({
             "SUBJECT_ID": [101, 101], "HADM_ID": [1001, 1001], "ICUSTAY_ID": [5001, 5001],
             "HOUR_IN": [10, 11], 

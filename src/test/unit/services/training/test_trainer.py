@@ -6,18 +6,35 @@ from src.hint.services.training.trainer import TrainingService
 from src.hint.domain.entities import InterventionModelEntity
 from src.hint.domain.vo import CNNConfig
 from src.hint.foundation.dtos import TensorBatch
-from src.test.conftest import TestFixtures # [Fix] Correct import
+from src.test.conftest import TestFixtures
 
 class MockNet(nn.Module):
     def __init__(self):
         super().__init__()
         self.fc = nn.Linear(10, 4)
+
     def forward(self, x_num, x_cat):
         if x_num.dim() == 3: x_pooled = x_num.mean(dim=2)
         else: x_pooled = x_num
         return self.fc(x_pooled)
 
 def test_train_model_runs_one_epoch() -> None:
+    """
+    [One-line Summary] Verify TrainingService runs one epoch and saves the model.
+
+    [Description]
+    Configure TrainingService with mock dependencies and a single-batch data loader, execute
+    `train_model`, and assert the entity epoch increments while the registry receives a save call.
+
+    Test Case ID: TRN-01
+    Scenario: Run a one-epoch training pass using synthetic batch data on the CPU.
+
+    Args:
+        None
+
+    Returns:
+        None
+    """
     logger.info("Starting test: test_train_model_runs_one_epoch")
 
     mock_registry = TestFixtures.get_mock_registry()

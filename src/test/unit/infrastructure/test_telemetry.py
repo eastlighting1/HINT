@@ -9,11 +9,14 @@ from hint.infrastructure.telemetry import RichTelemetryObserver
 
 def test_telemetry_initializes_console_and_loggers() -> None:
     """
-    Verify RichTelemetryObserver builds console and logging sinks.
+    [One-line Summary] Verify RichTelemetryObserver builds console and logging sinks.
 
-    This test validates that telemetry initialization constructs a Rich console and invokes console and file logger builders to avoid handler conflicts.
-    - Test Case ID: INF-TEL-01
-    - Scenario: Instantiate telemetry observer with patched logger builders.
+    [Description]
+    Instantiate the telemetry observer with patched logger builders to confirm it constructs
+    a Rich console and initializes console/file loggers without duplicating handlers.
+
+    Test Case ID: INF-TEL-01
+    Scenario: Instantiate telemetry observer with patched logger builders.
 
     Args:
         None
@@ -36,11 +39,14 @@ def test_telemetry_initializes_console_and_loggers() -> None:
 
 def test_telemetry_tracks_metrics() -> None:
     """
-    Confirm RichTelemetryObserver stores tracked metrics with step metadata.
+    [One-line Summary] Confirm RichTelemetryObserver stores tracked metrics with step metadata.
 
-    This test validates that calling `track_metric` appends values keyed by metric name, preserving both value and step for deterministic reporting.
-    - Test Case ID: INF-TEL-02
-    - Scenario: Track sequential metric updates for the same key.
+    [Description]
+    Track sequential metric updates and assert the observer records step and value entries per
+    key so downstream reporting remains deterministic.
+
+    Test Case ID: INF-TEL-02
+    Scenario: Track sequential metric updates for the same key.
 
     Args:
         None
@@ -65,11 +71,14 @@ def test_telemetry_tracks_metrics() -> None:
 
 def test_telemetry_creates_progress_with_console() -> None:
     """
-    Validate progress creation uses the telemetry console.
+    [One-line Summary] Validate progress creation uses the telemetry console.
 
-    This test ensures `create_progress` returns a Rich Progress instance bound to the observer console for consistent terminal rendering.
-    - Test Case ID: INF-TEL-03
-    - Scenario: Build a progress tracker from the telemetry observer.
+    [Description]
+    Request a progress instance from the telemetry observer and ensure it is bound to the
+    observer console for consistent terminal rendering.
+
+    Test Case ID: INF-TEL-03
+    Scenario: Build a progress tracker from the telemetry observer.
 
     Args:
         None

@@ -8,15 +8,28 @@ from src.hint.infrastructure.datasource import HDF5StreamingSource, ParquetSourc
 
 def test_hdf5_streaming_source_getitem() -> None:
     """
-    Validates data retrieval from HDF5StreamingSource.
+    [One-line Summary] Validate HDF5StreamingSource returns tensors with expected shapes.
+
+    [Description]
+    Write required datasets to a temporary HDF5 file, instantiate HDF5StreamingSource with
+    an explicit sequence length, and confirm the first sample yields tensors with expected
+    dimensions and label values.
+
     Test Case ID: INF-DS-01
+    Scenario: Retrieve the first sample from a temporary HDF5 file using seq_len metadata.
+
+    Args:
+        None
+
+    Returns:
+        None
     """
     logger.info("Starting test: test_hdf5_streaming_source_getitem")
 
     with tempfile.TemporaryDirectory() as tmp_dir:
         h5_path = Path(tmp_dir) / "test.h5"
         
-        # [Fix] Use correct key names: 'X_num' (Capital), 'sid' (not ids)
+        logger.info("Writing HDF5 datasets with expected key names.")
         with h5py.File(h5_path, "w") as f:
             f.create_dataset("X_num", data=np.random.randn(5, 10, 4))
             f.create_dataset("X_cat", data=np.random.randint(0, 5, (5, 10, 2)))
@@ -24,7 +37,7 @@ def test_hdf5_streaming_source_getitem() -> None:
             f.create_dataset("sid", data=np.arange(5))
             f.create_dataset("mask", data=np.ones((5, 10))) 
 
-        # [Fix] Added seq_len argument
+        logger.info("Initializing HDF5StreamingSource with explicit sequence length.")
         source = HDF5StreamingSource(h5_path, seq_len=10)
         
         sample = source[0]
@@ -36,8 +49,20 @@ def test_hdf5_streaming_source_getitem() -> None:
 
 def test_parquet_source_loading() -> None:
     """
-    Validates initialization and length checking of ParquetSource.
+    [One-line Summary] Validate initialization and length checking of ParquetSource.
+
+    [Description]
+    Persist a small Polars DataFrame to Parquet, load it via ParquetSource, and assert the
+    reported length matches the number of rows to confirm basic dataset access.
+
     Test Case ID: INF-DS-02
+    Scenario: Initialize ParquetSource from a generated dataset and verify its length.
+
+    Args:
+        None
+
+    Returns:
+        None
     """
     logger.info("Starting test: test_parquet_source_loading")
     import polars as pl

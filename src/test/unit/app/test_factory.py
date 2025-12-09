@@ -9,11 +9,14 @@ from hint.services.training.evaluator import EvaluationService
 
 def test_factory_initialization() -> None:
     """
-    Verify AppFactory initializes with a valid Hydra configuration.
+    [One-line Summary] Verify AppFactory initializes with a valid Hydra configuration.
 
-    This test validates that `AppFactory` builds its context, registry, and telemetry observer when provided with minimal Hydra-style settings for data, ICD, and CNN components.
-    - Test Case ID: APP-01
-    - Scenario: Construct AppFactory from a synthetic configuration.
+    [Description]
+    Provide minimal Hydra-style settings for data, ICD, and CNN components and confirm the
+    factory builds its context, registry, and telemetry observer without errors.
+
+    Test Case ID: APP-01
+    Scenario: Construct AppFactory from a synthetic configuration.
 
     Args:
         None
@@ -41,11 +44,14 @@ def test_factory_initialization() -> None:
 
 def test_create_icd_service() -> None:
     """
-    Confirm AppFactory produces an ICDService instance.
+    [One-line Summary] Confirm AppFactory produces an ICDService instance.
 
-    This test validates that the factory wires dependencies and returns `ICDService` when backing sources are patched, ensuring correct service construction without file I/O.
-    - Test Case ID: APP-02
-    - Scenario: Build an ICD service using mocked ParquetSource dependencies.
+    [Description]
+    Patch backing Parquet sources and verify the factory wires dependencies to return an
+    ICDService instance while sharing the registry established during initialization.
+
+    Test Case ID: APP-02
+    Scenario: Build an ICD service using mocked ParquetSource dependencies.
 
     Args:
         None
@@ -75,11 +81,14 @@ def test_create_icd_service() -> None:
 
 def test_create_cnn_services() -> None:
     """
-    Verify AppFactory constructs paired Training and Evaluation services.
+    [One-line Summary] Verify AppFactory constructs paired Training and Evaluation services.
 
-    This test validates that patched data sources allow `create_cnn_services` to return both trainer and evaluator bound to the same entity, confirming wiring without real file access.
-    - Test Case ID: APP-03
-    - Scenario: Instantiate CNN training and evaluation services using mocked storage and metadata.
+    [Description]
+    Mock training data sources and metadata files, invoke `create_cnn_services`, and ensure
+    the factory returns coupled Training and Evaluation services bound to the same entity.
+
+    Test Case ID: APP-03
+    Scenario: Instantiate CNN training and evaluation services using mocked storage and metadata.
 
     Args:
         None

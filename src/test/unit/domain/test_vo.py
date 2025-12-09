@@ -6,11 +6,14 @@ from ..conftest import UnitFixtures
 
 def test_etl_config_immutability() -> None:
     """
-    Verify ETLConfig rejects mutation of frozen fields.
+    [One-line Summary] Verify ETLConfig rejects mutation of frozen fields.
 
-    This test validates that attempting to reassign immutable attributes on `ETLConfig` raises `ValidationError`, preserving configuration integrity.
-    - Test Case ID: VO-01
-    - Scenario: Mutate a frozen ETL configuration attribute after creation.
+    [Description]
+    Attempt to reassign immutable attributes on ETLConfig and assert a ValidationError is
+    raised to guarantee configuration integrity after initialization.
+
+    Test Case ID: VO-01
+    Scenario: Mutate a frozen ETL configuration attribute after creation.
 
     Args:
         None
@@ -30,11 +33,14 @@ def test_etl_config_immutability() -> None:
 
 def test_cnn_config_defaults() -> None:
     """
-    Confirm CNNConfig initializes with expected default hyperparameters.
+    [One-line Summary] Confirm CNNConfig initializes with expected default hyperparameters.
 
-    This test validates default values such as batch size, learning rate, and excluded columns to guarantee predictable initialization.
-    - Test Case ID: VO-02
-    - Scenario: Instantiate CNNConfig with minimal paths and inspect defaults.
+    [Description]
+    Instantiate CNNConfig with minimal paths and verify defaults such as batch size, learning
+    rate, and excluded columns to ensure predictable setup for training services.
+
+    Test Case ID: VO-02
+    Scenario: Instantiate CNNConfig with minimal paths and inspect defaults.
 
     Args:
         None
@@ -59,11 +65,14 @@ def test_cnn_config_defaults() -> None:
 
 def test_etl_config_exact_level2_list() -> None:
     """
-    Ensure ETLConfig populates the default exact_level2_104 list.
+    [One-line Summary] Ensure ETLConfig populates the default exact_level2_104 list.
 
-    This test validates that `ETLConfig` seeds the vital sign list with expected entries such as `heart rate`, indicating required schema coverage.
-    - Test Case ID: VO-03
-    - Scenario: Construct ETLConfig with minimal paths and inspect default vital sign list.
+    [Description]
+    Construct ETLConfig with minimal paths and confirm the default vital sign list includes
+    expected entries such as `heart rate`, indicating required schema coverage.
+
+    Test Case ID: VO-03
+    Scenario: Construct ETLConfig with minimal paths and inspect default vital sign list.
 
     Args:
         None

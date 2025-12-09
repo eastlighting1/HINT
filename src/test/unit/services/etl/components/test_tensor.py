@@ -8,6 +8,22 @@ from src.hint.services.etl.components.tensor import TensorConverter
 from src.test.unit.conftest import UnitFixtures
 
 def test_tensor_converter_hdf5_generation() -> None:
+    """
+    [One-line Summary] Verify TensorConverter writes HDF5 tensors from labeled dataset.
+
+    [Description]
+    Provide a minimal labeled dataset parquet, configure CNN cache location, run the tensor
+    converter, and confirm it emits at least one HDF5 artifact in the cache directory.
+
+    Test Case ID: ETL-TENSOR-01
+    Scenario: Generate cached tensors from processed labels using minimal configuration.
+
+    Args:
+        None
+
+    Returns:
+        None
+    """
     logger.info("Starting test: test_tensor_converter_hdf5_generation")
     with tempfile.TemporaryDirectory() as tmp_dir:
         tmp_path = Path(tmp_dir)

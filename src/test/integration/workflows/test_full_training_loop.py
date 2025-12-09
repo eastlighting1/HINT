@@ -10,10 +10,23 @@ from src.hint.domain.entities import InterventionModelEntity
 from src.hint.infrastructure.datasource import HDF5StreamingSource
 from src.test.unit.conftest import UnitFixtures
 
+
 def test_full_training_loop_integration() -> None:
     """
-    Validates the full training loop with real data sources and entity updates.
+    [One-line Summary] Validate the training loop completes with HDF5 sources and a compatible network.
+
+    [Description]
+    Create minimal HDF5 datasets, run TrainingService with a compatibility network that pools sequence
+    features, and verify the entity records a completed epoch while the registry persists the model.
+
     Test Case ID: TS-11
+    Scenario: Execute a single-epoch training run with synthetic data and confirm persistence hooks fire.
+
+    Args:
+        None
+
+    Returns:
+        None
     """
     logger.info("Starting test: test_full_training_loop_integration")
     
@@ -23,7 +36,7 @@ def test_full_training_loop_integration() -> None:
         val_path = tmp_path / "val.h5"
         
         seq_len = 10
-        # Create valid HDF5 files with correct keys
+        logger.info("Creating synthetic HDF5 datasets with numeric, categorical, and label entries.")
         for path in [train_path, val_path]:
             with h5py.File(path, 'w') as f:
                 f.create_dataset("X_num", data=np.random.randn(10, seq_len, 5).astype(np.float32))
@@ -42,11 +55,10 @@ def test_full_training_loop_integration() -> None:
             def __init__(self):
                 super().__init__()
                 self.fc = torch.nn.Linear(5, 4)
+
             def forward(self, x_num, x_cat):
-                # [Fix] Mean over sequence dimension (dim=1) to match input features (5)
-                # Input shape: (Batch, Seq, Feat) -> (4, 10, 5)
-                x_pooled = x_num.mean(dim=1) # -> (4, 5)
-                return self.fc(x_pooled)     # -> (4, 4)
+                x_pooled = x_num.mean(dim=1)
+                return self.fc(x_pooled)
 
         entity = InterventionModelEntity(CompatMockNet())
         

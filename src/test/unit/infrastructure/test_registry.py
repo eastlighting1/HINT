@@ -6,8 +6,20 @@ from src.hint.infrastructure.registry import FileSystemRegistry
 
 def test_filesystem_registry_save_load() -> None:
     """
-    Validates saving and loading artifacts using FileSystemRegistry.
+    [One-line Summary] Validate FileSystemRegistry persists and restores model artifacts.
+
+    [Description]
+    Save a model state dict to a temporary directory, confirm the artifact is written, and
+    reload it to verify epoch and weight tensors match the original values.
+
     Test Case ID: INF-REG-01
+    Scenario: Persist and reload model weights and metadata using FileSystemRegistry.
+
+    Args:
+        None
+
+    Returns:
+        None
     """
     logger.info("Starting test: test_filesystem_registry_save_load")
 
@@ -18,7 +30,7 @@ def test_filesystem_registry_save_load() -> None:
         
         registry.save_model(state, "my_model", "best")
         
-        # Check if any file was created starting with my_model
+        logger.info("Searching for persisted model artifact on disk.")
         found_files = list(Path(tmp_dir).rglob("my_model*"))
         assert len(found_files) > 0, f"No model file found in {tmp_dir}"
         

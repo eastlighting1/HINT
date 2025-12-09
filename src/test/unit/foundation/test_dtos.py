@@ -5,11 +5,14 @@ from ...utils.custom_assertions import assert_raises
 
 def test_tensor_batch_device_transfer() -> None:
     """
-    Verify TensorBatch moves all tensor fields to the target device.
+    [One-line Summary] Verify TensorBatch moves all tensor fields to the target device.
 
-    This test validates that `TensorBatch.to` transfers each tensor attribute to the specified device so downstream components receive consistent device placement.
-    - Test Case ID: DTO-01
-    - Scenario: Transfer a populated TensorBatch to a target device.
+    [Description]
+    Transfer a populated TensorBatch to a target device and assert every tensor attribute
+    reports the new device to guarantee downstream components see consistent placement.
+
+    Test Case ID: DTO-01
+    Scenario: Transfer a populated TensorBatch to a target device.
 
     Args:
         None
@@ -42,11 +45,14 @@ def test_tensor_batch_device_transfer() -> None:
 
 def test_tensor_batch_optional_fields() -> None:
     """
-    Confirm TensorBatch handles optional fields during device transfer.
+    [One-line Summary] Confirm TensorBatch handles optional fields during device transfer.
 
-    This test ensures `TensorBatch.to` leaves optional attributes as `None` while transferring present tensors, preserving optional inputs without raising errors.
-    - Test Case ID: DTO-02
-    - Scenario: Transfer a TensorBatch containing optional fields set to None.
+    [Description]
+    Move a TensorBatch that includes optional fields set to None and verify the transfer keeps
+    absent values untouched while relocating populated tensors to the target device.
+
+    Test Case ID: DTO-02
+    Scenario: Transfer a TensorBatch containing optional fields set to None.
 
     Args:
         None

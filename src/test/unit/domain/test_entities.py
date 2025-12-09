@@ -17,11 +17,14 @@ class MockCNN(nn.Module):
 
 def test_intervention_entity_initialization() -> None:
     """
-    Verify InterventionModelEntity initializes with expected defaults.
+    [One-line Summary] Verify InterventionModelEntity initializes with expected defaults.
 
-    This test validates that constructing `InterventionModelEntity` with a mock CNN sets the name, best metric, EMA tracker, and epoch counter to their expected starting values.
-    - Test Case ID: ENT-01
-    - Scenario: Instantiate InterventionModelEntity using a mock CNN dependency.
+    [Description]
+    Construct InterventionModelEntity with a mock CNN and confirm the name, best metric,
+    EMA tracker, and epoch counter are set to the baseline values expected before training.
+
+    Test Case ID: ENT-01
+    Scenario: Instantiate InterventionModelEntity using a mock CNN dependency.
 
     Args:
         None
@@ -44,11 +47,14 @@ def test_intervention_entity_initialization() -> None:
 
 def test_intervention_entity_state_dict_cycle() -> None:
     """
-    Validate state_dict save and load cycle for InterventionModelEntity.
+    [One-line Summary] Validate state_dict save/load cycle for InterventionModelEntity.
 
-    This test modifies entity attributes, exports `state_dict`, loads it into a new instance, and confirms the restored fields match to guarantee persistence correctness.
-    - Test Case ID: ENT-02
-    - Scenario: Persist and restore an entity after mutating training state.
+    [Description]
+    Mutate entity training state, export the state_dict, load it into a new instance, and
+    verify epoch, metric, and temperature fields are restored to prove persistence integrity.
+
+    Test Case ID: ENT-02
+    Scenario: Persist and restore an entity after mutating training state.
 
     Args:
         None
@@ -81,11 +87,14 @@ def test_intervention_entity_state_dict_cycle() -> None:
 
 def test_entity_device_move() -> None:
     """
-    Confirm InterventionModelEntity moves its network to the requested device.
+    [One-line Summary] Confirm InterventionModelEntity moves its network to the requested device.
 
-    This test ensures calling `to` relocates model parameters to the target device string so downstream training uses the correct hardware placement.
-    - Test Case ID: ENT-03
-    - Scenario: Move an entity backed by a mock CNN onto the CPU device.
+    [Description]
+    Invoke `to` on an entity backed by a mock CNN and assert that model parameters reside on
+    the requested device string so subsequent training occurs on the intended hardware.
+
+    Test Case ID: ENT-03
+    Scenario: Move an entity backed by a mock CNN onto the CPU device.
 
     Args:
         None

@@ -5,11 +5,14 @@ from hint.foundation.dtos import AppContext
 
 def test_load_app_context_valid_yaml() -> None:
     """
-    Verify AppContext creation from a populated Hydra configuration.
+    [One-line Summary] Verify AppContext creation from a populated Hydra configuration.
 
-    This test validates `load_app_context` when it receives a complete OmegaConf mapping for ETL, ICD, and CNN settings, ensuring the resulting `AppContext` carries the expected values.
-    - Test Case ID: FND-01
-    - Scenario: Build AppContext from complete Hydra configuration.
+    [Description]
+    Provide a complete OmegaConf mapping for ETL, ICD, and CNN settings to `load_app_context`
+    and assert the resulting AppContext carries the expected values across sections.
+
+    Test Case ID: FND-01
+    Scenario: Build AppContext from complete Hydra configuration.
 
     Args:
         None

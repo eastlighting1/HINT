@@ -211,3 +211,6 @@ resources/
 outputs/
 artifacts/
 nohup.out
+design.md
+requirements.md
+tasks.md

@@ -4,11 +4,14 @@ from hint.infrastructure.components import FocalLoss, TemperatureScaler
 
 def test_focal_loss_reduction() -> None:
     """
-    Verify FocalLoss returns a positive scalar when applied to logits.
+    [One-line Summary] Verify FocalLoss returns a positive scalar when applied to logits.
 
-    This test validates that `FocalLoss` with configured gamma and class count produces a zero-dimensional tensor and yields a positive value for random logits and targets.
-    - Test Case ID: INF-COMP-01
-    - Scenario: Compute focal loss on synthetic logits to confirm reduction behavior.
+    [Description]
+    Compute FocalLoss with configured gamma and class count on synthetic logits and targets,
+    asserting the reduction yields a scalar tensor with a positive value.
+
+    Test Case ID: INF-COMP-01
+    Scenario: Compute focal loss on synthetic logits to confirm reduction behavior.
 
     Args:
         None
@@ -35,11 +38,14 @@ def test_focal_loss_reduction() -> None:
 
 def test_temperature_scaler_scaling() -> None:
     """
-    Confirm TemperatureScaler scales logits using the configured temperature.
+    [One-line Summary] Confirm TemperatureScaler scales logits using the configured temperature.
 
-    This test validates that manually setting the temperature produces logits divided by that temperature, ensuring calibration behaves predictably.
-    - Test Case ID: INF-COMP-02
-    - Scenario: Apply temperature scaling to a known tensor and compare with expected output.
+    [Description]
+    Manually set the calibration temperature, apply the scaler to known logits, and verify the
+    output equals logits divided by the configured value to ensure predictable calibration.
+
+    Test Case ID: INF-COMP-02
+    Scenario: Apply temperature scaling to a known tensor and compare with expected output.
 
     Args:
         None
