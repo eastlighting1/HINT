@@ -1,2 +1,2 @@
-from hint.services.training.trainer import TrainingService
-from hint.services.training.evaluator import EvaluationService
+from .predict_intervention.trainer import TrainingService
+from .predict_intervention.evaluator import EvaluationService

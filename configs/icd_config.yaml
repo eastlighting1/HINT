@@ -1,5 +1,13 @@
-# configs/icd_config.yaml
-data_path: "data/processed/dataset_123_answer.parquet"
+data:
+  input_h5_prefix: "train_coding"
+  output_h5_prefix: "train_intervention"
+  inferred_col_name: "icd_inferred_code"
+  data_cache_dir: "data/cache"
+
+artifacts:
+  model_name: "icd_model"
+  stacker_name: "icd_stacker"
+
 model_name: "Charangan/MedBERT"
 
 # Training

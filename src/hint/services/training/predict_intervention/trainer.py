@@ -1,13 +1,11 @@
 import torch
-import torch.nn as nn
 from torch.utils.data import DataLoader, Dataset
-from typing import Optional
 
-from ...foundation.interfaces import TelemetryObserver, Registry
-from ...domain.entities import InterventionModelEntity
-from ...domain.vo import CNNConfig
-from ...infrastructure.components import FocalLoss
-from ...infrastructure.datasource import collate_tensor_batch
+from ....foundation.interfaces import TelemetryObserver, Registry
+from ....domain.entities import InterventionModelEntity
+from ....domain.vo import CNNConfig
+from ....infrastructure.components import FocalLoss
+from ....infrastructure.datasource import collate_tensor_batch
 
 class TrainingService:
     """
@@ -81,7 +79,7 @@ class TrainingService:
                 self.entity.best_metric = val_acc
                 no_improve = 0
                 self.entity.update_ema()
-                self.registry.save_model(self.entity.state_dict(), "cnn_model", "best")
+                self.registry.save_model(self.entity.state_dict(), self.cfg.artifacts.model_name, "best")
                 self.observer.log("INFO", f"CNN Service: Saved best model acc={val_acc:.4f} at epoch {epoch}")
             else:
                 no_improve += 1

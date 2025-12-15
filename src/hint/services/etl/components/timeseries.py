@@ -86,9 +86,11 @@ class TimeSeriesAggregator(PipelineComponent):
             .collect()
         )
         
-        vitals_labs.write_parquet(proc_dir / "vitals_labs.parquet")
-        self.observer.log("INFO", "TimeSeriesAggregator: Saved vitals_labs.parquet")
+        vitals_path = proc_dir / self.cfg.artifacts.vitals_file
+        vitals_labs.write_parquet(vitals_path)
+        self.observer.log("INFO", f"TimeSeriesAggregator: Saved {vitals_path.name}")
 
         vitals_mean = vitals_labs.select(["SUBJECT_ID", "HADM_ID", "ICUSTAY_ID", "HOURS_IN", "LABEL", "MEAN"])
-        vitals_mean.write_parquet(proc_dir / "vitals_labs_mean.parquet")
-        self.observer.log("INFO", "TimeSeriesAggregator: Saved vitals_labs_mean.parquet")
+        vitals_mean_path = proc_dir / self.cfg.artifacts.vitals_mean_file
+        vitals_mean.write_parquet(vitals_mean_path)
+        self.observer.log("INFO", f"TimeSeriesAggregator: Saved {vitals_mean_path.name}")

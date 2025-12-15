@@ -14,8 +14,8 @@ from ..services.etl.service import ETLService
 from ..services.etl.components.assembler import FeatureAssembler
 from ..services.etl.components.tensor import TensorConverter
 from ..services.etl.components.labels import LabelGenerator
-from ..services.icd.service import ICDService
-from ..services.training.trainer import TrainingService
+from ..services.training.automatic_icd_coding.service import ICDService
+from ..services.training.predict_intervention.trainer import TrainingService
 
 class AppFactory:
     """
@@ -60,10 +60,11 @@ class AppFactory:
 
     def create_icd_service(self) -> ICDService:
         cfg = self.ctx.icd
+        etl_cfg = self.ctx.etl
         registry = self.create_registry()
         observer = self.create_telemetry()
         
-        train_path = Path(cfg.data_path)
+        train_path = Path(etl_cfg.proc_dir) / etl_cfg.artifacts.features_file
         source = ParquetSource(train_path)
         
         return ICDService(
@@ -80,9 +81,10 @@ class AppFactory:
         registry = self.create_registry()
         observer = self.create_telemetry()
         
-        cache_dir = Path(cfg.data_cache_dir)
-        train_path = cache_dir / "train.h5"
-        val_path = cache_dir / "val.h5"
+        cache_dir = Path(cfg.data.data_cache_dir)
+        prefix = cfg.data.input_h5_prefix
+        train_path = cache_dir / f"{prefix}_train.h5"
+        val_path = cache_dir / f"{prefix}_val.h5"
         
         try:
             train_source = HDF5StreamingSource(train_path, seq_len=cfg.seq_len)

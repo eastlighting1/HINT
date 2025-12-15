@@ -21,7 +21,7 @@ class LabelGenerator(PipelineComponent):
         if not proc_dir.exists():
             proc_dir.mkdir(parents=True, exist_ok=True)
 
-        ds_path = proc_dir / "dataset_123.parquet"
+        ds_path = proc_dir / self.cfg.artifacts.features_file
         
         if not ds_path.exists():
              if not ds_path.is_absolute():
@@ -117,7 +117,7 @@ class LabelGenerator(PipelineComponent):
             .select(["ICUSTAY_ID", "HOUR_IN", "LABEL"])
         )
         
-        out_path = proc_dir / "labels.parquet"
+        out_path = proc_dir / self.cfg.artifacts.labels_file
         self.registry.save_labels(final_labels, out_path)
         
         self.observer.log("INFO", f"LabelGenerator: Saved labels to {out_path} (rows={final_labels.height})")

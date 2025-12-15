@@ -1,30 +1,31 @@
 data:
-  feature_path: "data/cache/features.h5"
-  label_path: "data/processed/labels.parquet"
+  input_h5_prefix: "train_intervention"
   data_cache_dir: "data/cache"
   exclude_cols: ["ICD9_CODES"]
 
-model:
-  seq_len: 120
-  batch_size: 512
-  epochs: 2
-  lr: 0.001
-  patience: 10
+artifacts:
+  model_name: "intervention_model"
+
+seq_len: 120
+batch_size: 512
+epochs: 2
+lr: 0.001
+patience: 10
   
-  # Scheduler
-  use_cosine_scheduler: false
-  T_0: 10
-  lr_patience: 5
+# Scheduler
+use_cosine_scheduler: false
+T_0: 10
+lr_patience: 5
 
-  # Loss
-  focal_gamma: 2.0
-  label_smoothing: 0.1
-  ema_decay: 0.999
+# Loss
+focal_gamma: 2.0
+label_smoothing: 0.1
+ema_decay: 0.999
 
-  # Architecture
-  embed_dim: 128
-  cat_embed_dim: 32
-  dropout: 0.5
-  tcn_kernel_size: 5
-  tcn_layers: 5
-  tcn_dropout: 0.4
+# Architecture
+embed_dim: 128
+cat_embed_dim: 32
+dropout: 0.5
+tcn_kernel_size: 5
+tcn_layers: 5
+tcn_dropout: 0.4

@@ -36,32 +36,19 @@ def load_app_context(cfg: DictConfig) -> AppContext:
     """
     Build the strongly typed application context from the Hydra configuration.
     """
-    etl_data = cfg.get("etl", {}).get("data", {})
-    etl_cohort = cfg.get("etl", {}).get("cohort", {})
-    etl_proc = cfg.get("etl", {}).get("processing", {})
-    
+    etl_raw = OmegaConf.to_container(cfg.get("etl", {}), resolve=True) or {}
     etl_cfg = ETLConfig(
-        raw_dir=str(etl_data.get("raw_dir", "./data/raw")),
-        proc_dir=str(etl_data.get("proc_dir", "./data/processed")),
-        resources_dir=str(etl_data.get("resources_dir", "./resources")),
-        **etl_cohort,
-        **etl_proc
+        **etl_raw.get("data", {}),
+        **etl_raw.get("cohort", {}),
+        **etl_raw.get("processing", {}),
+        artifacts=etl_raw.get("artifacts", {}),
     )
 
-    icd_raw = OmegaConf.to_container(cfg.get("icd", {}), resolve=True)
+    icd_raw = OmegaConf.to_container(cfg.get("icd", {}), resolve=True) or {}
     icd_cfg = ICDConfig(**icd_raw)
 
-    cnn_raw = cfg.get("cnn", {})
-    cnn_data = cnn_raw.get("data", {})
-    cnn_model = cnn_raw.get("model", {})
-
-    cnn_cfg = CNNConfig(
-        feature_path=str(cnn_data.get("feature_path", "data/cache/train.h5")),
-        label_path=str(cnn_data.get("label_path", "data/processed/labels.parquet")),
-        data_cache_dir=str(cnn_data.get("data_cache_dir", "data/cache")),
-        exclude_cols=list(cnn_data.get("exclude_cols", ["ICD9_CODES"])),
-        **cnn_model,
-    )
+    cnn_raw = OmegaConf.to_container(cfg.get("cnn", {}), resolve=True) or {}
+    cnn_cfg = CNNConfig(**cnn_raw)
 
     return AppContext(
         etl=etl_cfg,

@@ -33,14 +33,14 @@ class TensorConverter(PipelineComponent):
         if not proc_dir.is_absolute():
             proc_dir = Path.cwd() / proc_dir
             
-        feat_path = proc_dir / "dataset_123.parquet"
+        feat_path = proc_dir / self.etl_cfg.artifacts.features_file
         if not feat_path.exists():
              raise FileNotFoundError(f"Feature file not found at: {feat_path}")
         
         self.observer.log("INFO", f"TensorConverter: Loading features from {feat_path}")
         df_feat = pl.read_parquet(feat_path)
 
-        label_path = proc_dir / "labels.parquet"
+        label_path = proc_dir / self.etl_cfg.artifacts.labels_file
         if not label_path.exists():
             raise FileNotFoundError(f"Label file not found at: {label_path}")
         
@@ -55,7 +55,7 @@ class TensorConverter(PipelineComponent):
         )
         
         id_cols = ["SUBJECT_ID", "HADM_ID", "ICUSTAY_ID", "HOUR_IN"]
-        exclude = self.cnn_cfg.exclude_cols + ["VENT_CLASS", "ICD9_CODES", "LABEL"] 
+        exclude = self.cnn_cfg.data.exclude_cols + ["VENT_CLASS", "ICD9_CODES", "LABEL"] 
         
         numeric_cols = []
         categorical_cols = []
@@ -111,14 +111,15 @@ class TensorConverter(PipelineComponent):
                 elif np.isnan(val): stats[k] = 0.0
                 else: stats[k] = val
         
-        cache_dir = Path(self.cnn_cfg.data_cache_dir)
+        cache_dir = Path(self.cnn_cfg.data.data_cache_dir)
         cache_dir.mkdir(parents=True, exist_ok=True)
         with open(cache_dir / "stats.json", "w") as f:
             json.dump(stats, f, indent=2)
 
-        self._process_split(df_tr, "train", numeric_cols, feat_names_num, categorical_idx_cols, stats, cache_dir)
-        self._process_split(df.filter(pl.col("ICUSTAY_ID").is_in(val_ids)), "val", numeric_cols, feat_names_num, categorical_idx_cols, stats, cache_dir)
-        self._process_split(df.filter(pl.col("ICUSTAY_ID").is_in(test_ids)), "test", numeric_cols, feat_names_num, categorical_idx_cols, stats, cache_dir)
+        prefix = self.etl_cfg.artifacts.output_h5_prefix
+        self._process_split(df_tr, "train", numeric_cols, feat_names_num, categorical_idx_cols, stats, cache_dir, prefix)
+        self._process_split(df.filter(pl.col("ICUSTAY_ID").is_in(val_ids)), "val", numeric_cols, feat_names_num, categorical_idx_cols, stats, cache_dir, prefix)
+        self._process_split(df.filter(pl.col("ICUSTAY_ID").is_in(test_ids)), "test", numeric_cols, feat_names_num, categorical_idx_cols, stats, cache_dir, prefix)
 
     def _flush_batch(self, h5_datasets, buffers):
         batch_len = len(buffers['y'])
@@ -136,8 +137,8 @@ class TensorConverter(PipelineComponent):
         
         for k in buffers: buffers[k].clear()
 
-    def _process_split(self, df: pl.DataFrame, split_name: str, num_cols: List[str], feat_names: List[str], cat_cols: List[str], stats: Dict[str, float], cache_dir: Path) -> None:
-        h5_path = cache_dir / f"{split_name}.h5"
+    def _process_split(self, df: pl.DataFrame, split_name: str, num_cols: List[str], feat_names: List[str], cat_cols: List[str], stats: Dict[str, float], cache_dir: Path, prefix: str) -> None:
+        h5_path = cache_dir / f"{prefix}_{split_name}.h5"
         self.observer.log("INFO", f"TensorConverter: Writing {split_name} split to {h5_path}")
         
         df = df.sort(by=["ICUSTAY_ID", "HOUR_IN"])

@@ -106,6 +106,6 @@ class StaticExtractor(PipelineComponent):
             .collect()
         )
 
-        out_path = proc_dir / "patients.parquet"
+        out_path = proc_dir / self.cfg.artifacts.patients_file
         df.write_parquet(out_path)
         self.observer.log("INFO", f"StaticExtractor: Saved cohort to {out_path} (rows={df.height})")

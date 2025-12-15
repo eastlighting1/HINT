@@ -25,24 +25,25 @@ class FeatureAssembler(PipelineComponent):
         proc_dir = Path(self.cfg.proc_dir)
         raw_dir = Path(self.cfg.raw_dir)
         
-        if (proc_dir / "patients.parquet").exists():
-            patients = pl.read_parquet(proc_dir / "patients.parquet")
+        patients_path = proc_dir / self.cfg.artifacts.patients_file
+        if patients_path.exists():
+            patients = pl.read_parquet(patients_path)
         else:
-            self.observer.log("WARNING", "patients.parquet not found. Attempting to use available processed data or fail.")
+            self.observer.log("WARNING", f"{patients_path.name} not found. Attempting to use available processed data or fail.")
             pass
 
-        if not (proc_dir / "patients.parquet").exists():
-             raise FileNotFoundError(f"Dependency missing: {proc_dir}/patients.parquet")
+        if not patients_path.exists():
+             raise FileNotFoundError(f"Dependency missing: {patients_path}")
              
-        patients = pl.read_parquet(proc_dir / "patients.parquet").with_columns([
+        patients = pl.read_parquet(patients_path).with_columns([
             pl.col("SUBJECT_ID").cast(pl.Int64),
             pl.col("HADM_ID").cast(pl.Int64),
             pl.col("ICUSTAY_ID").cast(pl.Int64),
             pl.col("INTIME").cast(pl.Datetime),
         ])
         
-        vitals = pl.read_parquet(proc_dir / "vitals_labs_mean.parquet")
-        interventions = pl.read_parquet(proc_dir / "interventions.parquet")
+        vitals = pl.read_parquet(proc_dir / self.cfg.artifacts.vitals_mean_file)
+        interventions = pl.read_parquet(proc_dir / self.cfg.artifacts.interventions_file)
         
         cand = raw_dir / "DIAGNOSES_ICD.csv"
         if not cand.exists() and (raw_dir / "DIAGNOSES_ICD.csv.gz").exists():
@@ -169,6 +170,6 @@ class FeatureAssembler(PipelineComponent):
             .sort(["SUBJECT_ID", "HADM_ID", "ICUSTAY_ID", "HOUR_IN"])
         )
 
-        out_path = proc_dir / "dataset_123.parquet"
+        out_path = proc_dir / self.cfg.artifacts.features_file
         feat.write_parquet(out_path)
-        self.observer.log("INFO", f"FeatureAssembler: Wrote dataset_123.parquet (rows={feat.height})")
+        self.observer.log("INFO", f"FeatureAssembler: Wrote {out_path.name} (rows={feat.height})")

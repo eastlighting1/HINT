@@ -66,5 +66,6 @@ class OutcomesBuilder(PipelineComponent):
             .sort(["SUBJECT_ID", "HADM_ID", "ICUSTAY_ID", "HOUR_IN"])
         )
 
-        flags_union.write_parquet(proc_dir / "interventions.parquet")
-        self.observer.log("INFO", f"OutcomesBuilder: Saved interventions.parquet (rows={flags_union.height})")
+        out_path = proc_dir / self.cfg.artifacts.interventions_file
+        flags_union.write_parquet(out_path)
+        self.observer.log("INFO", f"OutcomesBuilder: Saved {out_path.name} (rows={flags_union.height})")

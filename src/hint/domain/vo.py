@@ -5,11 +5,24 @@ class HyperparamVO(BaseModel):
     """Base class for immutable configuration objects."""
     model_config = ConfigDict(frozen=True)
 
+class ArtifactsConfig(HyperparamVO):
+    """Generic artifact naming and locations."""
+    patients_file: str = "patients.parquet"
+    vitals_file: str = "vitals_labs.parquet"
+    vitals_mean_file: str = "vitals_labs_mean.parquet"
+    interventions_file: str = "interventions.parquet"
+    features_file: str = "dataset_123.parquet"
+    labels_file: str = "labels.parquet"
+    output_h5_prefix: str = "train_coding"
+    model_name: Optional[str] = None
+
 class ETLConfig(HyperparamVO):
     """Configuration for ETL pipeline."""
     raw_dir: str = "./data/raw"
     proc_dir: str = "./data/processed"
     resources_dir: str = "./resources"
+
+    artifacts: ArtifactsConfig = Field(default_factory=ArtifactsConfig)
 
     min_los_icu_days: float = 0.0
     min_duration_hours: int = 0
@@ -57,9 +70,22 @@ class ETLConfig(HyperparamVO):
         "white blood cell count urine"
     ])
 
+class ICDDataConfig(HyperparamVO):
+    """Data flow configuration for ICD service."""
+    input_h5_prefix: str = "train_coding"
+    output_h5_prefix: str = "train_intervention"
+    inferred_col_name: str = "icd_inferred_code"
+    data_cache_dir: str = "data/cache"
+
+class ICDArtifactsConfig(HyperparamVO):
+    """Artifact naming for ICD trainer outputs."""
+    model_name: str = "icd_model"
+    stacker_name: str = "icd_stacker"
+
 class ICDConfig(HyperparamVO):
     """Configuration for ICD service."""
-    data_path: str
+    data: ICDDataConfig = Field(default_factory=ICDDataConfig)
+    artifacts: ICDArtifactsConfig = Field(default_factory=ICDArtifactsConfig)
     model_name: str = "Charangan/MedBERT"
     batch_size: int = 2048
     lr: float = 1e-5
@@ -92,12 +118,20 @@ class ICDConfig(HyperparamVO):
     xai_sample_size: int = 5
     xai_nsamples: Union[str, int] = 200
 
-class CNNConfig(HyperparamVO):
-    """Configuration for CNN service."""
-    feature_path: str = "data/cache/train.h5" 
-    label_path: str = "data/processed/labels.parquet"
+class CNNDataConfig(HyperparamVO):
+    """Data flow configuration for CNN service."""
+    input_h5_prefix: str = "train_intervention"
     data_cache_dir: str = "data/cache"
     exclude_cols: List[str] = Field(default_factory=lambda: ["ICD9_CODES"])
+
+class CNNArtifactsConfig(HyperparamVO):
+    """Artifact naming for CNN outputs."""
+    model_name: str = "intervention_model"
+
+class CNNConfig(HyperparamVO):
+    """Configuration for CNN service."""
+    data: CNNDataConfig = Field(default_factory=CNNDataConfig)
+    artifacts: CNNArtifactsConfig = Field(default_factory=CNNArtifactsConfig)
     
     seq_len: int = 120
     batch_size: int = 512

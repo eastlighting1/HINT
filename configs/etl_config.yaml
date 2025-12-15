@@ -13,3 +13,12 @@ processing:
   input_window_h: 6
   gap_h: 6
   pred_window_h: 4
+
+artifacts:
+  patients_file: "patients.parquet"
+  vitals_file: "vitals_labs.parquet"
+  vitals_mean_file: "vitals_labs_mean.parquet"
+  interventions_file: "interventions.parquet"
+  features_file: "dataset_123.parquet"
+  labels_file: "labels.parquet"
+  output_h5_prefix: "train_coding"

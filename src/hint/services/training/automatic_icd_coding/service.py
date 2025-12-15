@@ -9,12 +9,12 @@ from sklearn.model_selection import train_test_split
 from sklearn.preprocessing import LabelEncoder
 from sklearn.metrics import accuracy_score
 
-from ...domain.entities import ICDModelEntity
-from ...domain.vo import ICDConfig, CNNConfig
-from ...foundation.interfaces import TelemetryObserver, Registry, StreamingSource
-from ...infrastructure.components import CBFocalLoss, XGBoostStacker
-from ...infrastructure.datasource import ICDDataset, custom_collate, _to_python_list
-from ...infrastructure.networks import MedBERTClassifier
+from ....domain.entities import ICDModelEntity
+from ....domain.vo import ICDConfig, CNNConfig
+from ....foundation.interfaces import TelemetryObserver, Registry, StreamingSource
+from ....infrastructure.components import CBFocalLoss, XGBoostStacker
+from ....infrastructure.datasource import ICDDataset, custom_collate, _to_python_list
+from ....infrastructure.networks import MedBERTClassifier
 
 class ICDService:
     def __init__(
@@ -205,9 +205,9 @@ class ICDService:
 
             if val_acc > self.entity.best_metric:
                 self.entity.best_metric = val_acc
-                self.registry.save_model(self.entity.state_dict(), "icd_model", "best")
+                self.registry.save_model(self.entity.state_dict(), self.cfg.artifacts.model_name, "best")
                 if self.entity.stacker.model:
-                     self.registry.save_sklearn(self.entity.stacker.model, "icd_stacker_best")
+                     self.registry.save_sklearn(self.entity.stacker.model, f"{self.cfg.artifacts.stacker_name}_best")
                 self.observer.log("INFO", f"ICD Service: New best accuracy {val_acc:.4f} at epoch {epoch}")
 
         self.observer.log("INFO", "ICD Service: Training complete.")
@@ -260,34 +260,42 @@ class ICDService:
         
         return float(accuracy_score(y_val_ens, preds))
 
-    def inject_predictions(self, cnn_config: CNNConfig) -> None:
+    def _ensure_entity_loaded(self) -> bool:
         """
-        Inject ICD predictions into cached CNN datasets.
+        Ensure the ICD model and metadata are available for inference.
 
-        Args:
-            cnn_config: CNN configuration containing cache directory information.
+        Returns:
+            bool: True if the entity is ready, False otherwise.
         """
-        self.observer.log("INFO", "ICD Service: Starting prediction injection into cached datasets.")
-        
-        if self.entity is None:
-            try:
-                state = self.registry.load_model("icd_model", "best", str(self.device))
-                if self.feats and self.le:
-                    num_feats = len(self.feats)
-                    num_classes = len(self.le.classes_)
-                    head1 = MedBERTClassifier(self.cfg.model_name, num_num=num_feats, num_cls=num_classes)
-                    head2 = MedBERTClassifier(self.cfg.model_name, num_num=num_feats, num_cls=num_classes)
-                    stacker = XGBoostStacker(self.cfg.xgb_params)
-                    self.entity = ICDModelEntity(head1, head2, stacker)
-                    self.entity.load_state_dict(state)
-                    self.entity.to(str(self.device))
-                    self.observer.log("INFO", "ICD Service: Model state reloaded for injection workflow.")
-                else:
-                    self.observer.log("ERROR", "ICD Service: Missing feature metadata; run training before injection.")
-                    return
-            except Exception:
-                self.observer.log("WARNING", "ICD Service: Unable to load saved model; ensure train workflow completed.")
-                return
+        if self.entity is not None:
+            return True
+
+        try:
+            state = self.registry.load_model(self.cfg.artifacts.model_name, "best", str(self.device))
+            if self.feats and self.le:
+                num_feats = len(self.feats)
+                num_classes = len(self.le.classes_)
+                head1 = MedBERTClassifier(self.cfg.model_name, num_num=num_feats, num_cls=num_classes)
+                head2 = MedBERTClassifier(self.cfg.model_name, num_num=num_feats, num_cls=num_classes)
+                stacker = XGBoostStacker(self.cfg.xgb_params)
+                self.entity = ICDModelEntity(head1, head2, stacker)
+                self.entity.load_state_dict(state)
+                self.entity.to(str(self.device))
+                self.observer.log("INFO", "ICD Service: Model state reloaded for inference.")
+                return True
+            self.observer.log("ERROR", "ICD Service: Missing feature metadata; run training before inference.")
+        except Exception as exc:
+            self.observer.log("WARNING", f"ICD Service: Unable to load saved model ({exc}); ensure train workflow completed.")
+        return False
+
+    def generate_intervention_dataset(self, cnn_config: CNNConfig) -> None:
+        """
+        Run inference on the coding dataset and emit enriched H5 artifacts for the intervention task.
+        """
+        self.observer.log("INFO", "ICD Service: Starting intervention dataset generation.")
+
+        if not self._ensure_entity_loaded():
+            return
 
         self.entity.head1.eval()
         self.entity.head2.eval()
@@ -296,83 +304,95 @@ class ICDService:
         self.observer.log("INFO", "ICD Service: Preparing inference map from training source.")
         df_pl = self.train_source.load()
         df = df_pl.to_pandas()
-        
+
         drop_cols = ["SUBJECT_ID", "HADM_ID", "ICUSTAY_ID", "HOUR_IN", "ICD9_CODES", "target_label", "label_list", "raw_label", "VENT_CLASS"]
         feats = [c for c in df.select_dtypes("number").columns if c not in drop_cols]
         for f_name in feats:
             df[f_name] = df[f_name].fillna(0.0).astype(np.float32)
-            
+
         from transformers import AutoTokenizer
         tokenizer = AutoTokenizer.from_pretrained(self.cfg.model_name)
-        
+
         sid_to_idx = {sid: i for i, sid in enumerate(df["ICUSTAY_ID"].values)}
-        
+
         raw_codes = df["ICD9_CODES"].tolist()
         texts = [" ".join(_to_python_list(c)) for c in raw_codes]
-        
+
         self.observer.log("INFO", "ICD Service: Tokenizing texts for full dataset inference.")
         encodings = tokenizer(
-            texts, 
-            padding=True, 
-            truncation=True, 
-            max_length=self.cfg.max_length, 
+            texts,
+            padding=True,
+            truncation=True,
+            max_length=self.cfg.max_length,
             return_tensors="pt"
         )
         input_ids_all = encodings["input_ids"]
         mask_all = encodings["attention_mask"]
         nums_all = torch.tensor(df[feats].values, dtype=torch.float32)
-        
-        cache_dir = Path(cnn_config.data_cache_dir)
-        target_files = ["train.h5", "val.h5", "test.h5"]
-        
-        output_dim = self.entity.head1.fc.out_features 
-        
+
+        cache_dir = Path(self.cfg.data.data_cache_dir or cnn_config.data.data_cache_dir)
+        input_prefix = self.cfg.data.input_h5_prefix
+        output_prefix = self.cfg.data.output_h5_prefix
+
+        target_files = [f"{input_prefix}_{split}.h5" for split in ["train", "val", "test"]]
+        output_dim = self.entity.head1.fc.out_features
+
         for fname in target_files:
-            fpath = cache_dir / fname
-            if not fpath.exists():
-                self.observer.log("WARNING", f"ICD Service: Skipping missing cache file {fname}.")
+            src_path = cache_dir / fname
+            if not src_path.exists():
+                self.observer.log("WARNING", f"ICD Service: Skipping missing cache file {src_path.name}.")
                 continue
-            
-            self.observer.log("INFO", f"ICD Service: Injecting predictions into {fname}.")
-            
-            with h5py.File(fpath, "r+") as f:
-                sids = f["sid"][:]
+
+            split_name = fname.replace(f"{input_prefix}_", "").replace(".h5", "")
+            dst_path = cache_dir / f"{output_prefix}_{split_name}.h5"
+            self.observer.log("INFO", f"ICD Service: Augmenting {src_path.name} -> {dst_path.name}")
+
+            with h5py.File(src_path, "r") as src, h5py.File(dst_path, "w") as dst:
+                for key in src.keys():
+                    if key in ("X_icd", self.cfg.data.inferred_col_name):
+                        continue
+                    dst.copy(src[key], key)
+
+                sids = src["sid"][:]
                 total = len(sids)
-                
-                if "X_icd" in f:
-                    del f["X_icd"]
-                
-                dset = f.create_dataset("X_icd", (total, output_dim), dtype=np.float32)
-                
+                prob_ds = dst.create_dataset("X_icd", (total, output_dim), dtype=np.float32)
+                code_ds = dst.create_dataset(self.cfg.data.inferred_col_name, (total,), dtype=np.int64)
+
                 chunk_size = 512
                 for i in range(0, total, chunk_size):
-                    batch_sids = sids[i : i + chunk_size]
-                    
+                    batch_sids = sids[i: i + chunk_size]
                     batch_indices = [sid_to_idx.get(sid, -1) for sid in batch_sids]
                     valid_indices = [idx for idx in batch_indices if idx != -1]
-                    
+
                     if not valid_indices:
-                        dset[i : i + chunk_size] = np.zeros((len(batch_sids), output_dim))
+                        prob_ds[i: i + len(batch_sids)] = np.zeros((len(batch_sids), output_dim), dtype=np.float32)
+                        code_ds[i: i + len(batch_sids)] = -1
                         continue
 
                     b_ids = input_ids_all[valid_indices].to(self.device)
                     b_mask = mask_all[valid_indices].to(self.device)
                     b_num = nums_all[valid_indices].to(self.device)
-                    
+
                     with torch.no_grad():
                         o1 = self.entity.head1(b_ids, b_mask, b_num)
                         o2 = self.entity.head2(b_ids, b_mask, b_num)
                         avg_logits = (o1 + o2) / 2
                         probs = torch.softmax(avg_logits, dim=-1)
-                        
+
                     res_arr = np.zeros((len(batch_sids), output_dim), dtype=np.float32)
-                    
+                    argmax_arr = np.zeros((len(batch_sids),), dtype=np.int64)
+
                     curr_valid = 0
                     for j, idx in enumerate(batch_indices):
                         if idx != -1:
-                            res_arr[j] = probs[curr_valid].cpu().numpy()
+                            prob_vec = probs[curr_valid].cpu().numpy()
+                            res_arr[j] = prob_vec
+                            argmax_arr[j] = int(prob_vec.argmax())
                             curr_valid += 1
-                            
-                    dset[i : i + len(batch_sids)] = res_arr
-                    
-        self.observer.log("INFO", "ICD Service: Injection complete.")
+                        else:
+                            argmax_arr[j] = -1
+
+                    prob_ds[i: i + len(batch_sids)] = res_arr
+                    code_ds[i: i + len(batch_sids)] = argmax_arr
+
+        self.observer.log("INFO", "ICD Service: Augmentation complete.")

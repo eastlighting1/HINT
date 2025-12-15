@@ -21,8 +21,8 @@ def main() -> None:
             logged_start = True
         icd_service.observer.log("INFO", "App: Training ICD model.")
         icd_service.train()
-        icd_service.observer.log("INFO", "App: Injecting ICD predictions into cached datasets.")
-        icd_service.inject_predictions(factory.ctx.cnn)
+        icd_service.observer.log("INFO", "App: Generating intervention dataset with ICD inference.")
+        icd_service.generate_intervention_dataset(factory.ctx.cnn)
 
     if mode in ["all", "cnn", "train"]:
         cnn_service = factory.create_cnn_service()
