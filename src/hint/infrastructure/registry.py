@@ -6,7 +6,6 @@ from pathlib import Path
 from typing import Any, Dict, Optional, Union
 
 from ..foundation.interfaces import Registry
-from ..foundation.exceptions import ConfigurationError
 
 class FileSystemRegistry(Registry):
     """
@@ -75,6 +74,14 @@ class FileSystemRegistry(Registry):
         if not path.exists():
             raise FileNotFoundError(f"Data artifact {name} not found at {path}")
         return pl.read_parquet(path)
+
+    def save_labels(self, df: Any, name: Union[str, Path]) -> Path:
+        """Specifically saves label dataframes."""
+        return self.save_dataframe(df, name)
+
+    def load_labels(self, name: Union[str, Path]) -> pl.DataFrame:
+        """Specifically loads label dataframes."""
+        return self.load_dataframe(name)
 
     def save_json(self, data: Dict[str, Any], name: Union[str, Path]) -> Path:
         path = self._resolve_path(name, "metrics")

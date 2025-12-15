@@ -1,5 +1,5 @@
 from pydantic import BaseModel, Field, ConfigDict
-from typing import List, Optional, Tuple, Union
+from typing import List, Tuple, Union, Optional
 
 class HyperparamVO(BaseModel):
     """Base class for immutable configuration objects."""
@@ -94,8 +94,9 @@ class ICDConfig(HyperparamVO):
 
 class CNNConfig(HyperparamVO):
     """Configuration for CNN service."""
-    data_path: str
-    data_cache_dir: str
+    feature_path: str = "data/cache/train.h5" 
+    label_path: str = "data/processed/labels.parquet"
+    data_cache_dir: str = "data/cache"
     exclude_cols: List[str] = Field(default_factory=lambda: ["ICD9_CODES"])
     
     seq_len: int = 120

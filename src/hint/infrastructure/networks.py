@@ -1,6 +1,6 @@
 import torch
 import torch.nn as nn
-from typing import List, Sequence, Optional, Dict
+from typing import List, Sequence, Optional, Union
 from transformers import AutoModel
 
 class DilatedResidualBlock(nn.Module):
@@ -38,16 +38,26 @@ class DilatedResidualBlock(nn.Module):
 
 class GFINet_CNN(nn.Module):
     """
-    Multi-branch temporal CNN with ICD-conditioned gating.
+    Multi-branch temporal CNN with optional ICD-conditioned gating.
+
+    Args:
+        in_chs: Channel count for numeric inputs or a list of channel counts to be summed.
+        n_cls: Number of output classes.
+        vocab_sizes: Vocabulary sizes for each categorical branch.
+        icd_dim: Dimension of the ICD feature vector.
+        embed_dim: Embedding dimension for numeric and ICD projections.
+        cat_embed_dim: Embedding dimension for categorical inputs.
+        head_drop: Dropout rate for the classification head.
+        tcn_drop: Dropout rate for temporal convolutional residual blocks.
+        kernel: Kernel size for temporal convolutions.
+        layers: Number of dilated residual layers.
     """
     def __init__(
         self,
-        in_chs: Sequence[int],
+        in_chs: Union[int, Sequence[int]],
         n_cls: int,
-        g1: Sequence[int],
-        g2: Sequence[int],
-        rest: Sequence[int],
-        cat_vocab_sizes: Dict[str, int],
+        vocab_sizes: List[int],
+        icd_dim: int = 0,
         embed_dim: int = 128,
         cat_embed_dim: int = 32,
         head_drop: float = 0.3,
@@ -59,11 +69,6 @@ class GFINet_CNN(nn.Module):
 
         self.embed_dim = embed_dim
         dilations = [2**i for i in range(layers)]
-
-        # [Fix] Use torch.as_tensor to handle both list and tensor inputs without warning
-        self.register_buffer("g1", torch.as_tensor(g1, dtype=torch.long))
-        self.register_buffer("g2", torch.as_tensor(g2, dtype=torch.long))
-        self.register_buffer("rest", torch.as_tensor(rest, dtype=torch.long))
 
         def build_tcn_stack(in_dim: int, out_dim: int) -> nn.Sequential:
             base: List[nn.Module] = [
@@ -77,75 +82,81 @@ class GFINet_CNN(nn.Module):
                 base.append(DilatedResidualBlock(out_dim, out_dim, kernel, 1, d, tcn_drop))
             return nn.Sequential(*base)
 
-        self.numeric_branches = nn.ModuleList()
-        for channels in in_chs:
-            if channels > 0:
-                self.numeric_branches.append(build_tcn_stack(channels, embed_dim))
-            else:
-                self.numeric_branches.append(None)
+        if isinstance(in_chs, (list, tuple)):
+            numeric_in_dim = sum(in_chs)
+        else:
+            numeric_in_dim = in_chs
+            
+        self.numeric_branch = build_tcn_stack(numeric_in_dim, embed_dim)
 
-        num_in_numeric = 3 * embed_dim
-
-        self.cat_feat_names = list(cat_vocab_sizes.keys())
         self.cat_embeddings = nn.ModuleList()
         self.cat_branches = nn.ModuleList()
-        total_cat_dim = 0
-
-        for feat_name in self.cat_feat_names:
-            vocab_size = cat_vocab_sizes[feat_name]
-            self.cat_embeddings.append(nn.Embedding(vocab_size, cat_embed_dim, padding_idx=0))
+        
+        for vs in vocab_sizes:
+            self.cat_embeddings.append(nn.Embedding(vs, cat_embed_dim, padding_idx=0))
             self.cat_branches.append(build_tcn_stack(cat_embed_dim, cat_embed_dim))
-            total_cat_dim += cat_embed_dim
 
-        self.gate_linear = nn.Sequential(nn.Linear(total_cat_dim, num_in_numeric), nn.Sigmoid())
+        self.icd_dim = icd_dim
+        self.icd_projector = None
+        if icd_dim > 0:
+            self.icd_projector = nn.Sequential(
+                nn.Linear(icd_dim, embed_dim),
+                nn.ReLU(),
+                nn.Dropout(0.2)
+            )
 
-        head_in = num_in_numeric + total_cat_dim
+        total_feature_dim = embed_dim
+        if vocab_sizes:
+            total_feature_dim += (len(vocab_sizes) * cat_embed_dim)
+        
+        if icd_dim > 0:
+            total_feature_dim += embed_dim
+
         self.head = nn.Sequential(
-            nn.Linear(head_in, head_in // 2),
+            nn.Linear(total_feature_dim, total_feature_dim // 2),
             nn.ReLU(),
             nn.Dropout(head_drop),
-            nn.Linear(head_in // 2, n_cls),
+            nn.Linear(total_feature_dim // 2, n_cls),
         )
 
-    def forward(self, x_full: torch.Tensor, x_cat: torch.Tensor) -> torch.Tensor:
-        xg1 = x_full.index_select(1, self.g1)
-        xg2 = x_full.index_select(1, self.g2)
-        xr = x_full.index_select(1, self.rest)
+    def forward(self, x_num: torch.Tensor, x_cat: torch.Tensor, x_icd: Optional[torch.Tensor] = None) -> torch.Tensor:
+        """
+        Forward pass combining numeric, categorical, and optional ICD inputs.
 
-        numeric_inputs = [xg1, xg2, xr]
-        batch_size = x_full.size(0)
-        device = x_full.device
+        Args:
+            x_num: Numeric tensor shaped (batch, channels, time).
+            x_cat: Categorical tensor shaped (batch, n_categories, time).
+            x_icd: Optional ICD feature tensor shaped (batch, icd_dim).
 
-        numeric_pooled: List[torch.Tensor] = []
-        for branch, tensor in zip(self.numeric_branches, numeric_inputs):
-            if branch is None or tensor.size(1) == 0:
-                numeric_pooled.append(torch.zeros(batch_size, self.embed_dim, device=device))
-                continue
-            hidden = branch(tensor)
-            numeric_pooled.append(hidden[:, :, -1])
+        Returns:
+            Logits for each class.
+        """
+        num_out = self.numeric_branch(x_num)
+        num_pool = num_out[:, :, -1] 
 
-        p1, p2, p3 = numeric_pooled
-
-        cat_pooled: List[torch.Tensor] = []
-        for idx, (embedding, branch) in enumerate(zip(self.cat_embeddings, self.cat_branches)):
-            feature = x_cat[:, idx, :]
-            embedded = embedding(feature).permute(0, 2, 1)
-            cat_hidden = branch(embedded)
-            cat_pooled.append(cat_hidden[:, :, -1])
-
-        p_num = torch.cat([p1, p2, p3], dim=1)
-        p_cat = torch.cat(cat_pooled, dim=1) if cat_pooled else torch.zeros(batch_size, 0, device=device)
-
-        gate = self.gate_linear(p_cat)
-        gated_num = p_num * gate
-
-        features = torch.cat([gated_num, p_cat], dim=1)
-        return self.head(features)
+        cat_pool_list = []
+        if x_cat is not None and len(self.cat_embeddings) > 0:
+            for i, (emb, branch) in enumerate(zip(self.cat_embeddings, self.cat_branches)):
+                feat = x_cat[:, i, :]
+                x_emb = emb(feat).permute(0, 2, 1)
+                cat_out = branch(x_emb)
+                cat_pool_list.append(cat_out[:, :, -1])
+        
+        icd_feat = None
+        if self.icd_projector is not None and x_icd is not None:
+            icd_feat = self.icd_projector(x_icd)
+            
+        feats = [num_pool] + cat_pool_list
+        if icd_feat is not None:
+            feats.append(icd_feat)
+            
+        final_feat = torch.cat(feats, dim=1)
+        
+        return self.head(final_feat)
 
 class MedBERTClassifier(nn.Module):
     """
     BERT-based classifier head for ICD coding.
-    Originally build_classifier_head in ICD.py
     """
     def __init__(self, model_name: str, num_num: int, num_cls: int, drop: float = 0.3):
         super().__init__()

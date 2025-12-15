@@ -1,117 +1,130 @@
-from omegaconf import DictConfig
 from pathlib import Path
 import torch
-import json
+from typing import List
 
-from ..foundation.configs import load_app_context
-from ..foundation.interfaces import Registry, TelemetryObserver
+from ..foundation.configs import HydraConfigLoader, load_app_context
+from ..foundation.interfaces import Registry, TelemetryObserver, PipelineComponent
+from ..domain.vo import ETLConfig, ICDConfig, CNNConfig
+from ..domain.entities import InterventionModelEntity, ICDModelEntity
 from ..infrastructure.registry import FileSystemRegistry
 from ..infrastructure.telemetry import RichTelemetryObserver
 from ..infrastructure.datasource import HDF5StreamingSource, ParquetSource
-from ..infrastructure.networks import GFINet_CNN, MedBERTClassifier
-from ..infrastructure.components import XGBoostStacker
-from ..domain.entities import ICDModelEntity, InterventionModelEntity
+from ..infrastructure.networks import GFINet_CNN
 from ..services.etl.service import ETLService
+from ..services.etl.components.assembler import FeatureAssembler
+from ..services.etl.components.tensor import TensorConverter
+from ..services.etl.components.labels import LabelGenerator
 from ..services.icd.service import ICDService
 from ..services.training.trainer import TrainingService
-from ..services.training.evaluator import EvaluationService
-
-from ..services.etl.components.static import StaticExtractor
-from ..services.etl.components.timeseries import TimeSeriesAggregator
-from ..services.etl.components.outcomes import OutcomesBuilder
-from ..services.etl.components.ventilation import VentilationTagger
-from ..services.etl.components.notes import NoteTokenizer
-from ..services.etl.components.assembler import FeatureAssembler
-from ..services.etl.components.labels import LabelGenerator
-from ..services.etl.components.tensor import TensorConverter
 
 class AppFactory:
     """
-    Dependency Injection Factory for the HINT application.
-    Constructs services, entities, and infrastructure based on configuration.
+    Factory class to assemble components and services (Dependency Injection).
     """
-    def __init__(self, hydra_cfg: DictConfig):
-        self.ctx = load_app_context(hydra_cfg)
-        self.registry = FileSystemRegistry(hydra_cfg.get("logging", {}).get("artifacts_dir", "artifacts"))
-        self.observer = RichTelemetryObserver()
+    def __init__(self, config_name: str = "config", config_path: str = "configs"):
+        self.loader = HydraConfigLoader(config_name=config_name, config_path=config_path)
+        self.raw_cfg = self.loader.load()
+        self.ctx = load_app_context(self.raw_cfg)
+
+    def create_registry(self) -> Registry:
+        path = self.raw_cfg.get("logging", {}).get("artifacts_dir", "artifacts")
+        return FileSystemRegistry(base_dir=path)
+
+    def create_telemetry(self) -> TelemetryObserver:
+        return RichTelemetryObserver()
 
     def create_etl_service(self) -> ETLService:
-        components = [
-            StaticExtractor(self.ctx.etl, self.registry, self.observer),
-            TimeSeriesAggregator(self.ctx.etl, self.registry, self.observer),
-            OutcomesBuilder(self.ctx.etl, self.registry, self.observer),
-            VentilationTagger(self.ctx.etl, self.registry, self.observer),
-            NoteTokenizer(self.ctx.etl, self.registry, self.observer),
-            FeatureAssembler(self.ctx.etl, self.registry, self.observer),
-            LabelGenerator(self.ctx.etl, self.registry, self.observer),
-            TensorConverter(self.ctx.cnn, self.registry, self.observer)
+        etl_cfg = self.ctx.etl
+        cnn_cfg = self.ctx.cnn
+        
+        registry = self.create_registry()
+        observer = self.create_telemetry()
+        
+        assembler = FeatureAssembler(etl_cfg, registry, observer)
+        label_gen = LabelGenerator(etl_cfg, registry, observer)
+        
+        tensor_converter = TensorConverter(
+            etl_config=etl_cfg,
+            cnn_config=cnn_cfg,
+            registry=registry,
+            observer=observer
+        )
+        
+        components: List[PipelineComponent] = [
+            assembler,
+            label_gen,
+            tensor_converter
         ]
-        return ETLService(self.ctx.etl, self.ctx.cnn, components, self.observer)
+        
+        return ETLService(registry, observer, components)
 
     def create_icd_service(self) -> ICDService:
-        train_path = Path(self.ctx.icd.data_path)
+        cfg = self.ctx.icd
+        registry = self.create_registry()
+        observer = self.create_telemetry()
+        
+        train_path = Path(cfg.data_path)
         source = ParquetSource(train_path)
-
+        
         return ICDService(
-            self.ctx.icd, self.registry, self.observer, 
-            train_source=source, val_source=source, test_source=source
+            config=cfg,
+            registry=registry,
+            observer=observer,
+            train_source=source,
+            val_source=source,
+            test_source=source
         )
 
-    def create_cnn_services(self) -> tuple[TrainingService, EvaluationService]:
-        data_dir = Path(self.ctx.cnn.data_cache_dir)
+    def create_cnn_service(self) -> TrainingService:
+        cfg = self.ctx.cnn
+        registry = self.create_registry()
+        observer = self.create_telemetry()
         
-        tr_src = HDF5StreamingSource(data_dir / "train.h5", self.ctx.cnn.seq_len)
-        val_src = HDF5StreamingSource(data_dir / "val.h5", self.ctx.cnn.seq_len)
-        te_src = HDF5StreamingSource(data_dir / "test.h5", self.ctx.cnn.seq_len)
-        
-        feature_info_path = data_dir / "feature_info.json"
-        if not feature_info_path.exists():
-             vocab = {}
-             n_num = 123 * 3
-        else:
-            with open(feature_info_path, 'r') as f:
-                feat_info = json.load(f)
-            vocab = feat_info.get("vocab_info", {})
-            n_num = feat_info.get("n_feats_numeric", 0)
+        cache_dir = Path(cfg.data_cache_dir)
+        train_path = cache_dir / "train.h5"
+        val_path = cache_dir / "val.h5"
         
         try:
-            self.observer.log("INFO", "Factory: Verifying vocabulary sizes against training data...")
-            if hasattr(tr_src, "get_real_vocab_sizes"):
-                real_sizes = tr_src.get_real_vocab_sizes()
-                
-                if real_sizes:
-                    keys = list(vocab.keys())
-                    for i, key in enumerate(keys):
-                        if i < len(real_sizes):
-                            original_size = vocab[key]
-                            real_size = real_sizes[i]
-                            if real_size > original_size:
-                                self.observer.log("WARNING", f"Adjusting vocab size for '{key}': {original_size} -> {real_size}")
-                                vocab[key] = real_size
+            train_source = HDF5StreamingSource(train_path, seq_len=cfg.seq_len)
+            val_source = HDF5StreamingSource(val_path, seq_len=cfg.seq_len)
+            vocab_sizes = train_source.get_real_vocab_sizes()
+            
+            if len(train_source) > 0:
+                dummy = train_source[0]
+                num_channels = dummy.x_num.shape[0]
+                icd_dim = dummy.x_icd.shape[0] if dummy.x_icd is not None else 0
             else:
-                self.observer.log("WARNING", "Factory: 'get_real_vocab_sizes' method missing in Source.")
+                num_channels = 0
+                icd_dim = 0
         except Exception as e:
-            self.observer.log("WARNING", f"Factory: Could not verify vocab sizes: {e}")
+            observer.log("WARNING", f"CNN Factory: Could not initialize data sources ({e}). Using dummy dims.")
+            train_source = None
+            val_source = None
+            vocab_sizes = []
+            num_channels = 1
+            icd_dim = 0
 
-        net = GFINet_CNN(
-            in_chs=[n_num, 0, 0], 
-            n_cls=4, 
-            g1=list(range(n_num)), 
-            g2=[], 
-            rest=[],
-            cat_vocab_sizes=vocab,
-            embed_dim=self.ctx.cnn.embed_dim
+        network = GFINet_CNN(
+            in_chs=[num_channels],
+            n_cls=4,
+            vocab_sizes=vocab_sizes,
+            icd_dim=icd_dim,
+            embed_dim=cfg.embed_dim,
+            cat_embed_dim=cfg.cat_embed_dim,
+            head_drop=cfg.dropout,
+            tcn_drop=cfg.tcn_dropout,
+            kernel=cfg.tcn_kernel_size,
+            layers=cfg.tcn_layers
         )
-        entity = InterventionModelEntity(net, self.ctx.cnn.ema_decay)
         
-        device = "cuda" if torch.cuda.is_available() else "cpu"
+        entity = InterventionModelEntity(network)
         
-        trainer = TrainingService(self.ctx.cnn, self.registry, self.observer, entity, device)
-        evaluator = EvaluationService(self.ctx.cnn, self.registry, self.observer, entity, device)
-        
-        trainer.tr_src = tr_src
-        trainer.val_src = val_src
-        evaluator.te_src = te_src
-        evaluator.val_src = val_src
-        
-        return trainer, evaluator
+        return TrainingService(
+            config=cfg,
+            registry=registry,
+            observer=observer,
+            entity=entity,
+            device="cuda" if torch.cuda.is_available() else "cpu",
+            train_dataset=train_source,
+            val_dataset=val_source
+        )

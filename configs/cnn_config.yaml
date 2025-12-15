@@ -1,13 +1,13 @@
-# configs/cnn_config.yaml
 data:
-  path: "data/processed/dataset_123_answer.parquet" # 라벨링 된 데이터 사용
+  feature_path: "data/cache/features.h5"
+  label_path: "data/processed/labels.parquet"
   data_cache_dir: "data/cache"
   exclude_cols: ["ICD9_CODES"]
 
 model:
   seq_len: 120
   batch_size: 512
-  epochs: 0
+  epochs: 2
   lr: 0.001
   patience: 10
   

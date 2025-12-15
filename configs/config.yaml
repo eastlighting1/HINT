@@ -5,7 +5,7 @@ defaults:
   - cnn_config@cnn
 
 # 실행 모드 (etl, icd, cnn, train, all)
-mode: "all"
+mode: "cnn"
 seed: 42
 
 # 로깅 설정 (Hydra에 의해 보간됨)

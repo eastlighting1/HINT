@@ -7,35 +7,61 @@ from pathlib import Path
 from typing import List, Dict, Any
 from sklearn.model_selection import GroupShuffleSplit
 from ....foundation.interfaces import PipelineComponent, Registry, TelemetryObserver
-from ....domain.vo import CNNConfig
+from ....domain.vo import CNNConfig, ETLConfig
 
 class TensorConverter(PipelineComponent):
-    def __init__(self, config: CNNConfig, registry: Registry, observer: TelemetryObserver):
-        self.cfg = config
+    """
+    Generate base HDF5 files (train/val/test) containing time-series features and labels.
+
+    The outputs include datasets for numeric, categorical, target labels, stay ids, and hours.
+
+    Args:
+        etl_config: ETL configuration providing processed input paths.
+        cnn_config: CNN configuration providing output cache paths and sequence length.
+        registry: Persistence registry for saving artifacts.
+        observer: Telemetry observer for logging.
+    """
+    def __init__(self, etl_config: ETLConfig, cnn_config: CNNConfig, registry: Registry, observer: TelemetryObserver):
+        self.etl_cfg = etl_config
+        self.cnn_cfg = cnn_config
         self.registry = registry
         self.observer = observer
-        self.CLASS_NAMES = ["ONSET", "WEAN", "STAY ON", "STAY OFF"]
-        self.CLASS_TO_ID = {name: idx for idx, name in enumerate(self.CLASS_NAMES)}
 
     def execute(self) -> None:
-        self.observer.log("INFO", "TensorConverter: Starting preprocessing pipeline...")
+        self.observer.log("INFO", "TensorConverter: Starting base HDF5 generation using processed inputs.")
+        proc_dir = Path(self.etl_cfg.proc_dir)
+        if not proc_dir.is_absolute():
+            proc_dir = Path.cwd() / proc_dir
+            
+        feat_path = proc_dir / "dataset_123.parquet"
+        if not feat_path.exists():
+             raise FileNotFoundError(f"Feature file not found at: {feat_path}")
         
-        input_path = Path("data/processed/dataset_123_answer.parquet")
+        self.observer.log("INFO", f"TensorConverter: Loading features from {feat_path}")
+        df_feat = pl.read_parquet(feat_path)
+
+        label_path = proc_dir / "labels.parquet"
+        if not label_path.exists():
+            raise FileNotFoundError(f"Label file not found at: {label_path}")
         
-        if not input_path.exists():
-             raise FileNotFoundError(f"Input file not found: {input_path}")
-             
-        df = pl.read_parquet(input_path)
+        self.observer.log("INFO", f"TensorConverter: Loading labels from {label_path}")
+        df_label = pl.read_parquet(label_path)
+
+        self.observer.log("INFO", "TensorConverter: Joining features and labels.")
+        df = df_feat.join(
+            df_label, 
+            on=["ICUSTAY_ID", "HOUR_IN"], 
+            how="inner"
+        )
         
         id_cols = ["SUBJECT_ID", "HADM_ID", "ICUSTAY_ID", "HOUR_IN"]
-        label_col = "VENT_CLASS"
-        exclude = self.cfg.exclude_cols
+        exclude = self.cnn_cfg.exclude_cols + ["VENT_CLASS", "ICD9_CODES", "LABEL"] 
         
         numeric_cols = []
         categorical_cols = []
         
         for name, dtype in zip(df.columns, df.dtypes):
-            if name in id_cols + [label_col] + exclude: continue
+            if name in id_cols or name in exclude: continue
             if dtype in pl.NUMERIC_DTYPES or dtype == pl.Boolean:
                 numeric_cols.append(name)
             elif dtype == pl.Utf8:
@@ -59,16 +85,17 @@ class TensorConverter(PipelineComponent):
         feat_names_num = [f"{c}_VAL" for c in numeric_cols] + [f"{c}_MSK" for c in numeric_cols] + [f"{c}_DT" for c in numeric_cols]
         
         unique_stays = df.select("ICUSTAY_ID").unique().to_numpy().ravel()
-        gss1 = GroupShuffleSplit(1, test_size=0.2, random_state=42)
+        
+        gss1 = GroupShuffleSplit(n_splits=1, test_size=0.2, random_state=42)
         train_idx, teva_idx = next(gss1.split(unique_stays, groups=unique_stays))
         train_ids = unique_stays[train_idx]
         teva_ids = unique_stays[teva_idx]
         
-        gss2 = GroupShuffleSplit(1, test_size=0.5, random_state=42)
+        gss2 = GroupShuffleSplit(n_splits=1, test_size=0.5, random_state=42)
         test_idx, val_idx = next(gss2.split(teva_ids, groups=teva_ids))
         val_ids = teva_ids[val_idx]
         test_ids = teva_ids[test_idx]
-        
+
         df_tr = df.filter(pl.col("ICUSTAY_ID").is_in(train_ids))
         stats = {}
         v_cols = [c for c in numeric_cols if c.startswith("V__")]
@@ -77,71 +104,52 @@ class TensorConverter(PipelineComponent):
             stats_df = df_tr.select(stats_exprs)
             stats_raw = stats_df.to_dicts()[0]
             for k, v in stats_raw.items():
-                if v is None:
-                    stats[k] = 1.0 if k.endswith("_std") else 0.0
-                    continue
-                try:
-                    val = float(v)
-                except (TypeError, ValueError):
-                    stats[k] = 1.0 if k.endswith("_std") else 0.0
-                    continue
+                if v is None: stats[k] = 1.0 if k.endswith("_std") else 0.0; continue
+                try: val = float(v)
+                except: stats[k] = 1.0 if k.endswith("_std") else 0.0; continue
                 if k.endswith("_std") and (val == 0.0 or np.isnan(val)): stats[k] = 1.0
                 elif np.isnan(val): stats[k] = 0.0
                 else: stats[k] = val
         
-        cache_dir = Path(self.cfg.data_cache_dir)
+        cache_dir = Path(self.cnn_cfg.data_cache_dir)
         cache_dir.mkdir(parents=True, exist_ok=True)
-        
-        with open(cache_dir / "train_stats.json", "w") as f:
+        with open(cache_dir / "stats.json", "w") as f:
             json.dump(stats, f, indent=2)
-        
-        meta = {
-            "base_feats_numeric": numeric_cols,
-            "feat_names_numeric": feat_names_num,
-            "n_feats_numeric": len(feat_names_num),
-            "n_base_feats_numeric": len(numeric_cols),
-            "base_feats_categorical": categorical_cols,
-            "base_feats_categorical_idx": categorical_idx_cols,
-            "vocab_info": vocab_info,
-            "seq_len": self.cfg.seq_len,
-            "class_names": self.CLASS_NAMES
-        }
-        with open(cache_dir / "feature_info.json", "w") as f:
-            json.dump(meta, f, indent=2)
 
         self._process_split(df_tr, "train", numeric_cols, feat_names_num, categorical_idx_cols, stats, cache_dir)
         self._process_split(df.filter(pl.col("ICUSTAY_ID").is_in(val_ids)), "val", numeric_cols, feat_names_num, categorical_idx_cols, stats, cache_dir)
         self._process_split(df.filter(pl.col("ICUSTAY_ID").is_in(test_ids)), "test", numeric_cols, feat_names_num, categorical_idx_cols, stats, cache_dir)
 
-    def _flush_batch(self, h5_X_num, h5_X_cat, h5_y, h5_sid, X_batch_num, X_batch_cat, y_batch, sid_batch):
-        batch_len = len(y_batch)
+    def _flush_batch(self, h5_datasets, buffers):
+        batch_len = len(buffers['y'])
         if batch_len == 0: return
-        current_size = h5_y.shape[0]
-        h5_X_num.resize(current_size + batch_len, axis=0)
-        h5_X_cat.resize(current_size + batch_len, axis=0)
-        h5_y.resize(current_size + batch_len, axis=0)
-        h5_sid.resize(current_size + batch_len, axis=0)
-        h5_X_num[current_size:] = np.array(X_batch_num, dtype=np.float16)
-        h5_X_cat[current_size:] = np.array(X_batch_cat, dtype=np.int32)
-        h5_y[current_size:] = np.array(y_batch, dtype=np.int64)
-        h5_sid[current_size:] = np.array(sid_batch, dtype=np.int64)
-        X_batch_num.clear(); X_batch_cat.clear(); y_batch.clear(); sid_batch.clear()
+        
+        current_size = h5_datasets['y'].shape[0]
+        for key in h5_datasets:
+            h5_datasets[key].resize(current_size + batch_len, axis=0)
+            
+        h5_datasets['X_num'][current_size:] = np.array(buffers['X_num'], dtype=np.float16)
+        h5_datasets['X_cat'][current_size:] = np.array(buffers['X_cat'], dtype=np.int32)
+        h5_datasets['y'][current_size:] = np.array(buffers['y'], dtype=np.int64)
+        h5_datasets['sid'][current_size:] = np.array(buffers['sid'], dtype=np.int64)
+        h5_datasets['hour'][current_size:] = np.array(buffers['hour'], dtype=np.int32)
+        
+        for k in buffers: buffers[k].clear()
 
     def _process_split(self, df: pl.DataFrame, split_name: str, num_cols: List[str], feat_names: List[str], cat_cols: List[str], stats: Dict[str, float], cache_dir: Path) -> None:
         h5_path = cache_dir / f"{split_name}.h5"
         self.observer.log("INFO", f"TensorConverter: Writing {split_name} split to {h5_path}")
         
         df = df.sort(by=["ICUSTAY_ID", "HOUR_IN"])
-        seq_len = self.cfg.seq_len
+        seq_len = self.cnn_cfg.seq_len
         
         val_exprs = [pl.col(col).forward_fill().over("ICUSTAY_ID").alias(f"{col}_VAL") for col in num_cols]
         mask_exprs = [pl.col(col).is_not_null().cast(pl.Float32).alias(f"{col}_MSK") for col in num_cols]
-        
         delta_exprs = []
         for col in num_cols:
-            last_time = pl.when(pl.col(col).is_not_null()).then(pl.col("HOUR_IN")).otherwise(None).forward_fill().over("ICUSTAY_ID")
-            normalized_delta = (pl.col("HOUR_IN") - last_time).fill_null(seq_len).clip(0, seq_len).alias(f"{col}_DT")
-            delta_exprs.append((normalized_delta / seq_len))
+             last_time = pl.when(pl.col(col).is_not_null()).then(pl.col("HOUR_IN")).otherwise(None).forward_fill().over("ICUSTAY_ID")
+             normalized_delta = (pl.col("HOUR_IN") - last_time).fill_null(seq_len).clip(0, seq_len).alias(f"{col}_DT")
+             delta_exprs.append((normalized_delta / seq_len))
 
         df = df.with_columns(val_exprs + mask_exprs + delta_exprs)
         val_cols = [f"{col}_VAL" for col in num_cols]
@@ -156,50 +164,55 @@ class TensorConverter(PipelineComponent):
             else:
                 norm_exprs.append(pl.col(val_col))
         df = df.with_columns(norm_exprs)
-        
-        df = df.filter(pl.col("VENT_CLASS").is_in(self.CLASS_NAMES))
-        df = df.select(["ICUSTAY_ID", "VENT_CLASS"] + list(feat_names) + list(cat_cols))
-        
+
+        df = df.select(["ICUSTAY_ID", "HOUR_IN", "LABEL"] + list(feat_names) + list(cat_cols))
+
         with h5py.File(h5_path, "w") as f:
             n_feats_num = len(feat_names)
             n_cat_feats = len(cat_cols)
-            h5_X_num = f.create_dataset("X_num", (0, n_feats_num, seq_len), maxshape=(None, n_feats_num, seq_len), chunks=(64, n_feats_num, seq_len), dtype=np.float16, compression=hdf5plugin.Blosc(cname="lz4", clevel=5, shuffle=hdf5plugin.Blosc.SHUFFLE))
-            h5_X_cat = f.create_dataset("X_cat", (0, n_cat_feats, seq_len), maxshape=(None, n_cat_feats, seq_len), chunks=(64, n_cat_feats, seq_len), dtype=np.int32, compression=hdf5plugin.Blosc(cname="lz4", clevel=5, shuffle=hdf5plugin.Blosc.SHUFFLE))
-            h5_y = f.create_dataset("y", (0,), maxshape=(None,), chunks=(4096,), dtype=np.int64)
-            h5_sid = f.create_dataset("sid", (0,), maxshape=(None,), chunks=(4096,), dtype=np.int64)
-
+            
+            datasets = {
+                "X_num": f.create_dataset("X_num", (0, n_feats_num, seq_len), maxshape=(None, n_feats_num, seq_len), dtype=np.float16, compression=hdf5plugin.Blosc(cname="lz4")),
+                "X_cat": f.create_dataset("X_cat", (0, n_cat_feats, seq_len), maxshape=(None, n_cat_feats, seq_len), dtype=np.int32, compression=hdf5plugin.Blosc(cname="lz4")),
+                "y": f.create_dataset("y", (0,), maxshape=(None,), dtype=np.int64),
+                "sid": f.create_dataset("sid", (0,), maxshape=(None,), dtype=np.int64),
+                "hour": f.create_dataset("hour", (0,), maxshape=(None,), dtype=np.int32)
+            }
+            
+            buffers = {"X_num": [], "X_cat": [], "y": [], "sid": [], "hour": []}
             window_buffer_num = np.zeros((n_feats_num, seq_len), dtype=np.float16)
             window_buffer_cat = np.zeros((n_cat_feats, seq_len), dtype=np.int32)
-            X_batch_num, X_batch_cat, y_batch, sid_batch = [], [], [], []
             
             parts = df.partition_by("ICUSTAY_ID", maintain_order=True)
             for group in parts:
                 pdf = group.to_pandas()
                 sid = int(pdf["ICUSTAY_ID"].iloc[0])
-                labels = pdf["VENT_CLASS"].tolist()
+                labels = pdf["LABEL"].tolist()
+                hours = pdf["HOUR_IN"].tolist()
                 arr_num = pdf[feat_names].to_numpy(dtype=np.float32).T
                 arr_cat = pdf[cat_cols].to_numpy(dtype=np.int32).T if cat_cols else None
-
+                
                 for t, label in enumerate(labels):
-                    label_id = self.CLASS_TO_ID.get(label)
-                    if label_id is None: continue
                     start = max(0, t - seq_len + 1)
                     end = t + 1
                     window_len = end - start
+                    
                     window_buffer_num.fill(0)
                     window_buffer_num[:, seq_len - window_len :] = arr_num[:, start:end]
                     
                     if arr_cat is not None:
                         window_buffer_cat.fill(0)
                         window_buffer_cat[:, seq_len - window_len :] = arr_cat[:, start:end]
-                        X_batch_cat.append(window_buffer_cat.copy())
+                        buffers['X_cat'].append(window_buffer_cat.copy())
                     else:
-                        X_batch_cat.append(np.zeros((n_cat_feats, seq_len), dtype=np.int32))
+                        buffers['X_cat'].append(np.zeros((n_cat_feats, seq_len), dtype=np.int32))
                     
-                    X_batch_num.append(window_buffer_num.copy())
-                    y_batch.append(label_id)
-                    sid_batch.append(sid)
+                    buffers['X_num'].append(window_buffer_num.copy())
+                    buffers['y'].append(label)
+                    buffers['sid'].append(sid)
+                    buffers['hour'].append(hours[t])
                     
-                    if len(y_batch) >= 4096:
-                        self._flush_batch(h5_X_num, h5_X_cat, h5_y, h5_sid, X_batch_num, X_batch_cat, y_batch, sid_batch)
-            self._flush_batch(h5_X_num, h5_X_cat, h5_y, h5_sid, X_batch_num, X_batch_cat, y_batch, sid_batch)
+                    if len(buffers['sid']) >= 4096:
+                        self._flush_batch(datasets, buffers)
+            
+            self._flush_batch(datasets, buffers)

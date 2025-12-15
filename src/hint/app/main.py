@@ -1,45 +1,39 @@
-import hydra
-from omegaconf import DictConfig
-from pathlib import Path
+import sys
 from hint.app.factory import AppFactory
 
-BASE_DIR = Path(__file__).resolve().parents[3]
-CONFIG_DIR = BASE_DIR / "configs"
-
-@hydra.main(config_path=str(CONFIG_DIR), config_name="config", version_base=None)
-def main(cfg: DictConfig) -> None:
-    """
-    Main entry point for HINT pipeline.
-    Orchestrates ETL, ICD, and CNN workflows based on configuration mode.
-    """
-    factory = AppFactory(cfg)
-    mode = cfg.get("mode", "train")
-    
-    factory.observer.log("INFO", f"Main: Starting HINT pipeline in mode='{mode}'.")
+def main() -> None:
+    factory = AppFactory()
+    mode = factory.ctx.mode
+    logged_start = False
 
     if mode in ["all", "etl"]:
-        factory.observer.log("INFO", "Main: Launching ETL pipeline stage.")
         etl_service = factory.create_etl_service()
+        if not logged_start:
+            etl_service.observer.log("INFO", f"App: Starting application in [{mode}] mode.")
+            logged_start = True
+        etl_service.observer.log("INFO", "App: Running ETL pipeline.")
         etl_service.run_pipeline()
-        factory.observer.log("INFO", "Main: ETL pipeline stage completed.")
 
-    if mode in ["all", "train", "icd"]:
-        factory.observer.log("INFO", "Main: Launching ICD training stage.")
+    if mode in ["all", "icd"]:
         icd_service = factory.create_icd_service()
+        if not logged_start:
+            icd_service.observer.log("INFO", f"App: Starting application in [{mode}] mode.")
+            logged_start = True
+        icd_service.observer.log("INFO", "App: Training ICD model.")
         icd_service.train()
-        icd_service.run_xai()
-        factory.observer.log("INFO", "Main: ICD training stage completed.")
+        icd_service.observer.log("INFO", "App: Injecting ICD predictions into cached datasets.")
+        icd_service.inject_predictions(factory.ctx.cnn)
 
-    if mode in ["all", "train", "cnn"]:
-        factory.observer.log("INFO", "Main: Launching CNN training stage.")
-        trainer, evaluator = factory.create_cnn_services()
-        trainer.train_model(trainer.tr_src, trainer.val_src)
-        evaluator.calibrate(trainer.val_src)
-        evaluator.evaluate(evaluator.te_src)
-        evaluator.run_xai(evaluator.val_src, evaluator.te_src)
-        factory.observer.log("INFO", "Main: CNN training stage completed.")
-
-    factory.observer.log("INFO", "Main: Pipeline finished successfully.")
+    if mode in ["all", "cnn", "train"]:
+        cnn_service = factory.create_cnn_service()
+        if not logged_start and cnn_service.observer:
+            cnn_service.observer.log("INFO", f"App: Starting application in [{mode}] mode.")
+            logged_start = True
+        if cnn_service.train_dataset is not None:
+            cnn_service.observer.log("INFO", "App: Running CNN training service.")
+            cnn_service.train_model()
+        else:
+            cnn_service.observer.log("ERROR", "App: CNN training skipped due to missing data sources.")
 
 if __name__ == "__main__":
     main()

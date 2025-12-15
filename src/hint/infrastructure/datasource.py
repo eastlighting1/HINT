@@ -2,11 +2,11 @@ import h5py
 import torch
 import numpy as np
 import polars as pl
-import pyarrow.parquet as pq
 from pathlib import Path
-from typing import Optional, List, Any, Union, Generator, Dict
+from typing import Optional, List, Any, Union, Dict, Generator
 from torch.utils.data import Dataset
 from torch.utils.data.dataloader import default_collate
+from loguru import logger
 
 from ..foundation.interfaces import StreamingSource
 from ..foundation.dtos import TensorBatch
@@ -64,33 +64,6 @@ def custom_collate(batch, tokenizer, max_length):
     
     return bt
 
-def collate_tensor_batch(batch: List[TensorBatch]) -> TensorBatch:
-    """
-    Custom collate function to stack a list of TensorBatch objects into a single TensorBatch.
-    """
-    x_num = torch.stack([b.x_num for b in batch])
-    y = torch.stack([b.y for b in batch])
-
-    x_cat = None
-    if batch[0].x_cat is not None:
-        x_cat = torch.stack([b.x_cat for b in batch])
-        
-    ids = None
-    if batch[0].ids is not None:
-        ids = torch.stack([b.ids for b in batch])
-        
-    mask = None
-    if batch[0].mask is not None:
-        mask = torch.stack([b.mask for b in batch])
-
-    return TensorBatch(
-        x_num=x_num,
-        x_cat=x_cat,
-        y=y,
-        ids=ids,
-        mask=mask
-    )
-
 class ICDDataset(Dataset):
     """
     Dataset wrapper for combined numerical features and ICD code lists.
@@ -121,14 +94,85 @@ class ICDDataset(Dataset):
             "cand": self.cand[i],
         }
 
-class HDF5StreamingSource(StreamingSource, Dataset):
+def collate_tensor_batch(batch: List[TensorBatch]) -> TensorBatch:
     """
-    Streaming source for pre-windowed ICU time-series stored in HDF5 files.
-    Used by CNN TrainingService.
+    Custom collate function to stack a list of TensorBatch objects into a single TensorBatch.
     """
-    def __init__(self, h5_path: Path, seq_len: int):
-        self.h5_path = h5_path
-        self.seq_len = seq_len
+    x_num = torch.stack([b.x_num for b in batch])
+    y = torch.stack([b.y for b in batch])
+
+    x_cat = None
+    if batch[0].x_cat is not None:
+        x_cat = torch.stack([b.x_cat for b in batch])
+        
+    ids = None
+    if batch[0].ids is not None:
+        ids = torch.stack([b.ids for b in batch])
+        
+    mask = None
+    if batch[0].mask is not None:
+        mask = torch.stack([b.mask for b in batch])
+        
+    x_icd = None
+    if batch[0].x_icd is not None:
+        x_icd = torch.stack([b.x_icd for b in batch])
+
+    return TensorBatch(
+        x_num=x_num,
+        x_cat=x_cat,
+        y=y,
+        ids=ids,
+        mask=mask,
+        x_icd=x_icd
+    )
+
+class ParquetSource(StreamingSource):
+    """
+    Source for loading tabular data from Parquet files.
+    Used by ICDService and Factory.
+    """
+    def __init__(self, file_path: Union[str, Path]):
+        self.file_path = Path(file_path)
+        if not self.file_path.exists():
+            if not self.file_path.is_absolute():
+                self.file_path = Path.cwd() / self.file_path
+                
+            if not self.file_path.exists():
+                raise DataError(f"Parquet file not found at {self.file_path}")
+        
+        self._df: Optional[pl.DataFrame] = None
+        
+    def load(self) -> pl.DataFrame:
+        try:
+            if self._df is None:
+                self._df = pl.read_parquet(self.file_path)
+            return self._df
+        except Exception as e:
+            raise DataError(f"Failed to load parquet file: {e}")
+
+    def __iter__(self) -> Generator[Dict[str, Any], None, None]:
+        try:
+            if self._df is None:
+                self._df = pl.read_parquet(self.file_path)
+            for row in self._df.iter_rows(named=True):
+                yield row
+        except Exception as e:
+            raise DataError(f"Failed to stream data: {e}")
+
+    def __len__(self) -> int:
+        """Return number of rows in the parquet file."""
+        try:
+            return pl.scan_parquet(self.file_path).select(pl.len()).collect().item()
+        except Exception as e:
+            raise DataError(f"Failed to get length of parquet file: {e}")
+
+
+class HDF5StreamingSource(Dataset):
+    """
+    Step 3 Source: Reads enriched HDF5 files containing X_num, X_cat, y, AND X_icd.
+    """
+    def __init__(self, h5_path: Path, seq_len: int = 0):
+        self.h5_path = Path(h5_path)
         self.h5_file: Optional[h5py.File] = None
         self._len = 0
         
@@ -137,37 +181,13 @@ class HDF5StreamingSource(StreamingSource, Dataset):
 
         try:
             with h5py.File(self.h5_path, "r") as f:
-                if "X_num" not in f or "X_cat" not in f:
-                    raise DataError(f"HDF5 missing required datasets in {self.h5_path}")
+                if "X_num" not in f:
+                    raise DataError(f"HDF5 missing required dataset X_num in {self.h5_path}")
                 self._len = len(f["X_num"])
+                if "X_icd" not in f:
+                    logger.warning(f"HDF5StreamingSource: 'X_icd' dataset not found in {self.h5_path}; ICD injection might have been skipped.")
         except Exception as e:
             raise DataError(f"Failed to initialize HDF5 source: {e}")
-
-    def get_real_vocab_sizes(self) -> List[int]:
-        """
-        Scan the categorical tensor to derive the maximum index per feature.
-
-        Returns:
-            Vocabulary sizes derived from the stored categorical tensor.
-        """
-        should_close = False
-        if self.h5_file is None:
-            self.h5_file = h5py.File(self.h5_path, "r")
-            should_close = True
-        
-        try:
-            data = self.h5_file["X_cat"][:] 
-            max_indices = np.max(data, axis=(0, 2))
-            
-            real_vocab_sizes = (max_indices + 1).tolist()
-            return [int(s) for s in real_vocab_sizes]
-            
-        except Exception as e:
-            print(f"[Warning] Failed to calculate real vocab sizes: {e}")
-            return []
-        finally:
-            if should_close:
-                self.close()
 
     def __len__(self) -> int:
         return self._len
@@ -176,61 +196,37 @@ class HDF5StreamingSource(StreamingSource, Dataset):
         if self.h5_file is None:
             self.h5_file = h5py.File(self.h5_path, "r")
 
-        x_num = self.h5_file["X_num"][idx]
-        x_cat = self.h5_file["X_cat"][idx]
-        y = int(self.h5_file["y"][idx])
-        sid = int(self.h5_file["sid"][idx])
+        x_num = torch.from_numpy(self.h5_file["X_num"][idx]).float()
+        x_cat = torch.from_numpy(self.h5_file["X_cat"][idx]).long()
+        y = torch.tensor(int(self.h5_file["y"][idx]), dtype=torch.long)
+        sid = torch.tensor(int(self.h5_file["sid"][idx]), dtype=torch.long)
+        
+        x_icd = None
+        if "X_icd" in self.h5_file:
+            x_icd = torch.from_numpy(self.h5_file["X_icd"][idx]).float()
 
         return TensorBatch(
-            x_num=torch.from_numpy(x_num).float(),
-            x_cat=torch.from_numpy(x_cat).long(),
-            y=torch.tensor(y, dtype=torch.long),
-            ids=torch.tensor(sid, dtype=torch.long)
+            x_num=x_num,
+            x_cat=x_cat,
+            y=y,
+            ids=sid,
+            x_icd=x_icd
         )
-
-    def __iter__(self):
-        for i in range(len(self)):
-            yield self[i]
+    
+    def get_real_vocab_sizes(self) -> List[int]:
+        should_close = False
+        if self.h5_file is None:
+            self.h5_file = h5py.File(self.h5_path, "r")
+            should_close = True
+        try:
+            data = self.h5_file["X_cat"][:]
+            if data.size == 0: return []
+            max_indices = np.max(data, axis=(0, 2))
+            return [int(s) + 1 for s in max_indices]
+        finally:
+            if should_close: self.close()
 
     def close(self):
         if self.h5_file is not None:
             self.h5_file.close()
             self.h5_file = None
-
-class ParquetSource(StreamingSource):
-    """
-    Source for loading tabular data (default Parquet).
-    Supports both bulk loading (load) and memory-efficient streaming iteration (__iter__).
-    """
-    def __init__(self, file_path: Path):
-        self.file_path = file_path
-        if not self.file_path.exists():
-            if not file_path.is_absolute():
-                self.file_path = Path.cwd() / file_path
-                
-            if not self.file_path.exists():
-                raise DataError(f"Data file not found at {self.file_path}")
-        
-    def load(self) -> pl.DataFrame:
-        try:
-            return pl.read_parquet(self.file_path)
-        except Exception as e:
-            raise DataError(f"Failed to load parquet file: {e}")
-
-    def __len__(self) -> int:
-        try:
-            return pl.scan_parquet(self.file_path).select(pl.len()).collect().item()
-        except Exception:
-            return 0
-
-    def __iter__(self) -> Generator[Dict[str, Any], None, None]:
-        try:
-            parquet_file = pq.ParquetFile(self.file_path)
-            
-            for batch in parquet_file.iter_batches():
-                batch_df = pl.from_arrow(batch)
-                for row in batch_df.iter_rows(named=True):
-                    yield row
-                    
-        except Exception as e:
-            raise DataError(f"Failed to stream data from {self.file_path}: {e}")

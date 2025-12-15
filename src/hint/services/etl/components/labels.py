@@ -1,14 +1,13 @@
 import polars as pl
 from pathlib import Path
-from typing import List
-
 from ....foundation.interfaces import PipelineComponent, Registry, TelemetryObserver
 from ....domain.vo import ETLConfig
 
 class LabelGenerator(PipelineComponent):
     """
-    Generates ONSET/WEAN/STAY ON/STAY OFF labels.
-    Refactored to use vectorized Polars expressions instead of slow Python loops.
+    Generate ONSET/WEAN/STAY ON/STAY OFF labels independently.
+
+    Produces `labels.parquet` containing `ICUSTAY_ID`, `HOUR_IN`, and encoded `LABEL`.
     """
     def __init__(self, config: ETLConfig, registry: Registry, observer: TelemetryObserver):
         self.cfg = config
@@ -16,13 +15,23 @@ class LabelGenerator(PipelineComponent):
         self.observer = observer
 
     def execute(self) -> None:
-        self.observer.log("INFO", "LabelGenerator: Generating ventilation labels...")
+        self.observer.log("INFO", "LabelGenerator: Generating independent ventilation labels...")
         
         proc_dir = Path(self.cfg.proc_dir)
+        if not proc_dir.exists():
+            proc_dir.mkdir(parents=True, exist_ok=True)
+
         ds_path = proc_dir / "dataset_123.parquet"
+        
+        if not ds_path.exists():
+             if not ds_path.is_absolute():
+                 ds_path = Path.cwd() / ds_path
+             if not ds_path.exists():
+                 raise FileNotFoundError(f"Input dataset not found at {ds_path}")
+
         ds = pl.read_parquet(ds_path)
         
-        self.observer.log("INFO", "LabelGenerator: Filling sequences (vectorized)...")
+        self.observer.log("INFO", "LabelGenerator: Filling sequences...")
 
         bounds = (
             ds.group_by("ICUSTAY_ID")
@@ -46,6 +55,7 @@ class LabelGenerator(PipelineComponent):
             schema=["SUBJECT_ID", "HADM_ID", "ICUSTAY_ID", "HOUR_IN"], 
             orient="row"
         )
+        
         filled = (
             base.join(
                 ds.select(["ICUSTAY_ID", "HOUR_IN", "VENT"]), 
@@ -58,7 +68,7 @@ class LabelGenerator(PipelineComponent):
             )
         )
 
-        self.observer.log("INFO", "LabelGenerator: Calculating labels (vectorized)...")
+        self.observer.log("INFO", "LabelGenerator: Calculating labels...")
         
         INPUT_WIN = self.cfg.input_window_h
         GAP = self.cfg.gap_h
@@ -94,16 +104,20 @@ class LabelGenerator(PipelineComponent):
 
         valid_labels = labels.filter(
             pl.col(f"v_{PRED_WIN-1}").is_not_null()
-        ).select(["SUBJECT_ID", "HADM_ID", "ICUSTAY_ID", "HOUR_IN", "VENT_CLASS"])
+        ).select(["ICUSTAY_ID", "HOUR_IN", "VENT_CLASS"])
 
-        min_offset = INPUT_WIN + GAP
-        final_df = (
-            ds.join(valid_labels, on=["SUBJECT_ID", "HADM_ID", "ICUSTAY_ID", "HOUR_IN"], how="inner")
-            .filter(pl.col("HOUR_IN") >= (pl.col("HOUR_IN").min().over("ICUSTAY_ID") + min_offset))
+        class_map = {"ONSET": 0, "WEAN": 1, "STAY ON": 2, "STAY OFF": 3}
+        
+        final_labels = (
+            valid_labels
+            .filter(pl.col("VENT_CLASS").is_in(class_map.keys()))
+            .with_columns(
+                pl.col("VENT_CLASS").replace(class_map).cast(pl.Int64).alias("LABEL")
+            )
+            .select(["ICUSTAY_ID", "HOUR_IN", "LABEL"])
         )
         
-        out_path = proc_dir / "dataset_123_answer.parquet"
-        out_path.parent.mkdir(parents=True, exist_ok=True)
-        final_df.write_parquet(out_path)
+        out_path = proc_dir / "labels.parquet"
+        self.registry.save_labels(final_labels, out_path)
         
-        self.observer.log("INFO", f"LabelGenerator: Wrote dataset_123_answer.parquet (rows={final_df.height}) to {out_path}")
+        self.observer.log("INFO", f"LabelGenerator: Saved labels to {out_path} (rows={final_labels.height})")

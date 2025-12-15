@@ -1,6 +1,5 @@
 from typing import List
-from ...foundation.interfaces import TelemetryObserver, PipelineComponent
-from ...domain.vo import ETLConfig, CNNConfig
+from ...foundation.interfaces import TelemetryObserver, PipelineComponent, Registry
 
 class ETLService:
     """
@@ -9,15 +8,13 @@ class ETLService:
     """
     def __init__(
         self, 
-        etl_config: ETLConfig,
-        cnn_config: CNNConfig,
-        components: List[PipelineComponent],
-        observer: TelemetryObserver
+        registry: Registry,
+        observer: TelemetryObserver,
+        components: List[PipelineComponent]
     ):
-        self.etl_config = etl_config
-        self.cnn_config = cnn_config
-        self.components = components
+        self.registry = registry
         self.observer = observer
+        self.components = components
 
     def run_pipeline(self) -> None:
         """Execute all configured pipeline steps sequentially."""

@@ -4,41 +4,68 @@ from ....foundation.interfaces import PipelineComponent, Registry, TelemetryObse
 from ....domain.vo import ETLConfig
 
 class FeatureAssembler(PipelineComponent):
+    """
+    Assemble processed MIMIC inputs into a feature-rich dataframe for downstream steps.
+
+    Produces `dataset_123.parquet` containing feature columns without labels.
+
+    Args:
+        config: ETL configuration for input and resource paths.
+        registry: Persistence registry.
+        observer: Telemetry observer for logging.
+    """
     def __init__(self, config: ETLConfig, registry: Registry, observer: TelemetryObserver):
         self.cfg = config
         self.registry = registry
         self.observer = observer
 
     def execute(self) -> None:
-        proc_dir = Path(self.cfg.proc_dir)
         self.observer.log("INFO", "FeatureAssembler: Assembling hourly feature tensor...")
         
+        proc_dir = Path(self.cfg.proc_dir)
+        raw_dir = Path(self.cfg.raw_dir)
+        
+        if (proc_dir / "patients.parquet").exists():
+            patients = pl.read_parquet(proc_dir / "patients.parquet")
+        else:
+            self.observer.log("WARNING", "patients.parquet not found. Attempting to use available processed data or fail.")
+            pass
+
+        if not (proc_dir / "patients.parquet").exists():
+             raise FileNotFoundError(f"Dependency missing: {proc_dir}/patients.parquet")
+             
         patients = pl.read_parquet(proc_dir / "patients.parquet").with_columns([
             pl.col("SUBJECT_ID").cast(pl.Int64),
             pl.col("HADM_ID").cast(pl.Int64),
             pl.col("ICUSTAY_ID").cast(pl.Int64),
             pl.col("INTIME").cast(pl.Datetime),
         ])
+        
         vitals = pl.read_parquet(proc_dir / "vitals_labs_mean.parquet")
-        intervs = pl.read_parquet(proc_dir / "interventions.parquet")
-        raw_dir = Path(self.cfg.raw_dir)
+        interventions = pl.read_parquet(proc_dir / "interventions.parquet")
         
         cand = raw_dir / "DIAGNOSES_ICD.csv"
         if not cand.exists() and (raw_dir / "DIAGNOSES_ICD.csv.gz").exists():
              cand = raw_dir / "DIAGNOSES_ICD.csv.gz"
              
-        icd9 = (
-            pl.read_csv(str(cand), infer_schema_length=0)
-            .select(["SUBJECT_ID", "HADM_ID", "ICD9_CODE"])
-            .with_columns([
-                pl.col("SUBJECT_ID").cast(pl.Int64),
-                pl.col("HADM_ID").cast(pl.Int64),
-                pl.col("ICD9_CODE").cast(pl.Utf8),
-            ])
-            .drop_nulls()
-            .group_by(["SUBJECT_ID", "HADM_ID"])
-            .agg([pl.col("ICD9_CODE").unique().sort().alias("ICD9_CODES")])
-        )
+        if cand.exists():
+            icd9 = (
+                pl.read_csv(str(cand), infer_schema_length=0)
+                .select(["SUBJECT_ID", "HADM_ID", "ICD9_CODE"])
+                .with_columns([
+                    pl.col("SUBJECT_ID").cast(pl.Int64),
+                    pl.col("HADM_ID").cast(pl.Int64),
+                    pl.col("ICD9_CODE").cast(pl.Utf8),
+                ])
+                .drop_nulls()
+                .group_by(["SUBJECT_ID", "HADM_ID"])
+                .agg([pl.col("ICD9_CODE").unique().sort().alias("ICD9_CODES")])
+            )
+        else:
+            self.observer.log("WARNING", "DIAGNOSES_ICD.csv not found. ICD9_CODES will be empty.")
+            icd9 = patients.select(["SUBJECT_ID", "HADM_ID"]).unique().with_columns(
+                pl.lit([]).cast(pl.List(pl.Utf8)).alias("ICD9_CODES")
+            )
 
         first_icustay = (
             patients.select(["SUBJECT_ID", "ICUSTAY_ID", "INTIME"])
@@ -51,41 +78,43 @@ class FeatureAssembler(PipelineComponent):
         pat = (
             patients.join(first_icustay, on="SUBJECT_ID", how="inner")
             .filter(pl.col("ICUSTAY_ID") == pl.col("FIRST_ICUSTAY"))
-            .filter(pl.col("AGE") >= 15)
-            .filter((pl.col("STAY_HOURS") >= 24) & (pl.col("STAY_HOURS") < 240))
+            .filter(pl.col("AGE") >= self.cfg.min_age)
+            .filter((pl.col("STAY_HOURS") >= self.cfg.min_duration_hours) & (pl.col("STAY_HOURS") < self.cfg.max_duration_hours))
             .select(["SUBJECT_ID", "HADM_ID", "ICUSTAY_ID", "ETHNICITY", "ADMISSION_TYPE", "INSURANCE", "AGE", "INTIME"])
             .unique()
         )
         self.observer.log("INFO", f"FeatureAssembler: Cohort stays after filters={pat.height}")
 
         varmap_fp = Path(self.cfg.resources_dir) / "itemid_to_variable_map.csv"
-        def normalize(expr: pl.Expr) -> pl.Expr:
-            return expr.str.to_lowercase().str.replace_all(r"[^a-z0-9]+", "_").str.replace_all(r"^_+|_+$", "")
-
-        varmap = (
-            pl.read_csv(str(varmap_fp), infer_schema_length=0)
-            .select(["MIMIC LABEL", "LEVEL2"])
-            .drop_nulls()
-            .with_columns([
-                normalize(pl.col("MIMIC LABEL")).alias("MIMIC_NORM"),
-                pl.col("LEVEL2").str.to_lowercase().alias("LEVEL2_NORM")
-            ])
-            .unique()
-        )
-
-        vitals_norm = (
-            vitals.rename({"HOURS_IN": "HOUR_IN"})
-            .with_columns(normalize(pl.col("LABEL")).alias("LABEL_NORM"))
-            .join(varmap, left_on="LABEL_NORM", right_on="MIMIC_NORM", how="inner")
-            .filter(pl.col("LEVEL2_NORM").is_in([s.lower() for s in self.cfg.exact_level2_104]))
-            .group_by(["SUBJECT_ID", "HADM_ID", "ICUSTAY_ID", "HOUR_IN", "LEVEL2_NORM"])
-            .agg(pl.col("MEAN").mean().alias("VALUE"))
-        )
-
-        vl_wide = vitals_norm.pivot(
-            values="VALUE", index=["SUBJECT_ID", "HADM_ID", "ICUSTAY_ID", "HOUR_IN"],
-            on="LEVEL2_NORM", aggregate_function="mean"
-        )
+        
+        if varmap_fp.exists():
+            varmap = (
+                pl.read_csv(str(varmap_fp), infer_schema_length=0)
+                .select(["MIMIC LABEL", "LEVEL2"])
+                .drop_nulls()
+                .with_columns([
+                    pl.col("MIMIC LABEL").str.to_lowercase().str.replace_all(r"[^a-z0-9]+", "_").str.replace_all(r"^_+|_+$", "").alias("MIMIC_NORM"),
+                    pl.col("LEVEL2").str.to_lowercase().alias("LEVEL2_NORM")
+                ])
+                .unique()
+            )
+            
+            vitals_norm = (
+                vitals.rename({"HOURS_IN": "HOUR_IN"})
+                .with_columns(pl.col("LABEL").str.to_lowercase().str.replace_all(r"[^a-z0-9]+", "_").str.replace_all(r"^_+|_+$", "").alias("LABEL_NORM"))
+                .join(varmap, left_on="LABEL_NORM", right_on="MIMIC_NORM", how="inner")
+                .filter(pl.col("LEVEL2_NORM").is_in([s.lower() for s in self.cfg.exact_level2_104]))
+                .group_by(["SUBJECT_ID", "HADM_ID", "ICUSTAY_ID", "HOUR_IN", "LEVEL2_NORM"])
+                .agg(pl.col("MEAN").mean().alias("VALUE"))
+            )
+            
+            vl_wide = vitals_norm.pivot(
+                values="VALUE", index=["SUBJECT_ID", "HADM_ID", "ICUSTAY_ID", "HOUR_IN"],
+                on="LEVEL2_NORM", aggregate_function="mean"
+            )
+        else:
+             self.observer.log("WARNING", "Variable map missing. Skipping vital pivot.")
+             vl_wide = pat.select(["SUBJECT_ID", "HADM_ID", "ICUSTAY_ID"]).with_columns(pl.lit(0).alias("HOUR_IN"))
 
         for name in self.cfg.exact_level2_104:
             col_name = name.lower()
@@ -96,10 +125,10 @@ class FeatureAssembler(PipelineComponent):
         vl_wide = vl_wide.rename(rename_map)
         
         v_cols = [f"V__{n.replace(' ', '_')}" for n in self.cfg.exact_level2_104]
-        vl_wide = vl_wide.select(["SUBJECT_ID", "HADM_ID", "ICUSTAY_ID", "HOUR_IN"] + v_cols)
+        vl_wide = vl_wide.select(["SUBJECT_ID", "HADM_ID", "ICUSTAY_ID", "HOUR_IN"] + [c for c in v_cols if c in vl_wide.columns])
 
-        vent_df = intervs.select(["SUBJECT_ID", "HADM_ID", "ICUSTAY_ID", "HOUR_IN", "VENT", "OUTCOME_FLAG"])
-        
+        vent_df = interventions.select(["SUBJECT_ID", "HADM_ID", "ICUSTAY_ID", "HOUR_IN", "VENT", "OUTCOME_FLAG"])
+
         base = (
             vl_wide.join(pat.select(["SUBJECT_ID", "HADM_ID", "ICUSTAY_ID", "INTIME"]), on=["SUBJECT_ID", "HADM_ID", "ICUSTAY_ID"], how="inner")
             .with_columns((pl.col("INTIME") + pl.duration(hours=pl.col("HOUR_IN"))).dt.hour().alias("HOD"))
@@ -122,7 +151,7 @@ class FeatureAssembler(PipelineComponent):
             for lv in levels:
                 cname = f"{col}_{lv}"
                 if cname not in d.columns: d = d.with_columns(pl.lit(0).alias(cname))
-            rename_map = {c: f"{prefix}__{c.split(col + '_', 1)[1]}" for c in d.columns}
+            rename_map = {c: f"{prefix}__{c.split(col + '_', 1)[1]}" for c in d.columns if col + '_' in c}
             d = d.rename(rename_map)
             return pl.concat([df.drop(col), d], how="horizontal")
 
@@ -140,5 +169,6 @@ class FeatureAssembler(PipelineComponent):
             .sort(["SUBJECT_ID", "HADM_ID", "ICUSTAY_ID", "HOUR_IN"])
         )
 
-        feat.write_parquet(proc_dir / "dataset_123.parquet")
+        out_path = proc_dir / "dataset_123.parquet"
+        feat.write_parquet(out_path)
         self.observer.log("INFO", f"FeatureAssembler: Wrote dataset_123.parquet (rows={feat.height})")
