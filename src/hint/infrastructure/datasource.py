@@ -117,13 +117,29 @@ def collate_tensor_batch(batch: List[TensorBatch]) -> TensorBatch:
     if batch[0].x_icd is not None:
         x_icd = torch.stack([b.x_icd for b in batch])
 
+    # Handle new fields added for ICD
+    input_ids = None
+    if getattr(batch[0], "input_ids", None) is not None:
+        input_ids = torch.stack([b.input_ids for b in batch])
+
+    attention_mask = None
+    if getattr(batch[0], "attention_mask", None) is not None:
+        attention_mask = torch.stack([b.attention_mask for b in batch])
+        
+    candidates = None
+    if getattr(batch[0], "candidates", None) is not None:
+        candidates = torch.stack([b.candidates for b in batch])
+
     return TensorBatch(
         x_num=x_num,
         x_cat=x_cat,
         y=y,
         ids=ids,
         mask=mask,
-        x_icd=x_icd
+        x_icd=x_icd,
+        input_ids=input_ids,
+        attention_mask=attention_mask,
+        candidates=candidates
     )
 
 class ParquetSource(StreamingSource):
@@ -170,11 +186,13 @@ class ParquetSource(StreamingSource):
 class HDF5StreamingSource(Dataset):
     """
     Step 3 Source: Reads enriched HDF5 files containing X_num, X_cat, y, AND X_icd.
+    Supports reading ICD inputs (input_ids, attention_mask, candidates).
     """
-    def __init__(self, h5_path: Path, seq_len: int = 0):
+    def __init__(self, h5_path: Path, seq_len: int = 0, label_key: str = "y"):
         self.h5_path = Path(h5_path)
         self.h5_file: Optional[h5py.File] = None
         self._len = 0
+        self.label_key = label_key
         
         if not self.h5_path.exists():
             raise DataError(f"HDF5 file not found at {self.h5_path}")
@@ -185,7 +203,8 @@ class HDF5StreamingSource(Dataset):
                     raise DataError(f"HDF5 missing required dataset X_num in {self.h5_path}")
                 self._len = len(f["X_num"])
                 if "X_icd" not in f:
-                    logger.warning(f"HDF5StreamingSource: 'X_icd' dataset not found in {self.h5_path}; ICD injection might have been skipped.")
+                    # Not an error if we are in early training stage
+                    pass
         except Exception as e:
             raise DataError(f"Failed to initialize HDF5 source: {e}")
 
@@ -198,19 +217,38 @@ class HDF5StreamingSource(Dataset):
 
         x_num = torch.from_numpy(self.h5_file["X_num"][idx]).float()
         x_cat = torch.from_numpy(self.h5_file["X_cat"][idx]).long()
-        y = torch.tensor(int(self.h5_file["y"][idx]), dtype=torch.long)
+        
+        # Support flexible label key (y for ICD, y_vent for CNN)
+        y_val = self.h5_file[self.label_key][idx]
+        y = torch.tensor(int(y_val), dtype=torch.long)
+        
         sid = torch.tensor(int(self.h5_file["sid"][idx]), dtype=torch.long)
         
         x_icd = None
         if "X_icd" in self.h5_file:
             x_icd = torch.from_numpy(self.h5_file["X_icd"][idx]).float()
 
+        # ICD Specific fields
+        input_ids = None
+        attention_mask = None
+        candidates = None
+
+        if "input_ids" in self.h5_file:
+             input_ids = torch.from_numpy(self.h5_file["input_ids"][idx]).long()
+        if "attention_mask" in self.h5_file:
+             attention_mask = torch.from_numpy(self.h5_file["attention_mask"][idx]).long()
+        if "candidates" in self.h5_file:
+             candidates = torch.from_numpy(self.h5_file["candidates"][idx]).long()
+
         return TensorBatch(
             x_num=x_num,
             x_cat=x_cat,
             y=y,
             ids=sid,
-            x_icd=x_icd
+            x_icd=x_icd,
+            input_ids=input_ids,
+            attention_mask=attention_mask,
+            candidates=candidates
         )
     
     def get_real_vocab_sizes(self) -> List[int]:

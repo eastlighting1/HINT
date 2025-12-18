@@ -23,10 +23,14 @@ class ICDEvaluator(BaseEvaluator):
         
         with torch.no_grad():
             for batch in loader:
-                ids = batch['input_ids'].to(self.device)
-                mask = batch['attention_mask'].to(self.device)
-                num = batch['num'].to(self.device)
-                y = batch['lab'].cpu().numpy()
+                # Fix 1: Use TensorBatch fields directly
+                ids = batch.input_ids.to(self.device)
+                mask = batch.attention_mask.to(self.device)
+                
+                # Fix 2: Mean Pooling for x_num to match model input (Batch, Features)
+                num = batch.x_num.to(self.device).mean(dim=2)
+                
+                y = batch.y.cpu().numpy()
                 
                 o1 = self.entity.head1(ids, mask, num)
                 o2 = self.entity.head2(ids, mask, num)

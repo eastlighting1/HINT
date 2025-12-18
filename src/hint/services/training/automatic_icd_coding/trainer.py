@@ -30,7 +30,7 @@ class ICDTrainer(BaseTrainer):
         opt2 = torch.optim.Adam(self.entity.head2.parameters(), lr=self.cfg.lr)
         
         loss_fn = CBFocalLoss(
-            class_freq=self.class_freq, 
+            class_counts=self.class_freq, 
             beta=self.cfg.cb_beta, 
             gamma=self.cfg.focal_gamma, 
             device=str(self.device)
@@ -49,10 +49,16 @@ class ICDTrainer(BaseTrainer):
             with self.observer.create_progress(f"Epoch {epoch} Train", total=len(train_loader)) as progress:
                 task = progress.add_task("Training", total=len(train_loader))
                 for batch in train_loader:
-                    ids = batch['input_ids'].to(self.device)
-                    mask = batch['attention_mask'].to(self.device)
-                    num = batch['num'].to(self.device)
-                    target = batch['lab'].to(self.device)
+                    # Fix 1: Use TensorBatch fields directly
+                    ids = batch.input_ids.to(self.device)
+                    mask = batch.attention_mask.to(self.device)
+                    
+                    # Fix 2: Dimensionality Mismatch
+                    # batch.x_num is (Batch, Features, Time). Model expects (Batch, Features).
+                    # We apply Mean Pooling over the time dimension (dim=2).
+                    num = batch.x_num.to(self.device).mean(dim=2) 
+                    
+                    target = batch.y.to(self.device)
 
                     opt1.zero_grad()
                     logits1 = self.entity.head1(ids, mask, num)

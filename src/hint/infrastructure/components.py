@@ -9,7 +9,6 @@ from sklearn.decomposition import PCA
 class FocalLoss(nn.Module):
     """
     Multi-class focal loss with optional class weights and label smoothing.
-    Ported from CNN.py
     """
     def __init__(self, alpha: Optional[torch.Tensor] = None, gamma: float = 2.0, label_smoothing: float = 0.0, num_classes: int = 4):
         super().__init__()
@@ -41,18 +40,27 @@ class FocalLoss(nn.Module):
 class CBFocalLoss(nn.Module):
     """
     Class-Balanced Focal Loss.
-    Ported from ICD.py
     """
     def __init__(self, class_counts: np.ndarray, beta: float = 0.999, gamma: float = 1.5, device: str = 'cpu'):
         super().__init__()
+        # Fix: Handle zero counts to avoid divide by zero
+        class_counts = np.array(class_counts)
+        class_counts[class_counts == 0] = 1 # Avoid power of 0 issues temporarily
+        
         effective_num = 1.0 - np.power(beta, class_counts)
-        weights = (1.0 - beta) / np.array(effective_num)
+        # Fix: Add epsilon to avoid division by zero
+        weights = (1.0 - beta) / (np.array(effective_num) + 1e-6)
+        
+        # Restore 0 weight for 0 count classes if necessary, or just normalize
         weights = weights / np.sum(weights) * len(class_counts)
         
         self.class_weights = torch.tensor(weights, dtype=torch.float32, device=device)
         self.gamma = gamma
 
     def forward(self, logits, targets):
+        if self.class_weights.device != logits.device:
+            self.class_weights = self.class_weights.to(logits.device)
+            
         ce = F.cross_entropy(logits, targets, weight=self.class_weights, reduction="none")
         pt = torch.exp(-ce)
         focal_loss = ((1 - pt) ** self.gamma) * ce
@@ -61,7 +69,6 @@ class CBFocalLoss(nn.Module):
 class TemperatureScaler(nn.Module):
     """
     Post-hoc temperature scaling for probability calibration.
-    Ported from CNN.py
     """
     def __init__(self):
         super().__init__()
@@ -89,7 +96,7 @@ class TemperatureScaler(nn.Module):
 
 class XGBoostStacker:
     """
-    Wrapper for XGBoost + PCA stacking logic from ICD.py
+    Wrapper for XGBoost + PCA stacking logic.
     """
     def __init__(self, params: Dict):
         self.params = params
