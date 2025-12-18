@@ -2,21 +2,23 @@ import torch
 import h5py
 import numpy as np
 from pathlib import Path
-from typing import Optional
-from torch.utils.data import DataLoader, WeightedRandomSampler
+from typing import Optional, List, Tuple
 from functools import partial
+from torch.utils.data import DataLoader, WeightedRandomSampler
 from sklearn.model_selection import train_test_split
 from sklearn.preprocessing import LabelEncoder
-from sklearn.metrics import accuracy_score
 
+from ..common.base import BaseDomainService
+from .trainer import ICDTrainer
+from .evaluator import ICDEvaluator
 from ....domain.entities import ICDModelEntity
 from ....domain.vo import ICDConfig, CNNConfig
 from ....foundation.interfaces import TelemetryObserver, Registry, StreamingSource
-from ....infrastructure.components import CBFocalLoss, XGBoostStacker
+from ....infrastructure.components import XGBoostStacker
 from ....infrastructure.datasource import ICDDataset, custom_collate, _to_python_list
 from ....infrastructure.networks import MedBERTClassifier
 
-class ICDService:
+class ICDService(BaseDomainService):
     def __init__(
         self, 
         config: ICDConfig,
@@ -26,26 +28,22 @@ class ICDService:
         val_source: Optional[StreamingSource] = None,
         test_source: Optional[StreamingSource] = None
     ):
+        super().__init__(observer)
         self.cfg = config
         self.registry = registry
-        self.observer = observer
-        
-        self.entity: Optional[ICDModelEntity] = None 
-        
         self.train_source = train_source 
         self.val_source = val_source
         self.test_source = test_source
         self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
         
+        self.entity: Optional[ICDModelEntity] = None
         self.feats = []
         self.le = None
 
     def _prepare_data(self):
         """
         Prepare encoded ICD dataset, labels, and splits for model training.
-
-        Returns:
-            Training, validation, and test DataFrames along with feature columns, target column name, and the label encoder.
+        Full logic preserved from original code.
         """
         self.observer.log("INFO", "ICD Service: Starting data preparation with training source load.")
         df_pl = self.train_source.load()
@@ -84,6 +82,7 @@ class ICDService:
         candidate_names = []
         candidate_indices = []
 
+        # Candidate generation logic (Full Code)
         for codes, backup in zip(label_lists, filtered_labels):
             out = []
             for c in codes:
@@ -123,26 +122,25 @@ class ICDService:
         self.observer.log("INFO", f"ICD Service: Split sizes: Train={len(tr)}, Val={len(v)}, Test={len(te)}")
         return tr, v, te, feats, "target_label", le
 
-    def train(self) -> None:
+    def execute(self) -> None:
         """
-        Train the ICD classifier ensemble and stacker.
-
-        Returns:
-            None.
+        Orchestrates the training process:
+        1. Prepare Data
+        2. Initialize Models (Entity)
+        3. Setup DataLoader & Sampler
+        4. Run Trainer
         """
         tr_df, val_df, _test_df, feats, label_col, le = self._prepare_data()
         
         num_feats = len(feats)
         num_classes = len(le.classes_)
-        self.observer.log("INFO", f"ICD Service: Initializing models with num_features={num_feats}, num_classes={num_classes}")
         
         head1 = MedBERTClassifier(self.cfg.model_name, num_num=num_feats, num_cls=num_classes)
         head2 = MedBERTClassifier(self.cfg.model_name, num_num=num_feats, num_cls=num_classes)
         stacker = XGBoostStacker(self.cfg.xgb_params)
         
         self.entity = ICDModelEntity(head1, head2, stacker)
-        self.entity.to(str(self.device))
-        self.observer.log("INFO", f"ICD Service: Models moved to {self.device}; entering training loop.")
+        # Entity to device handled in Trainer
 
         target_counts = tr_df[label_col].value_counts()
         class_weights_map = {cls: 1.0 / (count ** self.cfg.sampler_alpha) for cls, count in target_counts.items()}
@@ -161,117 +159,24 @@ class ICDService:
         dl_tr = DataLoader(ds_tr, batch_size=self.cfg.batch_size, sampler=sampler, collate_fn=collate_fn, num_workers=self.cfg.num_workers)
         dl_val = DataLoader(ds_val, batch_size=self.cfg.batch_size, collate_fn=collate_fn, num_workers=self.cfg.num_workers)
 
-        opt1 = torch.optim.Adam(self.entity.head1.parameters(), lr=self.cfg.lr)
-        opt2 = torch.optim.Adam(self.entity.head2.parameters(), lr=self.cfg.lr)
-
         class_freq = np.array([target_counts.get(i, 1) for i in range(num_classes)])
-        loss_fn = CBFocalLoss(class_freq, beta=self.cfg.cb_beta, gamma=self.cfg.focal_gamma, device=str(self.device))
-
-        for epoch in range(1, self.cfg.epochs + 1):
-            self.entity.epoch = epoch
-            self.observer.log("INFO", f"ICD Service: Epoch {epoch} training started with freeze={epoch <= self.cfg.freeze_bert_epochs}.")
-            self.entity.head1.train()
-            self.entity.head2.train()
-            
-            freeze = epoch <= self.cfg.freeze_bert_epochs
-            self.entity.head1.set_backbone_grad(not freeze)
-            self.entity.head2.set_backbone_grad(not freeze)
-            
-            with self.observer.create_progress(f"Epoch {epoch} Train", total=len(dl_tr)) as progress:
-                task = progress.add_task("Training", total=len(dl_tr))
-                for batch in dl_tr:
-                    ids = batch['input_ids'].to(self.device)
-                    mask = batch['attention_mask'].to(self.device)
-                    num = batch['num'].to(self.device)
-                    target = batch['lab'].to(self.device)
-
-                    opt1.zero_grad()
-                    logits1 = self.entity.head1(ids, mask, num)
-                    loss1 = loss_fn(logits1, target)
-                    loss1.backward()
-                    opt1.step()
-
-                    opt2.zero_grad()
-                    logits2 = self.entity.head2(ids, mask, num)
-                    loss2 = loss_fn(logits2, target)
-                    loss2.backward()
-                    opt2.step()
-                    
-                    progress.advance(task)
-
-            val_acc = self._validate_and_stack(dl_val)
-            self.observer.track_metric("icd_val_acc", val_acc, step=epoch)
-            self.observer.log("INFO", f"ICD Service: Epoch {epoch} validation accuracy {val_acc:.4f}; updating stacker state.")
-
-            if val_acc > self.entity.best_metric:
-                self.entity.best_metric = val_acc
-                self.registry.save_model(self.entity.state_dict(), self.cfg.artifacts.model_name, "best")
-                if self.entity.stacker.model:
-                     self.registry.save_sklearn(self.entity.stacker.model, f"{self.cfg.artifacts.stacker_name}_best")
-                self.observer.log("INFO", f"ICD Service: New best accuracy {val_acc:.4f} at epoch {epoch}")
-
-        self.observer.log("INFO", "ICD Service: Training complete.")
-
-    def _validate_and_stack(self, loader: DataLoader) -> float:
-        """
-        Run validation for both classifier heads and fit the stacker.
-
-        Args:
-            loader: Validation DataLoader.
-
-        Returns:
-            Accuracy score computed on the validation set.
-        """
-        self.observer.log("INFO", "ICD Service: Starting validation pass and stacker fit.")
-        self.entity.head1.eval()
-        self.entity.head2.eval()
         
-        val_logits_list = []
-        val_labels_list = []
+        trainer = ICDTrainer(self.cfg, self.entity, self.registry, self.observer, self.device, class_freq)
+        evaluator = ICDEvaluator(self.cfg, self.entity, self.registry, self.observer, self.device)
         
-        with torch.no_grad():
-            for batch in loader:
-                ids = batch['input_ids'].to(self.device)
-                mask = batch['attention_mask'].to(self.device)
-                num = batch['num'].to(self.device)
-                y = batch['lab'].cpu().numpy()
-                
-                o1 = self.entity.head1(ids, mask, num)
-                o2 = self.entity.head2(ids, mask, num)
-                avg = (o1 + o2) / 2
-                
-                val_logits_list.append(avg.cpu().numpy())
-                val_labels_list.append(y)
-        
-        if not val_logits_list:
-            self.observer.log("WARNING", "ICD Service: Validation loader returned no batches; skipping stacking.")
-            return 0.0
-
-        X_val_ens = np.vstack(val_logits_list)
-        y_val_ens = np.concatenate(val_labels_list)
-        
-        if self.entity.stacker.pca is None:
-            X_pca = self.entity.stacker.fit_pca(X_val_ens, self.cfg.pca_components)
-        else:
-            X_pca = self.entity.stacker.transform_pca(X_val_ens)
-            
-        self.entity.stacker.fit(X_pca, y_val_ens)
-        preds = self.entity.stacker.predict(X_pca)
-        
-        return float(accuracy_score(y_val_ens, preds))
+        trainer.train(dl_tr, dl_val, evaluator)
 
     def _ensure_entity_loaded(self) -> bool:
-        """
-        Ensure the ICD model and metadata are available for inference.
-
-        Returns:
-            bool: True if the entity is ready, False otherwise.
-        """
         if self.entity is not None:
             return True
 
         try:
             state = self.registry.load_model(self.cfg.artifacts.model_name, "best", str(self.device))
+            
+            # Re-run prep to ensure features and encoder exist for reconstruction
+            if not self.feats or not self.le:
+                self._prepare_data()
+
             if self.feats and self.le:
                 num_feats = len(self.feats)
                 num_classes = len(self.le.classes_)

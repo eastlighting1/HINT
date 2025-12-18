@@ -1,5 +1,4 @@
 from pathlib import Path
-import torch
 from typing import List
 
 from ..foundation.configs import HydraConfigLoader, load_app_context
@@ -10,12 +9,14 @@ from ..infrastructure.registry import FileSystemRegistry
 from ..infrastructure.telemetry import RichTelemetryObserver
 from ..infrastructure.datasource import HDF5StreamingSource, ParquetSource
 from ..infrastructure.networks import GFINet_CNN
+
+# New Refactored Service Imports
 from ..services.etl.service import ETLService
 from ..services.etl.components.assembler import FeatureAssembler
 from ..services.etl.components.tensor import TensorConverter
 from ..services.etl.components.labels import LabelGenerator
 from ..services.training.automatic_icd_coding.service import ICDService
-from ..services.training.predict_intervention.trainer import TrainingService
+from ..services.training.predict_intervention.service import InterventionService
 
 class AppFactory:
     """
@@ -36,7 +37,6 @@ class AppFactory:
     def create_etl_service(self) -> ETLService:
         etl_cfg = self.ctx.etl
         cnn_cfg = self.ctx.cnn
-        
         registry = self.create_registry()
         observer = self.create_telemetry()
         
@@ -64,6 +64,7 @@ class AppFactory:
         registry = self.create_registry()
         observer = self.create_telemetry()
         
+        # ICD Service reads from ETL output parquet (train_coding)
         train_path = Path(etl_cfg.proc_dir) / etl_cfg.artifacts.features_file
         source = ParquetSource(train_path)
         
@@ -76,13 +77,14 @@ class AppFactory:
             test_source=source
         )
 
-    def create_cnn_service(self) -> TrainingService:
+    def create_intervention_service(self) -> InterventionService:
         cfg = self.ctx.cnn
         registry = self.create_registry()
         observer = self.create_telemetry()
         
+        # Intervention Service reads from ICD Augmented H5 files (train_intervention)
         cache_dir = Path(cfg.data.data_cache_dir)
-        prefix = cfg.data.input_h5_prefix
+        prefix = cfg.data.input_h5_prefix 
         train_path = cache_dir / f"{prefix}_train.h5"
         val_path = cache_dir / f"{prefix}_val.h5"
         
@@ -121,12 +123,11 @@ class AppFactory:
         
         entity = InterventionModelEntity(network)
         
-        return TrainingService(
+        return InterventionService(
             config=cfg,
             registry=registry,
             observer=observer,
             entity=entity,
-            device="cuda" if torch.cuda.is_available() else "cpu",
             train_dataset=train_source,
             val_dataset=val_source
         )

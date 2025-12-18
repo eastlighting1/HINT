@@ -21,6 +21,7 @@ dependencies = [
     "pytest>=9.0.2",
     "rich>=13.7.0",
     "scikit-learn>=1.3.0",
+    "seaborn>=0.13.2",
     "shap>=0.44.0",
     "spacy>=3.7.0",
     "torch>=2.1.0",
@@ -42,3 +43,9 @@ packages = ["src/hint"]
 
 [tool.uv]
 package = true
+
+[dependency-groups]
+dev = [
+    "jupyter>=1.1.1",
+    "uv>=0.9.17",
+]

@@ -2,11 +2,9 @@ from pydantic import BaseModel, Field, ConfigDict
 from typing import List, Tuple, Union, Optional
 
 class HyperparamVO(BaseModel):
-    """Base class for immutable configuration objects."""
     model_config = ConfigDict(frozen=True)
 
 class ArtifactsConfig(HyperparamVO):
-    """Generic artifact naming and locations."""
     patients_file: str = "patients.parquet"
     vitals_file: str = "vitals_labs.parquet"
     vitals_mean_file: str = "vitals_labs_mean.parquet"
@@ -17,18 +15,14 @@ class ArtifactsConfig(HyperparamVO):
     model_name: Optional[str] = None
 
 class ETLConfig(HyperparamVO):
-    """Configuration for ETL pipeline."""
     raw_dir: str = "./data/raw"
     proc_dir: str = "./data/processed"
     resources_dir: str = "./resources"
-
     artifacts: ArtifactsConfig = Field(default_factory=ArtifactsConfig)
-
     min_los_icu_days: float = 0.0
     min_duration_hours: int = 0
     max_duration_hours: int = 999999
     min_age: int = 0
-
     input_window_h: int = 6
     gap_h: int = 6
     pred_window_h: int = 4
@@ -71,19 +65,16 @@ class ETLConfig(HyperparamVO):
     ])
 
 class ICDDataConfig(HyperparamVO):
-    """Data flow configuration for ICD service."""
     input_h5_prefix: str = "train_coding"
     output_h5_prefix: str = "train_intervention"
     inferred_col_name: str = "icd_inferred_code"
     data_cache_dir: str = "data/cache"
 
 class ICDArtifactsConfig(HyperparamVO):
-    """Artifact naming for ICD trainer outputs."""
     model_name: str = "icd_model"
     stacker_name: str = "icd_stacker"
 
 class ICDConfig(HyperparamVO):
-    """Configuration for ICD service."""
     data: ICDDataConfig = Field(default_factory=ICDDataConfig)
     artifacts: ICDArtifactsConfig = Field(default_factory=ICDArtifactsConfig)
     model_name: str = "Charangan/MedBERT"
@@ -95,58 +86,44 @@ class ICDConfig(HyperparamVO):
     num_workers: int = 4
     pin_memory: bool = True
     max_length: int = 32
-    
     test_split_size: float = 0.2
     val_split_size: float = 0.15625
     top_k_labels: int = 500
     topk_eval: int = 5
-    
     sampler_alpha: float = 0.5
     cb_beta: float = 0.999
     focal_gamma: float = 1.5
     logit_adjust_tau: float = 1.0
     entropy_reg_lambda: float = 1e-3
     freeze_bert_epochs: int = 1
-    
     pca_components: float = 0.95
-    xgb_params: dict = Field(default_factory=lambda: {
-        "n_estimators": 100, "max_depth": 6, "learning_rate": 0.1, 
-        "tree_method": "hist", "objective": "multi:softprob"
-    })
-    
+    xgb_params: dict = Field(default_factory=dict)
     xai_bg_size: int = 128
     xai_sample_size: int = 5
     xai_nsamples: Union[str, int] = 200
 
 class CNNDataConfig(HyperparamVO):
-    """Data flow configuration for CNN service."""
     input_h5_prefix: str = "train_intervention"
     data_cache_dir: str = "data/cache"
     exclude_cols: List[str] = Field(default_factory=lambda: ["ICD9_CODES"])
 
 class CNNArtifactsConfig(HyperparamVO):
-    """Artifact naming for CNN outputs."""
     model_name: str = "intervention_model"
 
 class CNNConfig(HyperparamVO):
-    """Configuration for CNN service."""
     data: CNNDataConfig = Field(default_factory=CNNDataConfig)
     artifacts: CNNArtifactsConfig = Field(default_factory=CNNArtifactsConfig)
-    
     seq_len: int = 120
     batch_size: int = 512
     epochs: int = 100
     lr: float = 0.001
-    
     patience: int = 10
     use_cosine_scheduler: bool = False
     T_0: int = 10
     lr_patience: int = 5
-    
     focal_gamma: float = 2.0
     label_smoothing: float = 0.1
     ema_decay: float = 0.999
-    
     embed_dim: int = 128
     cat_embed_dim: int = 32
     dropout: float = 0.5

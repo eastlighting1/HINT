@@ -3,25 +3,40 @@ from pathlib import Path
 from ....foundation.interfaces import PipelineComponent, Registry, TelemetryObserver
 from ....domain.vo import ETLConfig
 
+
 class StaticExtractor(PipelineComponent):
+    """Extract static patient attributes from MIMIC tables.
+
+    Joins ICU stays, admissions, and patient demographics to produce the base cohort parquet.
+
+    Attributes:
+        cfg (ETLConfig): ETL configuration with paths and cohort thresholds.
+        registry (Registry): Registry placeholder for interface alignment.
+        observer (TelemetryObserver): Telemetry adapter for logging extraction progress.
     """
-    Extracts static patient cohort data (ICUSTAYS, ADMISSIONS, PATIENTS).
-    Fixed: Polars LazyFrame execution order and output path.
-    """
+
     def __init__(self, config: ETLConfig, registry: Registry, observer: TelemetryObserver):
         self.cfg = config
         self.registry = registry
         self.observer = observer
 
     def execute(self) -> None:
+        """Build the cohort parquet with static attributes.
+
+        Returns:
+            None
+
+        Raises:
+            FileNotFoundError: If expected raw MIMIC tables are not present.
+        """
         raw_dir = Path(self.cfg.raw_dir)
         proc_dir = Path(self.cfg.proc_dir)
-        
+
         proc_dir.mkdir(parents=True, exist_ok=True)
-        
-        self.observer.log("INFO", "StaticExtractor: Loading raw tables...")
-        
-        def find_raw_file(table: str) -> str:
+
+        self.observer.log("INFO", f"StaticExtractor: Searching raw CSVs under {raw_dir}")
+
+        def find_raw_file(table: str) -> Path:
             candidates = sorted(raw_dir.glob(f"{table}*.csv*"))
             if not candidates:
                 for p in sorted(raw_dir.glob("*.csv*")):
@@ -30,13 +45,12 @@ class StaticExtractor(PipelineComponent):
             if not candidates:
                 raise FileNotFoundError(f"No raw file for '{table}' in {raw_dir}")
             best = sorted(candidates, key=lambda p: (p.suffix != ".gz", str(p).lower()))[0]
-            return str(best)
+            return best
 
         def to_datetime_iso(col: str) -> pl.Expr:
             base = pl.col(col).str.to_datetime(time_unit="us", time_zone="UTC", strict=False)
             return pl.when(base.is_null() & pl.col(col).is_not_null()).then(
-                pl.col(col).str.replace(r"Z$", "+00:00", literal=False)
-                .str.to_datetime(time_unit="us", time_zone="UTC", strict=False)
+                pl.col(col).str.replace(r"Z$", "+00:00", literal=False).str.to_datetime(time_unit="us", time_zone="UTC", strict=False)
             ).otherwise(base)
 
         def floor_int(expr: pl.Expr, dtype=pl.Int32) -> pl.Expr:
@@ -46,18 +60,18 @@ class StaticExtractor(PipelineComponent):
             return expr.is_not_null() & left.is_not_null() & right.is_not_null() & (expr >= left) & (expr <= right)
 
         icu_fp = find_raw_file("ICUSTAYS")
+        self.observer.log("INFO", f"StaticExtractor: Loading ICU stays from {icu_fp.name}")
         icu_raw = (
             pl.scan_csv(icu_fp, infer_schema_length=0)
-            .with_columns([
-                to_datetime_iso("INTIME").alias("INTIME_DT"), 
-                to_datetime_iso("OUTTIME").alias("OUTTIME_DT")
-            ])
-            .with_columns([
-                pl.col("LOS").cast(pl.Float64).alias("LOS_ICU"),
-                floor_int((pl.col("OUTTIME_DT") - pl.col("INTIME_DT")).dt.total_hours()).alias("STAY_HOURS"),
-                pl.col("INTIME_DT").alias("INTIME"),
-                pl.col("OUTTIME_DT").alias("OUTTIME")
-            ])
+            .with_columns([to_datetime_iso("INTIME").alias("INTIME_DT"), to_datetime_iso("OUTTIME").alias("OUTTIME_DT")])
+            .with_columns(
+                [
+                    pl.col("LOS").cast(pl.Float64).alias("LOS_ICU"),
+                    floor_int((pl.col("OUTTIME_DT") - pl.col("INTIME_DT")).dt.total_hours()).alias("STAY_HOURS"),
+                    pl.col("INTIME_DT").alias("INTIME"),
+                    pl.col("OUTTIME_DT").alias("OUTTIME"),
+                ]
+            )
         )
 
         icu = (
@@ -69,43 +83,62 @@ class StaticExtractor(PipelineComponent):
         )
 
         adm_fp = find_raw_file("ADMISSIONS")
+        self.observer.log("INFO", f"StaticExtractor: Loading admissions from {adm_fp.name}")
         adm = (
             pl.scan_csv(adm_fp, infer_schema_length=0)
-            .with_columns([
-                to_datetime_iso("ADMITTIME").alias("ADMITTIME"),
-                to_datetime_iso("DISCHTIME").alias("DISCHTIME"),
-                to_datetime_iso("DEATHTIME").alias("DEATHTIME"),
-            ])
+            .with_columns(
+                [
+                    to_datetime_iso("ADMITTIME").alias("ADMITTIME"),
+                    to_datetime_iso("DISCHTIME").alias("DISCHTIME"),
+                    to_datetime_iso("DEATHTIME").alias("DEATHTIME"),
+                ]
+            )
             .select(["SUBJECT_ID", "HADM_ID", "ADMITTIME", "DISCHTIME", "DEATHTIME", "ETHNICITY", "ADMISSION_TYPE", "INSURANCE"])
         )
 
         pat_fp = find_raw_file("PATIENTS")
+        self.observer.log("INFO", f"StaticExtractor: Loading patients from {pat_fp.name}")
         pat = (
             pl.scan_csv(pat_fp, infer_schema_length=0)
-            .with_columns([
-                to_datetime_iso("DOB").alias("DOB"), 
-                to_datetime_iso("DOD").alias("DOD")
-            ])
+            .with_columns([to_datetime_iso("DOB").alias("DOB"), to_datetime_iso("DOD").alias("DOD")])
             .select(["SUBJECT_ID", "DOB", "DOD"])
         )
 
         df = (
             icu.join(adm, on=["SUBJECT_ID", "HADM_ID"], how="inner")
             .join(pat, on="SUBJECT_ID", how="inner")
-            .with_columns([
-                floor_int(((pl.col("INTIME") - pl.col("DOB")).dt.total_days() / 365.2425)).alias("AGE"),
-                pl.when(between_closed(pl.col("DEATHTIME"), pl.col("INTIME"), pl.col("OUTTIME"))).then(1).otherwise(0).alias("MORT_ICU"),
-                pl.when(between_closed(pl.col("DEATHTIME"), pl.col("ADMITTIME"), pl.col("DISCHTIME"))).then(1).otherwise(0).alias("MORT_HOSP"),
-            ])
+            .with_columns(
+                [
+                    floor_int(((pl.col("INTIME") - pl.col("DOB")).dt.total_days() / 365.2425)).alias("AGE"),
+                    pl.when(between_closed(pl.col("DEATHTIME"), pl.col("INTIME"), pl.col("OUTTIME"))).then(1).otherwise(0).alias("MORT_ICU"),
+                    pl.when(between_closed(pl.col("DEATHTIME"), pl.col("ADMITTIME"), pl.col("DISCHTIME"))).then(1).otherwise(0).alias("MORT_HOSP"),
+                ]
+            )
             .filter(pl.col("AGE") >= int(self.cfg.min_age))
-            .select([
-                "SUBJECT_ID", "HADM_ID", "ICUSTAY_ID", "ETHNICITY", "ADMISSION_TYPE", "INSURANCE",
-                "AGE", "MORT_ICU", "MORT_HOSP", "DOB", "DOD", "ADMITTIME", "DISCHTIME",
-                "INTIME", "OUTTIME", "LOS_ICU", "STAY_HOURS"
-            ])
+            .select(
+                [
+                    "SUBJECT_ID",
+                    "HADM_ID",
+                    "ICUSTAY_ID",
+                    "ETHNICITY",
+                    "ADMISSION_TYPE",
+                    "INSURANCE",
+                    "AGE",
+                    "MORT_ICU",
+                    "MORT_HOSP",
+                    "DOB",
+                    "DOD",
+                    "ADMITTIME",
+                    "DISCHTIME",
+                    "INTIME",
+                    "OUTTIME",
+                    "LOS_ICU",
+                    "STAY_HOURS",
+                ]
+            )
             .collect()
         )
 
         out_path = proc_dir / self.cfg.artifacts.patients_file
         df.write_parquet(out_path)
-        self.observer.log("INFO", f"StaticExtractor: Saved cohort to {out_path} (rows={df.height})")
+        self.observer.log("INFO", f"StaticExtractor: Saved cohort to {out_path} rows={df.height}")
