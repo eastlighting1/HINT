@@ -1,6 +1,6 @@
 import torch
 import numpy as np
-from typing import Dict
+from typing import Dict, List, Optional
 from sklearn.metrics import accuracy_score, precision_score, recall_score, f1_score
 
 from ..common.base import BaseEvaluator
@@ -8,62 +8,56 @@ from ....domain.entities import ICDModelEntity
 from ....domain.vo import ICDConfig
 
 class ICDEvaluator(BaseEvaluator):
-    def __init__(self, config: ICDConfig, entity: ICDModelEntity, registry, observer, device):
+    def __init__(
+        self, 
+        config: ICDConfig, 
+        entity: ICDModelEntity, 
+        registry, 
+        observer, 
+        device,
+        ignored_indices: Optional[List[int]] = None
+    ):
         super().__init__(registry, observer, device)
         self.cfg = config
         self.entity = entity
+        self.ignored_indices = ignored_indices if ignored_indices else []
 
-    def evaluate(self, loader, fit_stacker: bool = False) -> Dict[str, float]:
-        self.observer.log("INFO", "ICDEvaluator: Starting validation pass and stacker fit.")
-        self.entity.head1.eval()
-        self.entity.head2.eval()
+    def evaluate(self, loader) -> Dict[str, float]:
+        self.observer.log("INFO", "ICDEvaluator: Starting validation pass.")
+        self.entity.model.eval()
         
         val_logits_list = []
         val_labels_list = []
         
         with torch.no_grad():
             for batch in loader:
-                # Fix 1: Use TensorBatch fields directly
                 ids = batch.input_ids.to(self.device)
                 mask = batch.attention_mask.to(self.device)
-                
-                # Fix 2: Mean Pooling for x_num to match model input (Batch, Features)
-                num = batch.x_num.to(self.device).mean(dim=2)
-                
+                num = batch.x_num.to(self.device).float()
                 y = batch.y.cpu().numpy()
                 
-                o1 = self.entity.head1(ids, mask, num)
-                o2 = self.entity.head2(ids, mask, num)
-                avg = (o1 + o2) / 2
+                logits = self.entity.model(input_ids=ids, attention_mask=mask, x_num=num)
                 
-                val_logits_list.append(avg.cpu().numpy())
+                if self.ignored_indices:
+                    logits[:, self.ignored_indices] = -1e9
+                
+                val_logits_list.append(logits.cpu().numpy())
                 val_labels_list.append(y)
         
         if not val_logits_list:
             self.observer.log("WARNING", "ICDEvaluator: Validation loader returned no batches.")
             return {"accuracy": 0.0, "precision": 0.0, "recall": 0.0, "f1_macro": 0.0}
 
-        X_val_ens = np.vstack(val_logits_list)
-        y_val_ens = np.concatenate(val_labels_list)
+        X_val = np.vstack(val_logits_list)
+        y_val = np.concatenate(val_labels_list)
         
-        if fit_stacker:
-            if self.entity.stacker.pca is None:
-                X_pca = self.entity.stacker.fit_pca(X_val_ens, self.cfg.pca_components)
-            else:
-                X_pca = self.entity.stacker.transform_pca(X_val_ens)
-            self.entity.stacker.fit(X_pca, y_val_ens)
-            preds = self.entity.stacker.predict(X_pca)
-        else:
-            # Inference using fitted stacker or simple argmax fallback
-            if self.entity.stacker.pca:
-                X_pca = self.entity.stacker.transform_pca(X_val_ens)
-                preds = self.entity.stacker.predict(X_pca)
-            else:
-                preds = np.argmax(X_val_ens, axis=1)
+        preds = np.argmax(X_val, axis=1)
         
+        # [Removed] Stacker fitting/prediction logic
+
         return {
-            "accuracy": float(accuracy_score(y_val_ens, preds)),
-            "precision": float(precision_score(y_val_ens, preds, average='macro', zero_division=0)),
-            "recall": float(recall_score(y_val_ens, preds, average='macro', zero_division=0)),
-            "f1_macro": float(f1_score(y_val_ens, preds, average='macro', zero_division=0))
+            "accuracy": float(accuracy_score(y_val, preds)),
+            "precision": float(precision_score(y_val, preds, average='macro', zero_division=0)),
+            "recall": float(recall_score(y_val, preds, average='macro', zero_division=0)),
+            "f1_macro": float(f1_score(y_val, preds, average='macro', zero_division=0))
         }

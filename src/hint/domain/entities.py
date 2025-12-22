@@ -20,33 +20,36 @@ class TrainableEntity(ABC):
     def load_state_dict(self, state: Dict[str, Any]) -> None: ...
 
 class ICDModelEntity(TrainableEntity):
-    """Entity for ICD coding model (Ensemble of BERT heads)."""
-    def __init__(self, head1: nn.Module, head2: nn.Module, stacker: Any):
-        super().__init__("icd_ensemble")
-        self.head1 = head1
-        self.head2 = head2
-        self.stacker = stacker
+    """
+    Generic Entity for ICD coding model.
+    Wraps any model inheriting from BaseICDClassifier.
+    """
+    def __init__(self, model: nn.Module):
+        super().__init__("icd_entity")
+        self.model = model
+        self.network = model
         
     def state_dict(self) -> Dict[str, Any]:
         return {
-            "head1": self.head1.state_dict(),
-            "head2": self.head2.state_dict(),
+            "model": self.model.state_dict(),
             "best_metric": self.best_metric,
             "epoch": self.epoch
         }
     
     def load_state_dict(self, state: Dict[str, Any]) -> None:
-        self.head1.load_state_dict(state["head1"])
-        self.head2.load_state_dict(state["head2"])
+        self.model.load_state_dict(state["model"])
         self.best_metric = state.get("best_metric", 0.0)
         self.epoch = state.get("epoch", 0)
 
     def to(self, device: str) -> None:
-        self.head1.to(device)
-        self.head2.to(device)
+        self.model.to(device)
+
+    def forward(self, *args, **kwargs):
+        """Delegates forward call to the underlying model."""
+        return self.model(*args, **kwargs)
 
 class InterventionModelEntity(TrainableEntity):
-    """Entity for Intervention Prediction CNN with EMA and Calibration."""
+    """Entity for Intervention Prediction CNN with EMA."""
     def __init__(self, network: nn.Module, ema_decay: float = 0.999):
         super().__init__("intervention_cnn")
         self.network = network
@@ -60,7 +63,6 @@ class InterventionModelEntity(TrainableEntity):
     def state_dict(self) -> Dict[str, Any]:
         with self.ema.average_parameters():
             net_state = self.network.state_dict()
-            
         return {
             "network": net_state,
             "temperature": self.temperature,

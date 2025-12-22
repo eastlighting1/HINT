@@ -4,23 +4,67 @@ data:
   inferred_col_name: "icd_inferred_code"
   data_cache_dir: "data/cache"
 
+execution:
+  subset_ratio: 0.1
+
 artifacts:
   model_name: "icd_model"
   stacker_name: "icd_stacker"
 
-model_name: "Charangan/MedBERT"
+# Execution Strategy
+models_to_run:
+  - "GRU-D"
+  - "TST"
+  - "LatentODE"
+  - "iTransformer"
+
+# Common Hyperparameters
+dropout: 0.3
+max_length: 32  # Seq len for Time Series / Max len for Text
+
+# Model Specific Configurations
+model_configs:
+  MedBERT:
+    bert_model_name: "Charangan/MedBERT"
+  
+  GRU-D:
+    hidden_dim: 128
+    decay_rate: 0.99
+  
+  TST:
+    d_model: 128
+    n_heads: 4
+    num_layers: 3
+    d_ff: 256
+  
+  LatentODE:
+    latent_dim: 64
+    rec_dim: 128
+    ode_solver: "rk4"
+  
+  PatchTST:
+    d_model: 128
+    n_heads: 4
+    num_layers: 3
+    d_ff: 256
+    patch_len: 8
+    stride: 4
+  
+  iTransformer:
+    d_model: 128
+    n_heads: 4
+    num_layers: 3
+    d_ff: 256
 
 # Training
-batch_size: 8192
-lr: 1.0e-5
-epochs: 2
-patience: 2
-dropout: 0.3
+batch_size: 1024  # Reduced for stability with complex models
+lr: 1.0e-4
+epochs: 100
+patience: 5
 
 # Resources
-num_workers: 16
+num_workers: 8
 pin_memory: true
-max_length: 32
 
 # Validation & XAI
 test_split_size: 0.2
