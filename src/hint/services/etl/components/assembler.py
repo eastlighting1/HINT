@@ -1,4 +1,5 @@
 import polars as pl
+import re
 from pathlib import Path
 from ....foundation.interfaces import PipelineComponent, Registry, TelemetryObserver
 from ....domain.vo import ETLConfig
@@ -7,12 +8,10 @@ from ....domain.vo import ETLConfig
 class FeatureAssembler(PipelineComponent):
     """Assemble hourly features from vitals, interventions, and static data.
 
-    Combines cohort metadata with time-series vitals and intervention flags to build the modeling dataset.
-
-    Attributes:
-        cfg (ETLConfig): ETL configuration for directories and artifacts.
-        registry (Registry): Registry placeholder for compatibility.
-        observer (TelemetryObserver): Telemetry adapter for stepwise logging.
+    최적화 전략:
+    1. pl.scan_parquet을 사용하여 데이터 로딩을 지연(Lazy)시킴.
+    2. 3.7억 행 전체에 정규식을 거는 대신, 필터링된 코호트의 고유 라벨에만 정규식 적용.
+    3. 메모리 폭발을 방지하기 위해 코호트(pat)와 먼저 조인하여 대상 데이터 크기를 축소.
     """
 
     def __init__(self, config: ETLConfig, registry: Registry, observer: TelemetryObserver):
@@ -21,17 +20,11 @@ class FeatureAssembler(PipelineComponent):
         self.observer = observer
 
     def execute(self) -> None:
-        """Create the feature parquet used by downstream labeling and modeling.
-
-        Returns:
-            None
-
-        Raises:
-            FileNotFoundError: When prerequisite processed artifacts are missing.
-        """
+        """Create the feature parquet used by downstream labeling and modeling."""
         proc_dir = Path(self.cfg.proc_dir)
         raw_dir = Path(self.cfg.raw_dir)
 
+        # 1. 코호트 대상 환자 로드
         patients_path = proc_dir / self.cfg.artifacts.patients_file
         if not patients_path.exists():
             raise FileNotFoundError(f"Dependency missing: {patients_path}")
@@ -46,10 +39,34 @@ class FeatureAssembler(PipelineComponent):
             ]
         )
 
-        vitals = pl.read_parquet(proc_dir / self.cfg.artifacts.vitals_mean_file)
-        interventions = pl.read_parquet(proc_dir / self.cfg.artifacts.interventions_file)
-        self.observer.log("INFO", f"FeatureAssembler: Loaded vitals rows={vitals.height} and interventions rows={interventions.height}")
+        # 2. 첫 번째 ICU 입원 기록만 필터링
+        first_icustay = (
+            patients.select(["SUBJECT_ID", "ICUSTAY_ID", "INTIME"])
+            .sort(["SUBJECT_ID", "INTIME"])
+            .group_by("SUBJECT_ID")
+            .first()
+            .rename({"ICUSTAY_ID": "FIRST_ICUSTAY"})
+            .select(["SUBJECT_ID", "FIRST_ICUSTAY"])
+        )
 
+        pat = (
+            patients.join(first_icustay, on="SUBJECT_ID", how="inner")
+            .filter(pl.col("ICUSTAY_ID") == pl.col("FIRST_ICUSTAY"))
+            .filter(pl.col("AGE") >= self.cfg.min_age)
+            .filter((pl.col("STAY_HOURS") >= self.cfg.min_duration_hours) & (pl.col("STAY_HOURS") < self.cfg.max_duration_hours))
+            .select(["SUBJECT_ID", "HADM_ID", "ICUSTAY_ID", "ETHNICITY", "ADMISSION_TYPE", "INSURANCE", "AGE", "INTIME"])
+            .unique()
+        )
+        self.observer.log("INFO", f"FeatureAssembler: Cohort stays after filters={pat.height}")
+
+        # 3. Vitals 데이터를 Lazy하게 스캔 (3.7억 행 처리 대비)
+        vitals_path = proc_dir / self.cfg.artifacts.vitals_mean_file
+        vitals_lazy = pl.scan_parquet(vitals_path)
+        
+        # Interventions 로드
+        interventions = pl.read_parquet(proc_dir / self.cfg.artifacts.interventions_file)
+
+        # 4. ICD9 코드 로드 로직
         cand = raw_dir / "DIAGNOSES_ICD.csv"
         if not cand.exists() and (raw_dir / "DIAGNOSES_ICD.csv.gz").exists():
             cand = raw_dir / "DIAGNOSES_ICD.csv.gz"
@@ -71,70 +88,87 @@ class FeatureAssembler(PipelineComponent):
                 .agg([pl.col("ICD9_CODE").unique().sort().alias("ICD9_CODES")])
             )
         else:
-            self.observer.log("WARNING", "FeatureAssembler: DIAGNOSES_ICD source not found; filling empty ICD9 codes")
+            self.observer.log("WARNING", "FeatureAssembler: DIAGNOSES_ICD source not found")
             icd9 = patients.select(["SUBJECT_ID", "HADM_ID"]).unique().with_columns(pl.lit([]).cast(pl.List(pl.Utf8)).alias("ICD9_CODES"))
 
-        first_icustay = (
-            patients.select(["SUBJECT_ID", "ICUSTAY_ID", "INTIME"])
-            .sort(["SUBJECT_ID", "INTIME"])
-            .group_by("SUBJECT_ID")
-            .first()
-            .rename({"ICUSTAY_ID": "FIRST_ICUSTAY"})
-            .select(["SUBJECT_ID", "FIRST_ICUSTAY"])
-        )
-
-        pat = (
-            patients.join(first_icustay, on="SUBJECT_ID", how="inner")
-            .filter(pl.col("ICUSTAY_ID") == pl.col("FIRST_ICUSTAY"))
-            .filter(pl.col("AGE") >= self.cfg.min_age)
-            .filter((pl.col("STAY_HOURS") >= self.cfg.min_duration_hours) & (pl.col("STAY_HOURS") < self.cfg.max_duration_hours))
-            .select(["SUBJECT_ID", "HADM_ID", "ICUSTAY_ID", "ETHNICITY", "ADMISSION_TYPE", "INSURANCE", "AGE", "INTIME"])
-            .unique()
-        )
-        self.observer.log("INFO", f"FeatureAssembler: Cohort stays after filters={pat.height}")
-
+        # 5. Vitals 피벗 최적화 시작
         varmap_fp = Path(self.cfg.resources_dir) / "itemid_to_variable_map.csv"
-
         if varmap_fp.exists():
-            self.observer.log("INFO", f"FeatureAssembler: Pivoting vitals using variable map at {varmap_fp}")
+            self.observer.log("INFO", "FeatureAssembler: Optimizing vitals pivot via unique label mapping")
+            
+            # 변수 맵 정규화 (한 번만 수행)
             varmap = (
                 pl.read_csv(varmap_fp, infer_schema_length=0)
                 .select(["MIMIC LABEL", "LEVEL2"])
                 .drop_nulls()
                 .with_columns(
                     [
-                        pl.col("MIMIC LABEL").str.to_lowercase().str.replace_all(r"[^a-z0-9]+", "_").str.replace_all(r"^_+|_+$", "").alias("MIMIC_NORM"),
+                        pl.col("MIMIC LABEL").str.to_lowercase()
+                        .str.replace_all(r"[^a-z0-9]+", "_")
+                        .str.replace_all(r"^_+|_+$", "")
+                        .alias("MIMIC_NORM"),
                         pl.col("LEVEL2").str.to_lowercase().alias("LEVEL2_NORM"),
                     ]
                 )
                 .unique()
             )
 
-            vitals_norm = (
-                vitals.rename({"HOURS_IN": "HOUR_IN"})
-                .with_columns(pl.col("LABEL").str.to_lowercase().str.replace_all(r"[^a-z0-9]+", "_").str.replace_all(r"^_+|_+$", "").alias("LABEL_NORM"))
-                .join(varmap, left_on="LABEL_NORM", right_on="MIMIC_NORM", how="inner")
-                .filter(pl.col("LEVEL2_NORM").is_in([s.lower() for s in self.cfg.exact_level2_104]))
-                .group_by(["SUBJECT_ID", "HADM_ID", "ICUSTAY_ID", "HOUR_IN", "LEVEL2_NORM"])
-                .agg(pl.col("MEAN").mean().alias("VALUE"))
+            # [CPU 최적화 핵심] 3.7억 행에 직접 조인하기 전, 
+            # 1) 코호트 대상 환자 데이터만 남기기
+            vitals_filtered = vitals_lazy.rename({"HOURS_IN": "HOUR_IN"}).join(
+                pat.select(["SUBJECT_ID", "HADM_ID", "ICUSTAY_ID"]).lazy(),
+                on=["SUBJECT_ID", "HADM_ID", "ICUSTAY_ID"],
+                how="inner"
             )
 
-            vl_wide = vitals_norm.pivot(values="VALUE", index=["SUBJECT_ID", "HADM_ID", "ICUSTAY_ID", "HOUR_IN"], on="LEVEL2_NORM", aggregate_function="mean")
+            # 2) 필터링된 데이터에서 '고유 라벨'만 추출하여 정규화 매핑 테이블 생성
+            unique_labels = vitals_filtered.select("LABEL").unique().collect()
+            
+            label_mapping = (
+                unique_labels
+                .with_columns(
+                    pl.col("LABEL").str.to_lowercase()
+                    .str.replace_all(r"[^a-z0-9]+", "_")
+                    .str.replace_all(r"^_+|_+$", "")
+                    .alias("LABEL_NORM")
+                )
+                .join(varmap, left_on="LABEL_NORM", right_on="MIMIC_NORM", how="inner")
+                .filter(pl.col("LEVEL2_NORM").is_in([s.lower() for s in self.cfg.exact_level2_104]))
+                .select(["LABEL", "LEVEL2_NORM"])
+            )
+
+            # 3) 매핑 테이블을 사용하여 데이터 완성 및 집계
+            vitals_norm = (
+                vitals_filtered
+                .join(label_mapping.lazy(), on="LABEL", how="inner")
+                .group_by(["SUBJECT_ID", "HADM_ID", "ICUSTAY_ID", "HOUR_IN", "LEVEL2_NORM"])
+                .agg(pl.col("MEAN").mean().alias("VALUE"))
+                .collect() # 실제 연산 실행
+            )
+
+            vl_wide = vitals_norm.pivot(
+                values="VALUE", 
+                index=["SUBJECT_ID", "HADM_ID", "ICUSTAY_ID", "HOUR_IN"], 
+                on="LEVEL2_NORM", 
+                aggregate_function="mean"
+            )
         else:
-            self.observer.log("WARNING", "FeatureAssembler: Variable map missing; vitals pivot skipped")
+            self.observer.log("WARNING", "FeatureAssembler: Variable map missing; pivot skipped")
             vl_wide = pat.select(["SUBJECT_ID", "HADM_ID", "ICUSTAY_ID"]).with_columns(pl.lit(0).alias("HOUR_IN"))
 
+        # 6. 부족한 컬럼 채우기 및 이름 변경
         for name in self.cfg.exact_level2_104:
             col_name = name.lower()
             if col_name not in vl_wide.columns:
-                vl_wide = vl_wide.with_columns(pl.lit(None).alias(col_name))
+                vl_wide = vl_wide.with_columns(pl.lit(None).cast(pl.Float64).alias(col_name))
 
         rename_map = {c: f"V__{c.replace(' ', '_')}" for c in vl_wide.columns if c not in ["SUBJECT_ID", "HADM_ID", "ICUSTAY_ID", "HOUR_IN"]}
         vl_wide = vl_wide.rename(rename_map)
 
-        v_cols = [f"V__{n.replace(' ', '_')}" for n in self.cfg.exact_level2_104]
+        v_cols = [f"V__{n.replace(' ', '_').lower()}" for n in self.cfg.exact_level2_104]
         vl_wide = vl_wide.select(["SUBJECT_ID", "HADM_ID", "ICUSTAY_ID", "HOUR_IN"] + [c for c in v_cols if c in vl_wide.columns])
 
+        # 7. 정적 피처 및 기타 데이터 조인
         vent_df = interventions.select(["SUBJECT_ID", "HADM_ID", "ICUSTAY_ID", "HOUR_IN", "VENT", "OUTCOME_FLAG"])
 
         base = (
@@ -143,17 +177,14 @@ class FeatureAssembler(PipelineComponent):
             .drop("INTIME")
         )
 
+        # 정적 피처 처리
         age_bins = self.cfg.age_bin_edges
         static = pat.with_columns(
             [
-                pl.when(pl.col("AGE") < age_bins[1])
-                .then(pl.lit("AGE_15_39"))
-                .when(pl.col("AGE") < age_bins[2])
-                .then(pl.lit("AGE_40_64"))
-                .when(pl.col("AGE") < age_bins[3])
-                .then(pl.lit("AGE_65_89"))
-                .otherwise(pl.lit("AGE_90PLUS"))
-                .alias("AGE_BIN"),
+                pl.when(pl.col("AGE") < age_bins[1]).then(pl.lit("AGE_15_39"))
+                .when(pl.col("AGE") < age_bins[2]).then(pl.lit("AGE_40_64"))
+                .when(pl.col("AGE") < age_bins[3]).then(pl.lit("AGE_65_89"))
+                .otherwise(pl.lit("AGE_90PLUS")).alias("AGE_BIN"),
                 pl.col("ADMISSION_TYPE").alias("ADM4"),
                 pl.col("ETHNICITY").alias("ETH4"),
                 pl.col("INSURANCE").alias("INS5"),
@@ -167,11 +198,11 @@ class FeatureAssembler(PipelineComponent):
                 if cname not in d.columns:
                     d = d.with_columns(pl.lit(0).alias(cname))
             rename_map_inner = {c: f"{prefix}__{c.split(col + '_', 1)[1]}" for c in d.columns if col + "_" in c}
-            d = d.rename(rename_map_inner)
-            return pl.concat([df.drop(col), d], how="horizontal")
+            return pl.concat([df.drop(col), d.rename(rename_map_inner)], how="horizontal")
 
         static = one_hot_fixed(static, "AGE_BIN", ["AGE_15_39", "AGE_40_64", "AGE_65_89", "AGE_90PLUS"], "S__AGE")
 
+        # 최종 데이터셋 조립
         feat = (
             base.join(vent_df, on=["SUBJECT_ID", "HADM_ID", "ICUSTAY_ID", "HOUR_IN"], how="left")
             .join(icd9, on=["SUBJECT_ID", "HADM_ID"], how="left")

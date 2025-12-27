@@ -36,6 +36,7 @@ def _to_python_list(val: Any) -> List[str]:
 def custom_collate(batch, tokenizer, max_length):
     """
     Collate function for ICD data: batches numerical features and tokenizes text.
+    Legacy support for text-based pipelines.
     """
     nums, labs, lists, cands = zip(*[(b["num"], b["lab"], b["lst"], b["cand"]) for b in batch])
 
@@ -67,7 +68,7 @@ def custom_collate(batch, tokenizer, max_length):
 class ICDDataset(Dataset):
     """
     Dataset wrapper for combined numerical features and ICD code lists.
-    Used by ICDService for training and evaluation.
+    Used by ICDService for legacy training/evaluation or unit tests.
     """
     def __init__(self, df, feats, label_col, list_col, cand_col="candidate_indices"):
         self.X = df[feats].to_numpy(dtype=np.float32, copy=True)
@@ -84,6 +85,7 @@ class ICDDataset(Dataset):
 
     def __getitem__(self, i):
         num = torch.tensor(self.X[i], dtype=torch.float32)
+        # Handle NaNs / Inf for stability
         num = torch.nan_to_num(num, nan=0.0, posinf=0.0, neginf=0.0)
         lab = torch.tensor(self.y[i], dtype=torch.long)
         
@@ -97,6 +99,7 @@ class ICDDataset(Dataset):
 def collate_tensor_batch(batch: List[TensorBatch]) -> TensorBatch:
     """
     Custom collate function to stack a list of TensorBatch objects into a single TensorBatch.
+    Handles dynamic fields like 'delta' for GRU-D and PLL fields.
     """
     x_num = torch.stack([b.x_num for b in batch])
     y = torch.stack([b.y for b in batch])
@@ -112,12 +115,17 @@ def collate_tensor_batch(batch: List[TensorBatch]) -> TensorBatch:
     mask = None
     if batch[0].mask is not None:
         mask = torch.stack([b.mask for b in batch])
+
+    # [Dynamic] Delta field stacking for GRU-D
+    delta = None
+    if hasattr(batch[0], "delta") and batch[0].delta is not None:
+        delta = torch.stack([b.delta for b in batch])
         
     x_icd = None
     if batch[0].x_icd is not None:
         x_icd = torch.stack([b.x_icd for b in batch])
 
-    # Handle new fields added for ICD
+    # Handle PLL / Text fields
     input_ids = None
     if getattr(batch[0], "input_ids", None) is not None:
         input_ids = torch.stack([b.input_ids for b in batch])
@@ -130,7 +138,7 @@ def collate_tensor_batch(batch: List[TensorBatch]) -> TensorBatch:
     if getattr(batch[0], "candidates", None) is not None:
         candidates = torch.stack([b.candidates for b in batch])
 
-    return TensorBatch(
+    tb = TensorBatch(
         x_num=x_num,
         x_cat=x_cat,
         y=y,
@@ -141,11 +149,17 @@ def collate_tensor_batch(batch: List[TensorBatch]) -> TensorBatch:
         attention_mask=attention_mask,
         candidates=candidates
     )
+    
+    # Attach dynamic attributes
+    if delta is not None:
+        setattr(tb, "delta", delta)
+        
+    return tb
 
 class ParquetSource(StreamingSource):
     """
     Source for loading tabular data from Parquet files.
-    Used by ICDService and Factory.
+    Used by ICDService (legacy paths) and Factory.
     """
     def __init__(self, file_path: Union[str, Path]):
         self.file_path = Path(file_path)
@@ -185,8 +199,13 @@ class ParquetSource(StreamingSource):
 
 class HDF5StreamingSource(Dataset):
     """
-    Step 3 Source: Reads enriched HDF5 files containing X_num, X_cat, y, AND X_icd.
-    Supports reading ICD inputs (input_ids, attention_mask, candidates).
+    Optimized HDF5 Source for ICD Coding Task.
+    
+    Features:
+      - Reads Flat Schema HDF5 (No joins required).
+      - Converts float16 storage to float32 for training.
+      - Auto-computes 'mask' and 'delta' for GRU-D using NaNs.
+      - Supports PLL fields (candidates, input_ids).
     """
     def __init__(self, h5_path: Path, seq_len: int = 0, label_key: str = "y"):
         self.h5_path = Path(h5_path)
@@ -202,54 +221,107 @@ class HDF5StreamingSource(Dataset):
                 if "X_num" not in f:
                     raise DataError(f"HDF5 missing required dataset X_num in {self.h5_path}")
                 self._len = len(f["X_num"])
-                if "X_icd" not in f:
-                    # Not an error if we are in early training stage
-                    pass
         except Exception as e:
             raise DataError(f"Failed to initialize HDF5 source: {e}")
 
     def __len__(self) -> int:
         return self._len
 
+    def _compute_delta(self, mask: torch.Tensor) -> torch.Tensor:
+        """
+        Computes time intervals (delta) between observations.
+        Uses Numpy for speed optimization.
+        Args:
+            mask: (Channels, Time) tensor, 1=observed, 0=missing
+        Returns:
+            delta: (Channels, Time) tensor
+        """
+        channels, seq_len = mask.shape
+        # Move to numpy for faster CPU execution
+        m_np = mask.numpy()
+        d_np = np.zeros_like(m_np, dtype=np.float32)
+        
+        # Iterative calculation for time decay dynamics
+        # This loop is typically O(Channels * Time) but fast in C/Numpy
+        for c in range(channels):
+            last_valid = 0.0
+            for t in range(seq_len):
+                if m_np[c, t] == 1:
+                    last_valid = 0.0
+                else:
+                    last_valid += 1.0
+                d_np[c, t] = last_valid + 1.0 # delta starts at 1.0
+                
+        return torch.from_numpy(d_np)
+
     def __getitem__(self, idx: int) -> TensorBatch:
         if self.h5_file is None:
             self.h5_file = h5py.File(self.h5_path, "r")
 
-        x_num = torch.from_numpy(self.h5_file["X_num"][idx]).float()
-        x_cat = torch.from_numpy(self.h5_file["X_cat"][idx]).long()
+        # 1. Load X_num (Features)
+        # Stored as float16, convert to float32 for PyTorch stability
+        x_num_np = self.h5_file["X_num"][idx]
+        x_num = torch.from_numpy(x_num_np).float()
         
-        # Support flexible label key (y for ICD, y_vent for CNN)
+        # 2. Compute Mask & Handle NaNs
+        # NaN indicates missing value (from ETL).
+        is_nan = torch.isnan(x_num)
+        mask = (~is_nan).float()
+        
+        # 3. Impute NaNs
+        # Since ETL performed Instance Normalization, 0.0 is the mean.
+        x_num = torch.nan_to_num(x_num, nan=0.0)
+        
+        # 4. Compute Delta (Time Intervals) for GRU-D
+        delta = self._compute_delta(mask)
+
+        # 5. Other fields
+        x_cat = None
+        if "X_cat" in self.h5_file:
+            x_cat = torch.from_numpy(self.h5_file["X_cat"][idx]).long()
+        
         y_val = self.h5_file[self.label_key][idx]
         y = torch.tensor(int(y_val), dtype=torch.long)
         
-        sid = torch.tensor(int(self.h5_file["sid"][idx]), dtype=torch.long)
+        sid = -1
+        if "sid" in self.h5_file:
+            sid = int(self.h5_file["sid"][idx])
+        sid_tensor = torch.tensor(sid, dtype=torch.long)
         
         x_icd = None
         if "X_icd" in self.h5_file:
             x_icd = torch.from_numpy(self.h5_file["X_icd"][idx]).float()
 
-        # ICD Specific fields
+        # 6. PLL Fields (Direct Access)
         input_ids = None
-        attention_mask = None
-        candidates = None
-
         if "input_ids" in self.h5_file:
              input_ids = torch.from_numpy(self.h5_file["input_ids"][idx]).long()
+        
+        attention_mask = None
         if "attention_mask" in self.h5_file:
              attention_mask = torch.from_numpy(self.h5_file["attention_mask"][idx]).long()
+             
+        candidates = None
         if "candidates" in self.h5_file:
              candidates = torch.from_numpy(self.h5_file["candidates"][idx]).long()
 
-        return TensorBatch(
+        # 7. Construct TensorBatch
+        tb = TensorBatch(
             x_num=x_num,
             x_cat=x_cat,
             y=y,
-            ids=sid,
+            ids=sid_tensor,
+            mask=mask,
             x_icd=x_icd,
             input_ids=input_ids,
             attention_mask=attention_mask,
             candidates=candidates
         )
+        
+        # Attach delta dynamically
+        setattr(tb, "delta", delta)
+        
+        return tb
     
     def get_real_vocab_sizes(self) -> List[int]:
         should_close = False
@@ -257,6 +329,9 @@ class HDF5StreamingSource(Dataset):
             self.h5_file = h5py.File(self.h5_path, "r")
             should_close = True
         try:
+            if "X_cat" not in self.h5_file:
+                return []
+                
             data = self.h5_file["X_cat"][:]
             if data.size == 0: return []
             max_indices = np.max(data, axis=(0, 2))

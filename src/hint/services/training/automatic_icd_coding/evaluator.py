@@ -1,11 +1,13 @@
 import torch
 import numpy as np
-from typing import Dict, List, Optional
-from sklearn.metrics import accuracy_score, precision_score, recall_score, f1_score
+from typing import List, Dict, Optional, Union
+from sklearn.metrics import accuracy_score, precision_recall_fscore_support
+from torch.utils.data import DataLoader
 
 from ..common.base import BaseEvaluator
 from ....domain.entities import ICDModelEntity
 from ....domain.vo import ICDConfig
+from ....foundation.dtos import TensorBatch
 
 class ICDEvaluator(BaseEvaluator):
     def __init__(
@@ -22,42 +24,83 @@ class ICDEvaluator(BaseEvaluator):
         self.entity = entity
         self.ignored_indices = ignored_indices if ignored_indices else []
 
-    def evaluate(self, loader) -> Dict[str, float]:
-        self.observer.log("INFO", "ICDEvaluator: Starting validation pass.")
+    def _prepare_inputs(self, batch: TensorBatch) -> Dict[str, torch.Tensor]:
+        """
+        Duplicate of _prepare_inputs from Trainer to ensure standalone functionality.
+        """
+        inputs = {}
+        inputs["x_num"] = batch.x_num.to(self.device).float()
+        
+        if batch.mask is not None:
+            inputs["mask"] = batch.mask.to(self.device).float()
+            
+        if hasattr(batch, "delta") and batch.delta is not None:
+            inputs["delta"] = batch.delta.to(self.device).float()
+
+        if getattr(batch, "input_ids", None) is not None:
+            inputs["input_ids"] = batch.input_ids.to(self.device).long()
+        
+        if getattr(batch, "attention_mask", None) is not None:
+            inputs["attention_mask"] = batch.attention_mask.to(self.device).long()
+            
+        if batch.x_cat is not None:
+            inputs["x_cat"] = batch.x_cat.to(self.device).long()
+            
+        if batch.x_icd is not None:
+            inputs["x_icd"] = batch.x_icd.to(self.device).float()
+
+        return inputs
+
+    def evaluate(self, dataloader: DataLoader) -> Dict[str, float]:
         self.entity.model.eval()
+        self.observer.log("INFO", "ICDEvaluator: Starting validation pass.")
         
-        val_logits_list = []
-        val_labels_list = []
-        
+        all_preds = []
+        all_targets = []
+        total_loss = 0.0
+        criterion = torch.nn.CrossEntropyLoss()
+
         with torch.no_grad():
-            for batch in loader:
-                ids = batch.input_ids.to(self.device)
-                mask = batch.attention_mask.to(self.device)
-                num = batch.x_num.to(self.device).float()
-                y = batch.y.cpu().numpy()
-                
-                logits = self.entity.model(input_ids=ids, attention_mask=mask, x_num=num)
+            for batch in dataloader:
+                target = batch.y.to(self.device)
+
+                if self.ignored_indices:
+                    valid_mask = torch.ones(target.shape[0], dtype=torch.bool, device=self.device)
+                    for idx in self.ignored_indices:
+                        valid_mask &= (target != idx)
+                    
+                    if not valid_mask.any():
+                        continue
+                        
+                    target = target[valid_mask]
+                    batch_inputs = self._prepare_inputs(batch)
+                    filtered_inputs = {k: v[valid_mask] for k, v in batch_inputs.items()}
+                else:
+                    filtered_inputs = self._prepare_inputs(batch)
+
+                # [FIXED] Pass inputs as dictionary kwargs
+                logits = self.entity.model(**filtered_inputs)
                 
                 if self.ignored_indices:
                     logits[:, self.ignored_indices] = -1e9
-                
-                val_logits_list.append(logits.cpu().numpy())
-                val_labels_list.append(y)
-        
-        if not val_logits_list:
-            self.observer.log("WARNING", "ICDEvaluator: Validation loader returned no batches.")
-            return {"accuracy": 0.0, "precision": 0.0, "recall": 0.0, "f1_macro": 0.0}
 
-        X_val = np.vstack(val_logits_list)
-        y_val = np.concatenate(val_labels_list)
-        
-        preds = np.argmax(X_val, axis=1)
-        
-        # [Removed] Stacker fitting/prediction logic
+                loss = criterion(logits, target)
+                total_loss += loss.item()
 
+                preds = torch.argmax(logits, dim=1)
+                all_preds.extend(preds.cpu().numpy())
+                all_targets.extend(target.cpu().numpy())
+
+        if not all_targets:
+            return {"accuracy": 0.0, "precision": 0.0, "recall": 0.0, "f1_macro": 0.0, "loss": 0.0}
+
+        acc = accuracy_score(all_targets, all_preds)
+        p, r, f1, _ = precision_recall_fscore_support(all_targets, all_preds, average='macro', zero_division=0)
+        
         return {
-            "accuracy": float(accuracy_score(y_val, preds)),
-            "precision": float(precision_score(y_val, preds, average='macro', zero_division=0)),
-            "recall": float(recall_score(y_val, preds, average='macro', zero_division=0)),
-            "f1_macro": float(f1_score(y_val, preds, average='macro', zero_division=0))
+            "accuracy": acc,
+            "precision": p,
+            "recall": r,
+            "f1_macro": f1,
+            "loss": total_loss / len(dataloader) if len(dataloader) > 0 else 0.0
         }

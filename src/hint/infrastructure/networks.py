@@ -33,8 +33,7 @@ def get_network_class(model_name: str) -> type:
     from .models.medbert import MedBERTClassifier
     from .models.grud import GRUDClassifier
     from .models.tst import TSTClassifier
-    from .models.latent_ode import LatentODEClassifier
-    from .models.patchtst import PatchTSTClassifier
+    from .models.latent_ode import LatentODEClassifier    
     from .models.itransformer import iTransformerClassifier
     
     mapping = {
@@ -42,7 +41,6 @@ def get_network_class(model_name: str) -> type:
         "GRU-D": GRUDClassifier,
         "TST": TSTClassifier,
         "LatentODE": LatentODEClassifier,
-        "PatchTST": PatchTSTClassifier,
         "iTransformer": iTransformerClassifier
     }
     

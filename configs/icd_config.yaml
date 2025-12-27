@@ -13,6 +13,7 @@ artifacts:
 
 # Execution Strategy
 models_to_run:
+  - "MedBERT"
   - "GRU-D"
   - "TST"
   - "LatentODE"
@@ -57,7 +58,7 @@ model_configs:
     d_ff: 256
 
 # Training
-batch_size: 1024  # Reduced for stability with complex models
+batch_size: 128  # Reduced for stability with complex models
 lr: 1.0e-4
 epochs: 100
 patience: 5
