@@ -81,13 +81,33 @@ class ICDEvaluator(BaseEvaluator):
                 # [FIXED] Pass inputs as dictionary kwargs
                 logits = self.entity.model(**filtered_inputs)
                 
+                # Inference Time Disambiguation:
+                # If candidates exist, restrict prediction to the candidate set
+                if getattr(batch, "candidates", None) is not None:
+                    cands = batch.candidates.to(self.device).long()
+                    
+                    if self.ignored_indices and 'valid_mask' in locals():
+                         cands = cands[valid_mask]
+
+                    # Mask non-candidates with -inf for argmax
+                    inf_mask = torch.full_like(logits, float('-inf'))
+                    
+                    valid_cands_idx = (cands >= 0) & (cands < logits.size(1))
+                    rows = torch.arange(cands.size(0), device=self.device).unsqueeze(1).expand_as(cands)
+                    
+                    # Set candidate positions to 0.0 (keeping original logits)
+                    inf_mask[rows[valid_cands_idx], cands[valid_cands_idx]] = 0.0
+                    
+                    preds = torch.argmax(logits + inf_mask, dim=1)
+                else:
+                    preds = torch.argmax(logits, dim=1)
+                
                 if self.ignored_indices:
                     logits[:, self.ignored_indices] = -1e9
 
                 loss = criterion(logits, target)
                 total_loss += loss.item()
 
-                preds = torch.argmax(logits, dim=1)
                 all_preds.extend(preds.cpu().numpy())
                 all_targets.extend(target.cpu().numpy())
 

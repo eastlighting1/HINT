@@ -66,6 +66,42 @@ class CBFocalLoss(nn.Module):
         focal_loss = ((1 - pt) ** self.gamma) * ce
         return focal_loss.mean()
 
+class CLPLLoss(nn.Module):
+    """
+    Convex Loss for Partial Labels (CLPL).
+    Implementation of Equation (2) from 'Learning from Partial Labels' (Cour et al., 2011).
+    Maximizes the average score of candidate labels while minimizing scores of non-candidate labels.
+    """
+    def __init__(self):
+        super().__init__()
+
+    def forward(self, logits: torch.Tensor, candidate_mask: torch.Tensor) -> torch.Tensor:
+        """
+        Args:
+            logits: (Batch, Num_Classes)
+            candidate_mask: (Batch, Num_Classes), 1.0 for candidates, 0.0 otherwise.
+        """
+        # 1. Candidate Set Processing
+        # Calculate average logit for candidates: (1/|y|) * sum(g_a(x))
+        cand_sum = (logits * candidate_mask).sum(dim=1, keepdim=True)
+        cand_count = candidate_mask.sum(dim=1, keepdim=True).clamp(min=1.0)
+        cand_avg = cand_sum / cand_count
+        
+        # 2. Non-Candidate Set Processing
+        # Mask for labels NOT in the candidate set
+        non_candidate_mask = 1.0 - candidate_mask
+        
+        # 3. Loss Calculation using Softplus (convex surrogate for 0/1 loss)
+        # Term 1: Maximize average candidate score -> Minimize softplus(-avg)
+        term1 = F.softplus(-cand_avg)
+        
+        # Term 2: Minimize non-candidate scores -> Minimize softplus(logit)
+        # Sum over all non-candidate labels
+        term2 = (F.softplus(logits) * non_candidate_mask).sum(dim=1, keepdim=True)
+        
+        loss = term1 + term2
+        return loss.mean()
+
 class TemperatureScaler(nn.Module):
     """
     Post-hoc temperature scaling for probability calibration.

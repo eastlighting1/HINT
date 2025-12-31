@@ -86,6 +86,9 @@ class ICDConfig(HyperparamVO):
     execution: ExecutionConfig = Field(default_factory=ExecutionConfig)
     models_to_run: List[str] = Field(default_factory=lambda: ["MedBERT"])
     model_configs: Dict[str, Any] = Field(default_factory=dict)
+    
+    # [NEW] Loss Type for PLL (Default: focal, Option: clpl)
+    loss_type: str = "clpl"
 
     model_name: str = "Charangan/MedBERT"
     batch_size: int = 2048

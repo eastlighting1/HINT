@@ -5,7 +5,7 @@ from torch.utils.data import DataLoader
 from ..common.base import BaseTrainer, BaseEvaluator
 from ....domain.entities import ICDModelEntity
 from ....domain.vo import ICDConfig
-from ....infrastructure.components import CBFocalLoss
+from ....infrastructure.components import CBFocalLoss, CLPLLoss
 from ....foundation.dtos import TensorBatch
 
 class ICDTrainer(BaseTrainer):
@@ -45,7 +45,7 @@ class ICDTrainer(BaseTrainer):
 
     def train(self, train_loader: DataLoader, val_loader: DataLoader, evaluator: BaseEvaluator) -> None:
         self.entity.to(self.device)
-        self.observer.log("INFO", f"ICDTrainer: Start training for {self.cfg.epochs} epochs (AMP + PLL).")
+        self.observer.log("INFO", f"ICDTrainer: Start training for {self.cfg.epochs} epochs (AMP + PLL Mode: {self.cfg.loss_type}).")
         
         optimizer = torch.optim.Adam(self.entity.model.parameters(), lr=self.cfg.lr, weight_decay=1e-5)
         
@@ -54,7 +54,11 @@ class ICDTrainer(BaseTrainer):
             optimizer, mode='max', factor=0.1, patience=3
         )
         
-        loss_fn = CBFocalLoss(class_counts=self.class_freq, beta=self.cfg.cb_beta, gamma=self.cfg.focal_gamma, device=str(self.device))
+        # Initialize Loss Function based on Config
+        if self.cfg.loss_type == "clpl":
+            loss_fn = CLPLLoss().to(self.device)
+        else:
+            loss_fn = CBFocalLoss(class_counts=self.class_freq, beta=self.cfg.cb_beta, gamma=self.cfg.focal_gamma, device=str(self.device))
         
         no_improve = 0
         
@@ -91,26 +95,48 @@ class ICDTrainer(BaseTrainer):
                     with torch.amp.autocast('cuda', enabled=self.scaler is not None):
                         logits = self.entity.model(**filtered_inputs)
                         
-                        # PLL Candidate Masking
-                        if getattr(batch, "candidates", None) is not None:
+                        # CLPL Mode Logic
+                        if self.cfg.loss_type == "clpl" and getattr(batch, "candidates", None) is not None:
                             cands = batch.candidates.to(self.device).long()
                             cands = cands[valid_mask]
                             
-                            cand_mask = torch.full_like(logits, fill_value=False, dtype=torch.bool)
-                            
+                            # Create Multi-hot Candidate Mask (1 for candidates, 0 for others)
+                            cand_mask = torch.zeros_like(logits, dtype=torch.float32)
                             valid_cands_idx = (cands >= 0) & (cands < logits.size(1))
                             rows = torch.arange(cands.size(0), device=self.device).unsqueeze(1).expand_as(cands)
                             
-                            cand_mask[rows[valid_cands_idx], cands[valid_cands_idx]] = True
-                            cand_mask.scatter_(1, target.unsqueeze(1), True)
+                            cand_mask[rows[valid_cands_idx], cands[valid_cands_idx]] = 1.0
                             
-                            # [FIX] Use -1e4 to prevent float16 overflow
-                            logits = logits.masked_fill(~cand_mask, -1e4)
+                            # Ensure ground truth is included in candidates (Safety check)
+                            cand_mask.scatter_(1, target.unsqueeze(1), 1.0)
+                            
+                            if self.ignored_indices:
+                                logits[:, self.ignored_indices] = -1e4
 
-                        if self.ignored_indices: 
-                            logits[:, self.ignored_indices] = -1e4
-                        
-                        loss = loss_fn(logits, target)
+                            # Pass logits and mask to CLPL Loss (No forced masking of logits)
+                            loss = loss_fn(logits, cand_mask)
+
+                        else:
+                            # Standard / Original PLL Logic (Masking Non-Candidates)
+                            if getattr(batch, "candidates", None) is not None:
+                                cands = batch.candidates.to(self.device).long()
+                                cands = cands[valid_mask]
+                                
+                                cand_mask = torch.full_like(logits, fill_value=False, dtype=torch.bool)
+                                
+                                valid_cands_idx = (cands >= 0) & (cands < logits.size(1))
+                                rows = torch.arange(cands.size(0), device=self.device).unsqueeze(1).expand_as(cands)
+                                
+                                cand_mask[rows[valid_cands_idx], cands[valid_cands_idx]] = True
+                                cand_mask.scatter_(1, target.unsqueeze(1), True)
+                                
+                                # [FIX] Use -1e4 to prevent float16 overflow
+                                logits = logits.masked_fill(~cand_mask, -1e4)
+
+                            if self.ignored_indices: 
+                                logits[:, self.ignored_indices] = -1e4
+                            
+                            loss = loss_fn(logits, target)
 
                     if self.scaler:
                         self.scaler.scale(loss).backward()
