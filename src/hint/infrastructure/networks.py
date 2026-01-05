@@ -17,10 +17,12 @@ class BaseICDClassifier(nn.Module):
     def forward(self, input_ids: Optional[torch.Tensor] = None, 
                 attention_mask: Optional[torch.Tensor] = None, 
                 x_num: Optional[torch.Tensor] = None,
+                return_embeddings: bool = False,
                 **kwargs) -> torch.Tensor:
         """
-        x_num: Expected shape (Batch, Channels, Time) or (Batch, Time, Channels).
-               Implementations should handle permutation.
+        x_num: Expected shape (Batch, Channels, Time).
+        return_embeddings: If True, returns the penultimate layer embeddings instead of logits.
+                           Used for Adaptive Softmax / Sampled Softmax in XMC.
         """
         raise NotImplementedError
 
@@ -29,19 +31,27 @@ def get_network_class(model_name: str) -> type:
     Factory function to retrieve model class by name.
     Imports are done INSIDE this function to prevent circular import errors.
     """
-    # Relative imports from the .models sub-package
+    # Legacy / Time-series models
     from .models.medbert import MedBERTClassifier
     from .models.grud import GRUDClassifier
     from .models.tst import TSTClassifier
     from .models.latent_ode import LatentODEClassifier    
     from .models.itransformer import iTransformerClassifier
     
+    # New XMC / Tabular models
+    from .models.tabnet import TabNetICD
+    from .models.dcn_v2 import DCNv2ICD
+    from .models.ft_transformer import FTTransformerICD
+    
     mapping = {
         "MedBERT": MedBERTClassifier,
         "GRU-D": GRUDClassifier,
         "TST": TSTClassifier,
         "LatentODE": LatentODEClassifier,
-        "iTransformer": iTransformerClassifier
+        "iTransformer": iTransformerClassifier,
+        "TabNet": TabNetICD,
+        "DCNv2": DCNv2ICD,
+        "FTTransformer": FTTransformerICD
     }
     
     if model_name not in mapping:

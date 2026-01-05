@@ -13,15 +13,19 @@ artifacts:
 
 # Execution Strategy
 models_to_run:
-  - "MedBERT"
-  - "GRU-D"
-  - "TST"
-  - "LatentODE"
-  - "iTransformer"
+  - "TabNet"
+  - "DCNv2"
+  - "FTTransformer"
+  # - "MedBERT"
+  # - "GRU-D"
 
 # Common Hyperparameters
 dropout: 0.3
 max_length: 32  # Seq len for Time Series / Max len for Text
+
+# Loss Configuration
+# Options: "standard", "clpl", "adaptive_softmax"
+loss_type: "adaptive_softmax"  # Recommended for XMC
 
 # Model Specific Configurations
 model_configs:
@@ -43,19 +47,33 @@ model_configs:
     rec_dim: 128
     ode_solver: "rk4"
   
-  PatchTST:
-    d_model: 128
-    n_heads: 4
-    num_layers: 3
-    d_ff: 256
-    patch_len: 8
-    stride: 4
-  
   iTransformer:
     d_model: 128
     n_heads: 4
     num_layers: 3
     d_ff: 256
+
+  # --- New XMC Models ---
+  TabNet:
+    n_d: 64
+    n_a: 64
+    n_steps: 5
+    gamma: 1.5
+    n_independent: 2
+    n_shared: 2
+    virtual_batch_size: 128
+    momentum: 0.02
+
+  DCNv2:
+    cross_layers: 4
+    deep_layers: [512, 512, 512]
+    dropout: 0.2
+
+  FTTransformer:
+    d_token: 192
+    n_blocks: 3
+    n_heads: 8
+    d_ffn: 256
 
 # Training
 batch_size: 128  # Reduced for stability with complex models
