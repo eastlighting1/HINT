@@ -17,17 +17,17 @@ class TSTClassifier(BaseICDClassifier):
         self.fc = nn.Linear(d_model, num_classes)
 
     def forward(self, x_num: Optional[torch.Tensor] = None, **kwargs) -> torch.Tensor:
-        # x_num: (B, C, T) -> (B, T, C)
+                                       
         if x_num is None: raise ValueError("TST requires x_num")
         x = x_num.permute(0, 2, 1)
         
-        # Projection & Positional Encoding
+                                          
         x = self.projector(x) + self.pos_enc[:, :x.size(1), :]
         
-        # Transformer
+                     
         x = self.transformer_encoder(x)
         
-        # Global Average Pooling
+                                
         x = x.mean(dim=1)
         
         return self.fc(self.dropout(x))

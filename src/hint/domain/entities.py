@@ -5,7 +5,10 @@ from torch_ema import ExponentialMovingAverage
 from abc import ABC, abstractmethod
 
 class TrainableEntity(ABC):
-    """Abstract base class for trainable models with state."""
+    """Abstract base class for trainable models with state.
+
+    Tracks training progress metadata alongside model parameters.
+    """
     def __init__(self, name: str):
         self.name = name
         self.epoch: int = 0
@@ -20,9 +23,9 @@ class TrainableEntity(ABC):
     def load_state_dict(self, state: Dict[str, Any]) -> None: ...
 
 class ICDModelEntity(TrainableEntity):
-    """
-    Generic Entity for ICD coding model.
-    Wraps any model inheriting from BaseICDClassifier.
+    """Entity wrapper for ICD coding models.
+
+    Stores model state and training metadata for ICD classifiers.
     """
     def __init__(self, model: nn.Module):
         super().__init__("icd_entity")
@@ -45,11 +48,11 @@ class ICDModelEntity(TrainableEntity):
         self.model.to(device)
 
     def forward(self, *args, **kwargs):
-        """Delegates forward call to the underlying model."""
+        """Delegate the forward call to the underlying model."""
         return self.model(*args, **kwargs)
 
 class InterventionModelEntity(TrainableEntity):
-    """Entity for Intervention Prediction CNN with EMA."""
+    """Entity for intervention prediction models with EMA tracking."""
     def __init__(self, network: nn.Module, ema_decay: float = 0.999):
         super().__init__("intervention_cnn")
         self.network = network

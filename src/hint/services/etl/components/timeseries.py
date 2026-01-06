@@ -4,18 +4,20 @@ from ....foundation.interfaces import PipelineComponent, Registry, TelemetryObse
 from ....domain.vo import ETLConfig
 
 class TimeSeriesAggregator(PipelineComponent):
+    """Aggregate time-series events into hourly vitals and labs."""
     def __init__(self, config: ETLConfig, registry: Registry, observer: TelemetryObserver):
         self.cfg = config
         self.registry = registry
         self.observer = observer
 
     def execute(self) -> None:
+        """Build vitals and labs aggregates from raw events."""
         raw_dir = Path(self.cfg.raw_dir)
         resources_dir = Path(self.cfg.resources_dir)
         proc_dir = Path(self.cfg.proc_dir)
         proc_dir.mkdir(parents=True, exist_ok=True)
 
-        self.observer.log("INFO", f"TimeSeriesAggregator: Scanning raw directory {raw_dir}")
+        self.observer.log("INFO", f"TimeSeriesAggregator: Stage 1/3 scanning raw directory {raw_dir}")
 
         def process_events(table: str, time_col: str) -> pl.LazyFrame:
             fpath = raw_dir / f"{table.upper()}.csv.gz"
@@ -46,12 +48,12 @@ class TimeSeriesAggregator(PipelineComponent):
             ]).select(["ICUSTAY_ID", "HOURS_IN", "LABEL", "VALUENUM"])
 
         full_lf = pl.concat([process_events("chartevents", "charttime"), process_events("labevents", "charttime")])
-        
-        # [Optimization] Outlier Filtering
+        self.observer.log("INFO", "TimeSeriesAggregator: Stage 2/3 filtering outliers and invalid values")
         clean_lf = full_lf.filter(
             pl.col("VALUENUM").is_not_null() & pl.col("VALUENUM").is_finite() & (pl.col("VALUENUM") >= 0) & (pl.col("VALUENUM") < 10000)
         )
 
+        self.observer.log("INFO", "TimeSeriesAggregator: Stage 3/3 aggregating hourly statistics")
         vitals_labs = clean_lf.group_by(["ICUSTAY_ID", "HOURS_IN", "LABEL"]).agg([
             pl.col("VALUENUM").mean().alias("MEAN"),
             pl.col("VALUENUM").count().alias("COUNT"),

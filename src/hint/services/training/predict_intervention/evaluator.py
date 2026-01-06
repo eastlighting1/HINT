@@ -13,7 +13,7 @@ class InterventionEvaluator(BaseEvaluator):
         super().__init__(registry, observer, device)
         self.cfg = config
         self.entity = entity
-        # 0: ONSET, 1: WEAN, 2: STAY ON, 3: STAY OFF
+                                                    
         self.class_names = ["ONSET", "WEAN", "STAY ON", "STAY OFF"]
 
     def evaluate(self, loader, **kwargs) -> Dict[str, float]:
@@ -39,17 +39,17 @@ class InterventionEvaluator(BaseEvaluator):
         y_pred = np.array(all_preds)
         y_score = np.array(all_probs)
         
-        # 1. Accuracy
+                     
         acc = float(accuracy_score(y_true, y_pred))
         
-        # 2. F1 Score (Macro)
+                             
         f1 = float(f1_score(y_true, y_pred, average='macro'))
         
-        # 3. AUCs (One-vs-Rest for each class)
-        # Binarize labels for multi-class ROC/PR computation
+                                              
+                                                            
         y_true_bin = label_binarize(y_true, classes=[0, 1, 2, 3])
         
-        # roc_auc_score with average=None returns array of scores per class
+                                                                           
         try:
             aucs = roc_auc_score(y_true_bin, y_score, average=None, multi_class='ovr')
             macro_auc = float(np.mean(aucs))
@@ -58,14 +58,14 @@ class InterventionEvaluator(BaseEvaluator):
             stay_on_auc = float(aucs[2])
             stay_off_auc = float(aucs[3])
         except ValueError:
-            # Handle cases where not all classes are present in batch
+                                                                     
             macro_auc = 0.0
             onset_auc = 0.0
             wean_auc = 0.0
             stay_on_auc = 0.0
             stay_off_auc = 0.0
 
-        # 4. Macro AUPRC
+                        
         try:
             macro_auprc = float(average_precision_score(y_true_bin, y_score, average='macro'))
         except ValueError:

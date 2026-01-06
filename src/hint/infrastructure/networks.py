@@ -3,9 +3,9 @@ import torch.nn as nn
 from typing import Optional, Union, Sequence, List
 
 class BaseICDClassifier(nn.Module):
-    """
-    Abstract base class for all ICD classifiers.
-    Standardizes inputs: text (input_ids/mask) and time series (x_num).
+    """Abstract base class for ICD classifiers.
+
+    Standardizes inputs for text tokens and time-series features.
     """
     def __init__(self, num_classes: int, input_dim: int, seq_len: int, dropout: float = 0.3, **kwargs):
         super().__init__()
@@ -19,26 +19,37 @@ class BaseICDClassifier(nn.Module):
                 x_num: Optional[torch.Tensor] = None,
                 return_embeddings: bool = False,
                 **kwargs) -> torch.Tensor:
-        """
-        x_num: Expected shape (Batch, Channels, Time).
-        return_embeddings: If True, returns the penultimate layer embeddings instead of logits.
-                           Used for Adaptive Softmax / Sampled Softmax in XMC.
+        """Run the forward pass for classification.
+
+        Args:
+            input_ids (Optional[torch.Tensor]): Token ids for text inputs.
+            attention_mask (Optional[torch.Tensor]): Attention mask for text tokens.
+            x_num (Optional[torch.Tensor]): Time-series input shaped (Batch, Channels, Time).
+            return_embeddings (bool): Whether to return embeddings instead of logits.
+            **kwargs: Additional model-specific inputs.
+
+        Returns:
+            torch.Tensor: Model logits or embeddings, depending on configuration.
         """
         raise NotImplementedError
 
 def get_network_class(model_name: str) -> type:
+    """Resolve a model class by name.
+
+    Args:
+        model_name (str): Model identifier from configuration.
+
+    Returns:
+        type: Model class matching the name.
     """
-    Factory function to retrieve model class by name.
-    Imports are done INSIDE this function to prevent circular import errors.
-    """
-    # Legacy / Time-series models
+                                 
     from .models.medbert import MedBERTClassifier
     from .models.grud import GRUDClassifier
     from .models.tst import TSTClassifier
     from .models.latent_ode import LatentODEClassifier    
     from .models.itransformer import iTransformerClassifier
     
-    # New XMC / Tabular models
+                              
     from .models.tabnet import TabNetICD
     from .models.dcn_v2 import DCNv2ICD
     from .models.ft_transformer import FTTransformerICD
@@ -58,9 +69,9 @@ def get_network_class(model_name: str) -> type:
         raise ValueError(f"Model {model_name} not found. Options: {list(mapping.keys())}")
     return mapping[model_name]
 
-# -----------------------------------------------------------------------------
-# Legacy Components (GFINet_CNN) - Kept for compatibility
-# -----------------------------------------------------------------------------
+                                                                               
+                                                         
+                                                                               
 
 class DilatedResidualBlock(nn.Module):
     def __init__(self, in_c: int, out_c: int, kernel: int, stride: int, dilation: int, dropout: float) -> None:

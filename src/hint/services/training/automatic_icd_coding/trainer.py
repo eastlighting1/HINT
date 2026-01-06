@@ -17,29 +17,29 @@ class ICDTrainer(BaseTrainer):
         self.class_freq = class_freq if class_freq is not None else np.ones(1)
         self.ignored_indices = ignored_indices if ignored_indices else []
         
-        # [FIX] Use new torch.amp API
+                                     
         self.scaler = torch.amp.GradScaler('cuda') if torch.cuda.is_available() else None
         
-        # Initialize Loss Function based on Config
+                                                  
         self.use_adaptive_softmax = False
         self.adaptive_loss_fn = None
         
         if self.cfg.loss_type == "adaptive_softmax":
             self.use_adaptive_softmax = True
-            # Determine input embedding dimension from the model
-            # New XMC models (TabNet, DCNv2, FT) must have 'embedding_dim' attribute
+                                                                
+                                                                                    
             if hasattr(self.entity.model, "embedding_dim"):
                 in_features = self.entity.model.embedding_dim
-            elif hasattr(self.entity.model, "fc"): # Fallback for older models if adapter is added
+            elif hasattr(self.entity.model, "fc"):                                                
                 in_features = self.entity.model.fc.in_features
             else:
-                # Default fallback or raise error
+                                                 
                 raise AttributeError("Model must have 'embedding_dim' attribute for adaptive_softmax.")
             
-            # Dynamic cutoffs based on number of classes
+                                                        
             n_classes = self.entity.model.num_classes
             if n_classes > 100000:
-                cutoffs = [10000, 50000, n_classes - 10000] # Example for extreme
+                cutoffs = [10000, 50000, n_classes - 10000]                      
             elif n_classes > 10000:
                 cutoffs = [2000, 8000]
             else:
@@ -82,19 +82,19 @@ class ICDTrainer(BaseTrainer):
         self.entity.to(self.device)
         self.observer.log("INFO", f"ICDTrainer: Start training for {self.cfg.epochs} epochs (AMP + Mode: {self.cfg.loss_type}).")
         
-        # Add adaptive loss params to optimizer if active
+                                                         
         params = list(self.entity.model.parameters())
         if self.use_adaptive_softmax:
             params += list(self.adaptive_loss_fn.parameters())
             
         optimizer = torch.optim.Adam(params, lr=self.cfg.lr, weight_decay=1e-5)
         
-        # [FIX] Removed 'verbose' argument
+                                          
         scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(
             optimizer, mode='max', factor=0.1, patience=3
         )
         
-        # Standard Loss Functions (Fallback or Non-Adaptive)
+                                                            
         standard_loss_fn = None
         if not self.use_adaptive_softmax:
             if self.cfg.loss_type == "clpl":
@@ -120,16 +120,16 @@ class ICDTrainer(BaseTrainer):
                 task = progress.add_task("Training", total=len(train_loader))
                 
                 for batch in train_loader:
-                    # [MODIFIED] Handle missing y (target) for True PLL
+                                                                       
                     target = getattr(batch, "y", None)
                     if target is not None:
                         target = target.to(self.device)
                     
-                    # Create basic valid mask (all true if target is missing)
+                                                                             
                     batch_size = batch.x_num.size(0)
                     valid_mask = torch.ones(batch_size, dtype=torch.bool, device=self.device)
                     
-                    # Only filter by ignored indices if target exists and not in adaptive mode (Adaptive handles ignored itself mostly or via mask)
+                                                                                                                                                   
                     if target is not None and self.ignored_indices:
                         for idx in self.ignored_indices: valid_mask &= (target != idx)
                     
@@ -139,12 +139,12 @@ class ICDTrainer(BaseTrainer):
                     
                     if target is not None:
                         target = target[valid_mask]
-                        # For AdaptiveSoftmax, target must be LongTensor (indices), not One-Hot
+                                                                                               
                         if self.use_adaptive_softmax and target.dim() > 1 and target.size(1) > 1:
-                             # Assuming Multi-label is converted to single-label per sample or using custom loop
-                             # NOTE: AdaptiveLogSoftmax is strictly for Multi-Class (Single Label). 
-                             # If XMC is Multi-Label, we must flatten (Batch * Labels) or use SampledSoftmax.
-                             # Here assuming target is index-based for XMC (Multi-class setup)
+                                                                                                                
+                                                                                                    
+                                                                                                             
+                                                                                              
                              target = target.squeeze()
                         
                     batch_inputs = self._prepare_inputs(batch)
@@ -152,52 +152,52 @@ class ICDTrainer(BaseTrainer):
 
                     optimizer.zero_grad()
                     
-                    # [FIX] Use new torch.amp API
+                                                 
                     with torch.amp.autocast('cuda', enabled=self.scaler is not None):
                         
                         if self.use_adaptive_softmax:
-                            # Forward pass returning embeddings
+                                                               
                             embeddings = self.entity.model(**filtered_inputs, return_embeddings=True)
                             
-                            # Calculate loss using Adaptive Softmax
-                            # Output is NamedTuple(output, loss)
+                                                                   
+                                                                
                             _, loss = self.adaptive_loss_fn(embeddings, target)
                             
                         else:
-                            # Standard Logits Path
+                                                  
                             logits = self.entity.model(**filtered_inputs)
                             
-                            # ============================================================
-                            # [KEY LOGIC] Disambiguation & Entropy Regularization
-                            # ============================================================
+                                                                                          
+                                                                                 
+                                                                                          
                             
-                            # CLPL Mode or Standard PLL logic
+                                                             
                             if self.cfg.loss_type == "clpl" and getattr(batch, "candidates", None) is not None:
                                 cands = batch.candidates.to(self.device).long()
                                 cands = cands[valid_mask]
                                 
-                                # Create Multi-hot Candidate Mask
+                                                                 
                                 cand_mask = torch.zeros_like(logits, dtype=torch.float32)
                                 valid_cands_idx = (cands >= 0) & (cands < logits.size(1))
                                 rows = torch.arange(cands.size(0), device=self.device).unsqueeze(1).expand_as(cands)
                                 
                                 cand_mask[rows[valid_cands_idx], cands[valid_cands_idx]] = 1.0
                                 
-                                # [MODIFIED] Only inject ground truth if we actually have it
+                                                                                            
                                 if target is not None:
                                     if target.dim() == 1:
                                          cand_mask.scatter_(1, target.unsqueeze(1), 1.0)
                                     else:
-                                         # Multi-label case
+                                                           
                                          cand_mask = torch.max(cand_mask, target.float())
                                 
                                 if self.ignored_indices:
                                     logits[:, self.ignored_indices] = -1e4
 
-                                # Main Loss (Likelihood of Candidate Set)
+                                                                         
                                 loss_main = standard_loss_fn(logits, cand_mask)
 
-                                # [ADDED] Entropy Regularization
+                                                                
                                 probs = torch.softmax(logits, dim=1)
                                 entropy = -torch.sum(probs * torch.log(probs + 1e-10), dim=1).mean()
                                 
@@ -205,14 +205,14 @@ class ICDTrainer(BaseTrainer):
                                 loss = loss_main + (reg_lambda * entropy)
 
                             else:
-                                # Fallback if no candidates provided or standard supervision
+                                                                                            
                                 if target is None:
                                     progress.advance(task)
                                     continue
 
-                                # Standard Classification Logic
+                                                               
                                 if getattr(batch, "candidates", None) is not None:
-                                    # ... (Candidate masking logic)
+                                                                   
                                     pass
 
                                 if self.ignored_indices: 
@@ -238,11 +238,11 @@ class ICDTrainer(BaseTrainer):
             avg_loss = epoch_loss / batch_count if batch_count > 0 else 0.0
             self.observer.track_metric("train_loss", avg_loss, step=epoch)
 
-            # Evaluation
-            # For Adaptive Softmax models, evaluation needs careful handling (predict returns embeddings or full logits?)
-            # Usually we use standard evaluation but might need to switch model to 'eval' mode 
-            # where it returns logits via adaptive_loss_fn.log_prob (expensive) or prediction.
-            # Here assuming evaluator handles model.forward() which defaults to logits if return_embeddings=False
+                        
+                                                                                                                         
+                                                                                               
+                                                                                              
+                                                                                                                 
             metrics = evaluator.evaluate(val_loader)
             val_acc = metrics.get("accuracy", 0.0)
             val_f1 = metrics.get("f1_macro", 0.0)

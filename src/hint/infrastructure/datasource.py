@@ -6,16 +6,21 @@ from pathlib import Path
 from typing import Optional, List, Any, Union, Dict, Generator
 from torch.utils.data import Dataset
 from torch.utils.data.dataloader import default_collate
-from loguru import logger
 
 from ..foundation.interfaces import StreamingSource
 from ..foundation.dtos import TensorBatch
 from ..foundation.exceptions import DataError
 
 def _to_python_list(val: Any) -> List[str]:
-    """
-    Helper to ensure value is a python list of strings.
-    Handles numpy arrays, lists, and string representations.
+    """Normalize a value to a list of strings.
+
+    Handles numpy arrays, Python lists, and stringified list values.
+
+    Args:
+        val (Any): Input value to normalize.
+
+    Returns:
+        List[str]: List of string tokens.
     """
     if isinstance(val, np.ndarray):
         return val.tolist()
@@ -34,9 +39,15 @@ def _to_python_list(val: Any) -> List[str]:
     return []
 
 def custom_collate(batch, tokenizer, max_length):
-    """
-    Collate function for ICD data: batches numerical features and tokenizes text.
-    Legacy support for text-based pipelines.
+    """Batch ICD samples and optionally tokenize text fields.
+
+    Args:
+        batch (Any): Batch of sample dictionaries.
+        tokenizer (Any): Optional tokenizer instance.
+        max_length (int): Maximum token length.
+
+    Returns:
+        Any: Collated batch with optional tokenized fields.
     """
     nums, labs, lists, cands = zip(*[(b["num"], b["lab"], b["lst"], b["cand"]) for b in batch])
 
@@ -66,9 +77,9 @@ def custom_collate(batch, tokenizer, max_length):
     return bt
 
 class ICDDataset(Dataset):
-    """
-    Dataset wrapper for combined numerical features and ICD code lists.
-    Used by ICDService for legacy training/evaluation or unit tests.
+    """Dataset wrapper for numerical features and ICD code lists.
+
+    Used by ICDService for legacy training and evaluation paths.
     """
     def __init__(self, df, feats, label_col, list_col, cand_col="candidate_indices"):
         self.X = df[feats].to_numpy(dtype=np.float32, copy=True)
@@ -85,7 +96,7 @@ class ICDDataset(Dataset):
 
     def __getitem__(self, i):
         num = torch.tensor(self.X[i], dtype=torch.float32)
-        # Handle NaNs / Inf for stability
+                                         
         num = torch.nan_to_num(num, nan=0.0, posinf=0.0, neginf=0.0)
         lab = torch.tensor(self.y[i], dtype=torch.long)
         
@@ -97,9 +108,13 @@ class ICDDataset(Dataset):
         }
 
 def collate_tensor_batch(batch: List[TensorBatch]) -> TensorBatch:
-    """
-    Custom collate function to stack a list of TensorBatch objects into a single TensorBatch.
-    Handles dynamic fields like 'delta' for GRU-D and PLL fields.
+    """Stack TensorBatch objects into a single batch.
+
+    Args:
+        batch (List[TensorBatch]): List of TensorBatch objects.
+
+    Returns:
+        TensorBatch: Stacked batch with optional dynamic fields.
     """
     x_num = torch.stack([b.x_num for b in batch])
     y = torch.stack([b.y for b in batch])
@@ -116,7 +131,7 @@ def collate_tensor_batch(batch: List[TensorBatch]) -> TensorBatch:
     if batch[0].mask is not None:
         mask = torch.stack([b.mask for b in batch])
 
-    # [Dynamic] Delta field stacking for GRU-D
+                                              
     delta = None
     if hasattr(batch[0], "delta") and batch[0].delta is not None:
         delta = torch.stack([b.delta for b in batch])
@@ -125,7 +140,7 @@ def collate_tensor_batch(batch: List[TensorBatch]) -> TensorBatch:
     if batch[0].x_icd is not None:
         x_icd = torch.stack([b.x_icd for b in batch])
 
-    # Handle PLL / Text fields
+                              
     input_ids = None
     if getattr(batch[0], "input_ids", None) is not None:
         input_ids = torch.stack([b.input_ids for b in batch])
@@ -150,16 +165,16 @@ def collate_tensor_batch(batch: List[TensorBatch]) -> TensorBatch:
         candidates=candidates
     )
     
-    # Attach dynamic attributes
+                               
     if delta is not None:
         setattr(tb, "delta", delta)
         
     return tb
 
 class ParquetSource(StreamingSource):
-    """
-    Source for loading tabular data from Parquet files.
-    Used by ICDService (legacy paths) and Factory.
+    """Streaming source for parquet files.
+
+    Used in legacy ICD paths and factory loading.
     """
     def __init__(self, file_path: Union[str, Path]):
         self.file_path = Path(file_path)
@@ -190,7 +205,11 @@ class ParquetSource(StreamingSource):
             raise DataError(f"Failed to stream data: {e}")
 
     def __len__(self) -> int:
-        """Return number of rows in the parquet file."""
+        """Return the number of rows in the parquet file.
+
+        Returns:
+            int: Row count in the parquet file.
+        """
         try:
             return pl.scan_parquet(self.file_path).select(pl.len()).collect().item()
         except Exception as e:
@@ -198,14 +217,10 @@ class ParquetSource(StreamingSource):
 
 
 class HDF5StreamingSource(Dataset):
-    """
-    Optimized HDF5 Source for ICD Coding Task.
-    
-    Features:
-      - Reads Flat Schema HDF5 (No joins required).
-      - Converts float16 storage to float32 for training.
-      - Auto-computes 'mask' and 'delta' for GRU-D using NaNs.
-      - Supports PLL fields (candidates, input_ids).
+    """Optimized HDF5 source for ICD coding tasks.
+
+    Reads flat-schema HDF5 data, converts float16 to float32, computes
+    masks and deltas for GRU-D, and exposes PLL fields when available.
     """
     def __init__(self, h5_path: Path, seq_len: int = 0, label_key: str = "y"):
         self.h5_path = Path(h5_path)
@@ -228,21 +243,21 @@ class HDF5StreamingSource(Dataset):
         return self._len
 
     def _compute_delta(self, mask: torch.Tensor) -> torch.Tensor:
-        """
-        Computes time intervals (delta) between observations.
-        Uses Numpy for speed optimization.
+        """Compute time intervals between observations.
+
         Args:
-            mask: (Channels, Time) tensor, 1=observed, 0=missing
+            mask (torch.Tensor): (Channels, Time) tensor with 1=observed, 0=missing.
+
         Returns:
-            delta: (Channels, Time) tensor
+            torch.Tensor: (Channels, Time) delta tensor.
         """
         channels, seq_len = mask.shape
-        # Move to numpy for faster CPU execution
+                                                
         m_np = mask.numpy()
         d_np = np.zeros_like(m_np, dtype=np.float32)
         
-        # Iterative calculation for time decay dynamics
-        # This loop is typically O(Channels * Time) but fast in C/Numpy
+                                                       
+                                                                       
         for c in range(channels):
             last_valid = 0.0
             for t in range(seq_len):
@@ -250,7 +265,7 @@ class HDF5StreamingSource(Dataset):
                     last_valid = 0.0
                 else:
                     last_valid += 1.0
-                d_np[c, t] = last_valid + 1.0 # delta starts at 1.0
+                d_np[c, t] = last_valid + 1.0                      
                 
         return torch.from_numpy(d_np)
 
@@ -258,24 +273,24 @@ class HDF5StreamingSource(Dataset):
         if self.h5_file is None:
             self.h5_file = h5py.File(self.h5_path, "r")
 
-        # 1. Load X_num (Features)
-        # Stored as float16, convert to float32 for PyTorch stability
+                                  
+                                                                     
         x_num_np = self.h5_file["X_num"][idx]
         x_num = torch.from_numpy(x_num_np).float()
         
-        # 2. Compute Mask & Handle NaNs
-        # NaN indicates missing value (from ETL).
+                                       
+                                                 
         is_nan = torch.isnan(x_num)
         mask = (~is_nan).float()
         
-        # 3. Impute NaNs
-        # Since ETL performed Instance Normalization, 0.0 is the mean.
+                        
+                                                                      
         x_num = torch.nan_to_num(x_num, nan=0.0)
         
-        # 4. Compute Delta (Time Intervals) for GRU-D
+                                                     
         delta = self._compute_delta(mask)
 
-        # 5. Other fields
+                         
         x_cat = None
         if "X_cat" in self.h5_file:
             x_cat = torch.from_numpy(self.h5_file["X_cat"][idx]).long()
@@ -292,7 +307,7 @@ class HDF5StreamingSource(Dataset):
         if "X_icd" in self.h5_file:
             x_icd = torch.from_numpy(self.h5_file["X_icd"][idx]).float()
 
-        # 6. PLL Fields (Direct Access)
+                                       
         input_ids = None
         if "input_ids" in self.h5_file:
              input_ids = torch.from_numpy(self.h5_file["input_ids"][idx]).long()
@@ -305,7 +320,7 @@ class HDF5StreamingSource(Dataset):
         if "candidates" in self.h5_file:
              candidates = torch.from_numpy(self.h5_file["candidates"][idx]).long()
 
-        # 7. Construct TensorBatch
+                                  
         tb = TensorBatch(
             x_num=x_num,
             x_cat=x_cat,
@@ -318,7 +333,7 @@ class HDF5StreamingSource(Dataset):
             candidates=candidates
         )
         
-        # Attach delta dynamically
+                                  
         setattr(tb, "delta", delta)
         
         return tb

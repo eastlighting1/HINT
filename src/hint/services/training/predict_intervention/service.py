@@ -27,13 +27,8 @@ class InterventionService(BaseDomainService):
         self.device = "cuda" if torch.cuda.is_available() else "cpu"
 
     def execute(self) -> None:
-        """
-        Orchestrates Intervention Prediction training:
-        1. Setup Dataloaders
-        2. Init Trainer & Evaluator
-        3. Run Training Loop
-        """
-        self.observer.log("INFO", "InterventionService: Starting execution.")
+        """Execute the intervention prediction training workflow."""
+        self.observer.log("INFO", "InterventionService: Stage 1/3 building dataloaders.")
         
         dl_tr = DataLoader(
             self.train_ds, 
@@ -51,7 +46,9 @@ class InterventionService(BaseDomainService):
             collate_fn=collate_tensor_batch
         )
 
+        self.observer.log("INFO", "InterventionService: Stage 2/3 initializing trainer and evaluator.")
         trainer = InterventionTrainer(self.cfg, self.entity, self.registry, self.observer, self.device)
         evaluator = InterventionEvaluator(self.cfg, self.entity, self.registry, self.observer, self.device)
         
+        self.observer.log("INFO", "InterventionService: Stage 3/3 entering training loop.")
         trainer.train(dl_tr, dl_val, evaluator)

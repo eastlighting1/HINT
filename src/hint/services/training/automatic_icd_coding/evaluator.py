@@ -58,17 +58,17 @@ class ICDEvaluator(BaseEvaluator):
         all_preds = []
         all_targets = []
         total_loss = 0.0
-        # Check if model uses adaptive softmax (returns tuple) or standard logits
+                                                                                 
         criterion = torch.nn.CrossEntropyLoss()
 
         with torch.no_grad():
             for batch in dataloader:
-                # [MODIFIED] Handle missing targets gracefully
+                                                              
                 target = getattr(batch, "y", None)
                 if target is not None:
                     target = target.to(self.device)
                 
-                # Setup validation mask only if target exists
+                                                             
                 valid_mask = None
                 if target is not None and self.ignored_indices:
                     valid_mask = torch.ones(target.shape[0], dtype=torch.bool, device=self.device)
@@ -82,40 +82,40 @@ class ICDEvaluator(BaseEvaluator):
                     batch_inputs = self._prepare_inputs(batch)
                     filtered_inputs = {k: v[valid_mask] for k, v in batch_inputs.items()}
                 else:
-                    # No target or no ignore indices -> use all
+                                                               
                     filtered_inputs = self._prepare_inputs(batch)
 
-                # [FIXED] Pass inputs as dictionary kwargs
-                # Handle return_embeddings logic if model supports it but we need logits for eval
+                                                          
+                                                                                                 
                 logits = self.entity.model(**filtered_inputs)
                 
-                # Check if output is tuple (AdaptiveSoftmax) or Tensor
+                                                                      
                 if isinstance(logits, tuple):
-                    # AdaptiveSoftmax returns (output, loss) usually during training, 
-                    # but here we likely get just logits or need to handle it.
-                    # Assuming standard forward returns logits for these models in eval mode
+                                                                                      
+                                                                              
+                                                                                            
                     logits = logits[0]
 
-                # Inference Time Disambiguation:
+                                                
                 if getattr(batch, "candidates", None) is not None:
                     cands = batch.candidates.to(self.device).long()
                     
                     if target is not None and self.ignored_indices and valid_mask is not None:
                          cands = cands[valid_mask]
 
-                    # Mask non-candidates with -inf for argmax
+                                                              
                     inf_mask = torch.full_like(logits, float('-inf'))
                     
                     valid_cands_idx = (cands >= 0) & (cands < logits.size(1))
                     rows = torch.arange(cands.size(0), device=self.device).unsqueeze(1).expand_as(cands)
                     
-                    # Set candidate positions to 0.0 (keeping original logits)
+                                                                              
                     inf_mask[rows[valid_cands_idx], cands[valid_cands_idx]] = 0.0
                     
-                    # [BUG FIX] Ensure we don't accidentally mask the ground truth if it exists
-                    # If target exists, unmask it (it SHOULD be in candidates, but safety first)
+                                                                                               
+                                                                                                
                     if target is not None:
-                        # Ensure target is 1D for indexing
+                                                          
                         if target.dim() > 1: target_idx = target.argmax(dim=1)
                         else: target_idx = target
                         
@@ -129,11 +129,11 @@ class ICDEvaluator(BaseEvaluator):
                 if self.ignored_indices:
                     logits[:, self.ignored_indices] = -1e9
 
-                # Calculate loss only if target is available
+                                                            
                 if target is not None:
-                    # Ensure target compatibility with CrossEntropy
+                                                                   
                     if target.dim() > 1 and target.shape[1] > 1:
-                         # One-hot to indices
+                                             
                          target_indices = target.argmax(dim=1)
                     else:
                          target_indices = target
@@ -144,7 +144,7 @@ class ICDEvaluator(BaseEvaluator):
                 
                 all_preds.extend(preds.cpu().numpy())
 
-        # If no targets were found (Pure Unsupervised Inference), return dummies
+                                                                                
         if not all_targets:
             self.observer.log("WARNING", "No targets found in validation set. Metrics will be 0.")
             return {"accuracy": 0.0, "precision": 0.0, "recall": 0.0, "f1_macro": 0.0, "loss": 0.0}

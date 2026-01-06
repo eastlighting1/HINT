@@ -12,9 +12,10 @@ from ..foundation.interfaces import TelemetryObserver
 
 
 class RichTelemetryObserver(TelemetryObserver):
-    """
-    Telemetry observer that prints structured logs to the terminal with Rich
-    and mirrors the same messages to the Hydra job log via loguru.
+    """Telemetry observer that logs to Rich and Hydra log files.
+
+    Emits terminal logs through Rich while mirroring the same messages to the
+    Hydra-managed log file via loguru without creating a new file.
     """
 
     def __init__(self) -> None:
@@ -78,15 +79,14 @@ class RichTelemetryObserver(TelemetryObserver):
         self.metrics[name].append({"step": step, "value": value})
 
     def create_progress(self, desc: str, total: int) -> Progress:
-        """
-        Create a Rich progress display for multi-step tasks.
+        """Create a Rich progress display for multi-step tasks.
 
         Args:
-            desc: Description to show in the progress header.
-            total: Number of steps in the task.
+            desc (str): Description to show in the progress header.
+            total (int): Number of steps in the task.
 
         Returns:
-            Configured Rich Progress instance.
+            Progress: Configured Rich progress instance.
         """
         return Progress(
             SpinnerColumn(),

@@ -74,7 +74,7 @@ class ICDArtifactsConfig(HyperparamVO):
     model_name: str = "icd_model"
     stacker_name: str = "icd_stacker"
 
-# [NEW] Execution Config for subsampling strategy
+                                                 
 class ExecutionConfig(HyperparamVO):
     subset_ratio: float = 1.0
 
@@ -82,12 +82,12 @@ class ICDConfig(HyperparamVO):
     data: ICDDataConfig = Field(default_factory=ICDDataConfig)
     artifacts: ICDArtifactsConfig = Field(default_factory=ICDArtifactsConfig)
     
-    # [NEW] Fields added to match icd_config.yaml
+                                                 
     execution: ExecutionConfig = Field(default_factory=ExecutionConfig)
     models_to_run: List[str] = Field(default_factory=lambda: ["MedBERT"])
     model_configs: Dict[str, Any] = Field(default_factory=dict)
     
-    # [NEW] Loss Type for PLL (Default: focal, Option: clpl)
+                                                            
     loss_type: str = "clpl"
 
     model_name: str = "Charangan/MedBERT"

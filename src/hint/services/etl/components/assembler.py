@@ -8,10 +8,8 @@ from ....domain.vo import ETLConfig
 class FeatureAssembler(PipelineComponent):
     """Assemble hourly features from vitals, interventions, and static data.
 
-    최적화 전략:
-    1. pl.scan_parquet을 사용하여 데이터 로딩을 지연(Lazy)시킴.
-    2. 3.7억 행 전체에 정규식을 거는 대신, 필터링된 코호트의 고유 라벨에만 정규식 적용.
-    3. 메모리 폭발을 방지하기 위해 코호트(pat)와 먼저 조인하여 대상 데이터 크기를 축소.
+    Applies lazy loading, cohort-restricted label normalization, and early
+    joins to reduce memory and compute overhead.
     """
 
     def __init__(self, config: ETLConfig, registry: Registry, observer: TelemetryObserver):
@@ -24,12 +22,11 @@ class FeatureAssembler(PipelineComponent):
         proc_dir = Path(self.cfg.proc_dir)
         raw_dir = Path(self.cfg.raw_dir)
 
-        # 1. 코호트 대상 환자 로드
         patients_path = proc_dir / self.cfg.artifacts.patients_file
         if not patients_path.exists():
             raise FileNotFoundError(f"Dependency missing: {patients_path}")
 
-        self.observer.log("INFO", f"FeatureAssembler: Loading cohort from {patients_path}")
+        self.observer.log("INFO", f"FeatureAssembler: Stage 1/6 loading cohort from {patients_path}")
         patients = pl.read_parquet(patients_path).with_columns(
             [
                 pl.col("SUBJECT_ID").cast(pl.Int64),
@@ -39,7 +36,6 @@ class FeatureAssembler(PipelineComponent):
             ]
         )
 
-        # 2. 첫 번째 ICU 입원 기록만 필터링
         first_icustay = (
             patients.select(["SUBJECT_ID", "ICUSTAY_ID", "INTIME"])
             .sort(["SUBJECT_ID", "INTIME"])
@@ -57,16 +53,15 @@ class FeatureAssembler(PipelineComponent):
             .select(["SUBJECT_ID", "HADM_ID", "ICUSTAY_ID", "ETHNICITY", "ADMISSION_TYPE", "INSURANCE", "AGE", "INTIME"])
             .unique()
         )
-        self.observer.log("INFO", f"FeatureAssembler: Cohort stays after filters={pat.height}")
+        self.observer.log("INFO", f"FeatureAssembler: Stage 1/6 cohort filters complete stays={pat.height}")
 
-        # 3. Vitals 데이터를 Lazy하게 스캔 (3.7억 행 처리 대비)
         vitals_path = proc_dir / self.cfg.artifacts.vitals_mean_file
         vitals_lazy = pl.scan_parquet(vitals_path)
         
-        # Interventions 로드
+        self.observer.log("INFO", "FeatureAssembler: Stage 2/6 loading interventions and vitals sources")
         interventions = pl.read_parquet(proc_dir / self.cfg.artifacts.interventions_file)
 
-        # 4. ICD9 코드 로드 로직
+        self.observer.log("INFO", "FeatureAssembler: Stage 3/6 resolving ICD9 source")
         cand = raw_dir / "DIAGNOSES_ICD.csv"
         if not cand.exists() and (raw_dir / "DIAGNOSES_ICD.csv.gz").exists():
             cand = raw_dir / "DIAGNOSES_ICD.csv.gz"
@@ -91,12 +86,11 @@ class FeatureAssembler(PipelineComponent):
             self.observer.log("WARNING", "FeatureAssembler: DIAGNOSES_ICD source not found")
             icd9 = patients.select(["SUBJECT_ID", "HADM_ID"]).unique().with_columns(pl.lit([]).cast(pl.List(pl.Utf8)).alias("ICD9_CODES"))
 
-        # 5. Vitals 피벗 최적화 시작
+        self.observer.log("INFO", "FeatureAssembler: Stage 4/6 preparing vitals pivot")
         varmap_fp = Path(self.cfg.resources_dir) / "itemid_to_variable_map.csv"
         if varmap_fp.exists():
             self.observer.log("INFO", "FeatureAssembler: Optimizing vitals pivot via unique label mapping")
             
-            # 변수 맵 정규화 (한 번만 수행)
             varmap = (
                 pl.read_csv(varmap_fp, infer_schema_length=0)
                 .select(["MIMIC LABEL", "LEVEL2"])
@@ -113,15 +107,12 @@ class FeatureAssembler(PipelineComponent):
                 .unique()
             )
 
-            # [CPU 최적화 핵심] 3.7억 행에 직접 조인하기 전, 
-            # 1) 코호트 대상 환자 데이터만 남기기
             vitals_filtered = vitals_lazy.rename({"HOURS_IN": "HOUR_IN"}).join(
                 pat.select(["SUBJECT_ID", "HADM_ID", "ICUSTAY_ID"]).lazy(),
                 on=["SUBJECT_ID", "HADM_ID", "ICUSTAY_ID"],
                 how="inner"
             )
 
-            # 2) 필터링된 데이터에서 '고유 라벨'만 추출하여 정규화 매핑 테이블 생성
             unique_labels = vitals_filtered.select("LABEL").unique().collect()
             
             label_mapping = (
@@ -137,13 +128,12 @@ class FeatureAssembler(PipelineComponent):
                 .select(["LABEL", "LEVEL2_NORM"])
             )
 
-            # 3) 매핑 테이블을 사용하여 데이터 완성 및 집계
             vitals_norm = (
                 vitals_filtered
                 .join(label_mapping.lazy(), on="LABEL", how="inner")
                 .group_by(["SUBJECT_ID", "HADM_ID", "ICUSTAY_ID", "HOUR_IN", "LEVEL2_NORM"])
                 .agg(pl.col("MEAN").mean().alias("VALUE"))
-                .collect() # 실제 연산 실행
+                .collect()
             )
 
             vl_wide = vitals_norm.pivot(
@@ -156,7 +146,7 @@ class FeatureAssembler(PipelineComponent):
             self.observer.log("WARNING", "FeatureAssembler: Variable map missing; pivot skipped")
             vl_wide = pat.select(["SUBJECT_ID", "HADM_ID", "ICUSTAY_ID"]).with_columns(pl.lit(0).alias("HOUR_IN"))
 
-        # 6. 부족한 컬럼 채우기 및 이름 변경
+        self.observer.log("INFO", "FeatureAssembler: Stage 5/6 aligning vitals columns and names")
         for name in self.cfg.exact_level2_104:
             col_name = name.lower()
             if col_name not in vl_wide.columns:
@@ -168,7 +158,7 @@ class FeatureAssembler(PipelineComponent):
         v_cols = [f"V__{n.replace(' ', '_').lower()}" for n in self.cfg.exact_level2_104]
         vl_wide = vl_wide.select(["SUBJECT_ID", "HADM_ID", "ICUSTAY_ID", "HOUR_IN"] + [c for c in v_cols if c in vl_wide.columns])
 
-        # 7. 정적 피처 및 기타 데이터 조인
+        self.observer.log("INFO", "FeatureAssembler: Stage 6/6 joining static and intervention features")
         vent_df = interventions.select(["SUBJECT_ID", "HADM_ID", "ICUSTAY_ID", "HOUR_IN", "VENT", "OUTCOME_FLAG"])
 
         base = (
@@ -177,7 +167,6 @@ class FeatureAssembler(PipelineComponent):
             .drop("INTIME")
         )
 
-        # 정적 피처 처리
         age_bins = self.cfg.age_bin_edges
         static = pat.with_columns(
             [
@@ -202,7 +191,6 @@ class FeatureAssembler(PipelineComponent):
 
         static = one_hot_fixed(static, "AGE_BIN", ["AGE_15_39", "AGE_40_64", "AGE_65_89", "AGE_90PLUS"], "S__AGE")
 
-        # 최종 데이터셋 조립
         feat = (
             base.join(vent_df, on=["SUBJECT_ID", "HADM_ID", "ICUSTAY_ID", "HOUR_IN"], how="left")
             .join(icd9, on=["SUBJECT_ID", "HADM_ID"], how="left")

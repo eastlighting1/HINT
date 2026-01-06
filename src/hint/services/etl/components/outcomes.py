@@ -34,7 +34,7 @@ class OutcomesBuilder(PipelineComponent):
         proc_dir = Path(self.cfg.proc_dir)
         proc_dir.mkdir(parents=True, exist_ok=True)
 
-        self.observer.log("INFO", "OutcomesBuilder: Loading ICU boundaries for time alignment")
+        self.observer.log("INFO", "OutcomesBuilder: Stage 1/3 loading ICU boundaries for time alignment")
 
         icu = (
             pl.read_csv(raw_dir / "ICUSTAYS.csv.gz", infer_schema_length=0)
@@ -55,7 +55,7 @@ class OutcomesBuilder(PipelineComponent):
                 self.observer.log("WARNING", "OutcomesBuilder: No OUTPUTEVENTS found in raw directory")
                 return
 
-        self.observer.log("INFO", f"OutcomesBuilder: Found {len(files)} OUTPUTEVENTS files to process")
+        self.observer.log("INFO", f"OutcomesBuilder: Stage 2/3 scanning OUTPUTEVENTS files count={len(files)}")
 
         for fname in files:
             ev = (
@@ -73,6 +73,7 @@ class OutcomesBuilder(PipelineComponent):
         if not all_flags:
             return
 
+        self.observer.log("INFO", "OutcomesBuilder: Stage 3/3 aggregating outcome flags")
         flags_union = (
             pl.concat(all_flags)
             .with_columns(

@@ -78,7 +78,7 @@ model_configs:
 # Training
 batch_size: 128  # Reduced for stability with complex models
 lr: 1.0e-4
-epochs: 100
+epochs: 0
 patience: 5
 
 # Resources

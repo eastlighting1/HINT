@@ -8,8 +8,10 @@ from typing import Any, Dict, Optional, Union
 from ..foundation.interfaces import Registry
 
 class FileSystemRegistry(Registry):
-    """
-    Implementation of Registry that stores artifacts on the local file system.
+    """Local filesystem-backed registry for artifacts.
+
+    Persists checkpoints, datasets, metrics, and configs under a base
+    directory with structured subfolders.
     """
     def __init__(self, base_dir: Union[str, Path]):
         self.base_dir = Path(base_dir)
@@ -25,9 +27,14 @@ class FileSystemRegistry(Registry):
             d.mkdir(parents=True, exist_ok=True)
 
     def _resolve_path(self, name: Union[str, Path], category: str) -> Path:
-        """
-        If name is a Path object or contains separator, use it directly (relative to CWD).
-        Otherwise, prepend the default category directory.
+        """Resolve artifact paths using category defaults.
+
+        Args:
+            name (Union[str, Path]): Artifact name or explicit path.
+            category (str): Default category directory key.
+
+        Returns:
+            Path: Resolved file path for the artifact.
         """
         if isinstance(name, Path) or "/" in str(name) or "\\" in str(name):
             path = Path(name)
@@ -76,11 +83,26 @@ class FileSystemRegistry(Registry):
         return pl.read_parquet(path)
 
     def save_labels(self, df: Any, name: Union[str, Path]) -> Path:
-        """Specifically saves label dataframes."""
+        """Persist label dataframes under the data directory.
+
+        Args:
+            df (Any): Polars dataframe containing labels.
+            name (Union[str, Path]): Target file name or path.
+
+        Returns:
+            Path: Path to the saved artifact.
+        """
         return self.save_dataframe(df, name)
 
     def load_labels(self, name: Union[str, Path]) -> pl.DataFrame:
-        """Specifically loads label dataframes."""
+        """Load label dataframes from the data directory.
+
+        Args:
+            name (Union[str, Path]): Artifact name or path.
+
+        Returns:
+            pl.DataFrame: Loaded label dataframe.
+        """
         return self.load_dataframe(name)
 
     def save_json(self, data: Dict[str, Any], name: Union[str, Path]) -> Path:

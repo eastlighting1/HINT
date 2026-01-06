@@ -9,7 +9,7 @@ class RK4Solver(nn.Module):
         self.func = func
 
     def forward(self, z0, t_span):
-        # Simple RK4 integration
+                                
         dt = (t_span[-1] - t_span[0]) / (len(t_span) - 1)
         z = z0
         zs = [z]
@@ -38,7 +38,7 @@ class LatentODEClassifier(BaseICDClassifier):
     def __init__(self, num_classes: int, input_dim: int, seq_len: int, latent_dim: int = 64, rec_dim: int = 128, **kwargs):
         super().__init__(num_classes, input_dim, seq_len)
         
-        # ODE-RNN Encoder part (Simplified as RNN encoder -> ODE solver)
+                                                                        
         self.rnn = nn.GRU(input_dim, rec_dim, batch_first=True)
         self.fc_mean = nn.Linear(rec_dim, latent_dim)
         self.fc_std = nn.Linear(rec_dim, latent_dim)
@@ -54,22 +54,22 @@ class LatentODEClassifier(BaseICDClassifier):
         self.latent_dim = latent_dim
 
     def forward(self, x_num: Optional[torch.Tensor] = None, **kwargs) -> torch.Tensor:
-        # x_num: (B, C, T) -> (B, T, C)
+                                       
         if x_num is None: raise ValueError("LatentODE requires x_num")
         x = x_num.permute(0, 2, 1)
         b, t, c = x.size()
         
-        # Encode backward to get initial state (common strategy in Latent ODE)
+                                                                              
         _, h_n = self.rnn(torch.flip(x, [1]))
         h_n = h_n.squeeze(0)
         
-        # Variational parameters
+                                
         qm = self.fc_mean(h_n)
         
-        # Solve ODE forward (simplified: solving from t=0 to t=1)
-        # We use the final state of ODE for classification
+                                                                 
+                                                          
         t_span = torch.linspace(0, 1, steps=10).to(x.device)
-        z_t = self.solver(qm, t_span) # (Steps, B, Latent)
+        z_t = self.solver(qm, t_span)                     
         
         z_final = z_t[-1]
         

@@ -2,9 +2,10 @@ from typing import List
 from ...foundation.interfaces import TelemetryObserver, PipelineComponent, Registry
 
 class ETLService:
-    """
-    Orchestrator for the data processing pipeline.
-    Executes registered PipelineComponents in order.
+    """Orchestrator for the ETL pipeline.
+
+    Executes registered pipeline components sequentially with progress
+    reporting and structured logging.
     """
     def __init__(
         self, 
@@ -18,7 +19,7 @@ class ETLService:
 
     def run_pipeline(self) -> None:
         """Execute all configured pipeline steps sequentially."""
-        self.observer.log("INFO", "ETL Service: Starting data pipeline execution.")
+        self.observer.log("INFO", "ETL Service: Starting pipeline execution.")
         
         total_steps = len(self.components)
         with self.observer.create_progress("ETL Pipeline", total=total_steps) as progress:
@@ -30,14 +31,14 @@ class ETLService:
                 progress.update(task, description=f"[{i}/{total_steps}] Running {name}")
                 
                 try:
-                    self.observer.log("INFO", f"ETL Service: Executing component {name}...")
+                    self.observer.log("INFO", f"ETL Service: Step {i}/{total_steps} start component={name}.")
                     component.execute()
-                    self.observer.log("INFO", f"ETL Service: Component {name} completed successfully.")
+                    self.observer.log("INFO", f"ETL Service: Step {i}/{total_steps} complete component={name}.")
 
                     progress.advance(task)
                     
                 except Exception as e:
-                    self.observer.log("ERROR", f"ETL Service: Component {name} failed: {e}")
+                    self.observer.log("ERROR", f"ETL Service: Step {i}/{total_steps} failed component={name} error={e}.")
                     raise e
         
         self.observer.log("INFO", "ETL Service: Pipeline execution finished.")

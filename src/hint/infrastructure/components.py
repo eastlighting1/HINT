@@ -7,9 +7,7 @@ from typing import List, Optional, Dict, Any
 from sklearn.decomposition import PCA
 
 class FocalLoss(nn.Module):
-    """
-    Multi-class focal loss with optional class weights and label smoothing.
-    """
+    """Multi-class focal loss with optional class weights and label smoothing."""
     def __init__(self, alpha: Optional[torch.Tensor] = None, gamma: float = 2.0, label_smoothing: float = 0.0, num_classes: int = 4):
         super().__init__()
         self.alpha = alpha
@@ -38,20 +36,18 @@ class FocalLoss(nn.Module):
         return loss.mean()
 
 class CBFocalLoss(nn.Module):
-    """
-    Class-Balanced Focal Loss.
-    """
+    """Class-balanced focal loss."""
     def __init__(self, class_counts: np.ndarray, beta: float = 0.999, gamma: float = 1.5, device: str = 'cpu'):
         super().__init__()
-        # Fix: Handle zero counts to avoid divide by zero
+                                                         
         class_counts = np.array(class_counts)
-        class_counts[class_counts == 0] = 1 # Avoid power of 0 issues temporarily
+        class_counts[class_counts == 0] = 1                                      
         
         effective_num = 1.0 - np.power(beta, class_counts)
-        # Fix: Add epsilon to avoid division by zero
+                                                    
         weights = (1.0 - beta) / (np.array(effective_num) + 1e-6)
         
-        # Restore 0 weight for 0 count classes if necessary, or just normalize
+                                                                              
         weights = weights / np.sum(weights) * len(class_counts)
         
         self.class_weights = torch.tensor(weights, dtype=torch.float32, device=device)
@@ -67,45 +63,47 @@ class CBFocalLoss(nn.Module):
         return focal_loss.mean()
 
 class CLPLLoss(nn.Module):
-    """
-    Convex Loss for Partial Labels (CLPL).
-    Implementation of Equation (2) from 'Learning from Partial Labels' (Cour et al., 2011).
-    Maximizes the average score of candidate labels while minimizing scores of non-candidate labels.
+    """Convex loss for partial labels.
+
+    Implements the convex surrogate from "Learning from Partial Labels" (Cour et al., 2011)
+    by maximizing candidate scores and minimizing non-candidate scores.
     """
     def __init__(self):
         super().__init__()
 
     def forward(self, logits: torch.Tensor, candidate_mask: torch.Tensor) -> torch.Tensor:
-        """
+        """Compute the CLPL loss.
+
         Args:
-            logits: (Batch, Num_Classes)
-            candidate_mask: (Batch, Num_Classes), 1.0 for candidates, 0.0 otherwise.
+            logits (torch.Tensor): (Batch, Num_Classes) logits.
+            candidate_mask (torch.Tensor): (Batch, Num_Classes) candidate indicator.
+
+        Returns:
+            torch.Tensor: Scalar loss value.
         """
-        # 1. Candidate Set Processing
-        # Calculate average logit for candidates: (1/|y|) * sum(g_a(x))
+                                     
+                                                                       
         cand_sum = (logits * candidate_mask).sum(dim=1, keepdim=True)
         cand_count = candidate_mask.sum(dim=1, keepdim=True).clamp(min=1.0)
         cand_avg = cand_sum / cand_count
         
-        # 2. Non-Candidate Set Processing
-        # Mask for labels NOT in the candidate set
+                                         
+                                                  
         non_candidate_mask = 1.0 - candidate_mask
         
-        # 3. Loss Calculation using Softplus (convex surrogate for 0/1 loss)
-        # Term 1: Maximize average candidate score -> Minimize softplus(-avg)
+                                                                            
+                                                                             
         term1 = F.softplus(-cand_avg)
         
-        # Term 2: Minimize non-candidate scores -> Minimize softplus(logit)
-        # Sum over all non-candidate labels
+                                                                           
+                                           
         term2 = (F.softplus(logits) * non_candidate_mask).sum(dim=1, keepdim=True)
         
         loss = term1 + term2
         return loss.mean()
 
 class TemperatureScaler(nn.Module):
-    """
-    Post-hoc temperature scaling for probability calibration.
-    """
+    """Post-hoc temperature scaling for probability calibration."""
     def __init__(self):
         super().__init__()
         self.temperature = nn.Parameter(torch.ones(1) * 1.5)
@@ -131,9 +129,7 @@ class TemperatureScaler(nn.Module):
         return float(self.temperature.item())
 
 class XGBoostStacker:
-    """
-    Wrapper for XGBoost + PCA stacking logic.
-    """
+    """Wrapper for XGBoost stacking with optional PCA."""
     def __init__(self, params: Dict):
         self.params = params
         self.params["n_jobs"] = -1

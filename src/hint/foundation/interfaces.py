@@ -4,13 +4,21 @@ from pathlib import Path
 import torch
 
 class TelemetryObserver(Protocol):
-    """Interface for logging, metrics, and progress tracking."""
+    """Telemetry adapter for logs, metrics, and progress reporting.
+
+    Defines the contract for emitting structured messages, tracking metrics,
+    and creating progress displays within services and pipelines.
+    """
     def log(self, level: str, message: str) -> None: ...
     def track_metric(self, name: str, value: float, step: int) -> None: ...
     def create_progress(self, desc: str, total: int) -> Any: ...
 
 class Registry(ABC):
-    """Interface for artifact persistence (Model, Data, Config)."""
+    """Artifact store interface for models, dataframes, and metadata.
+
+    Provides a unified API for saving and loading training artifacts across
+    the application lifecycle.
+    """
     @abstractmethod
     def save_model(self, state_dict: Dict[str, Any], name: str, tag: str) -> Path: ...
     @abstractmethod
@@ -27,12 +35,20 @@ class Registry(ABC):
     def get_artifact_path(self, name: str) -> Path: ...
 
 class PipelineComponent(ABC):
-    """Interface for ETL pipeline steps."""
+    """ETL pipeline step interface.
+
+    Each component encapsulates one stage in the ETL flow and exposes a
+    single execution entry point.
+    """
     @abstractmethod
     def execute(self) -> None: ...
 
 class StreamingSource(ABC):
-    """Interface for data streaming."""
+    """Streaming data source interface.
+
+    Supports iterable access to large datasets and exposes a length for
+    progress and batching.
+    """
     @abstractmethod
     def __len__(self) -> int: ...
     @abstractmethod

@@ -33,7 +33,7 @@ class VentilationTagger(PipelineComponent):
         """
         resources_dir = Path(self.cfg.resources_dir)
         proc_dir = Path(self.cfg.proc_dir)
-        self.observer.log("INFO", f"VentilationTagger: Resolving resources at {resources_dir} and {proc_dir}")
+        self.observer.log("INFO", f"VentilationTagger: Stage 1/3 resolving resources at {resources_dir} and {proc_dir}")
 
         vent_itemids = {
             445, 448, 449, 450, 1340, 1486, 1600, 224687, 639, 654, 681, 682, 683, 684,
@@ -50,7 +50,7 @@ class VentilationTagger(PipelineComponent):
                 pl.col("MIMIC LABEL").alias("LABEL"),
             ]
         )
-        self.observer.log("INFO", "VentilationTagger: Loaded item map for ventilation label lookup")
+        self.observer.log("INFO", "VentilationTagger: Stage 2/3 loaded item map for ventilation label lookup")
 
         vent_labels = (
             itemmap.filter(pl.col("ITEMID").is_in(list(vent_itemids)) & (pl.col("LINKSTO") == "chartevents"))
@@ -71,7 +71,7 @@ class VentilationTagger(PipelineComponent):
             .with_columns(pl.lit(1).alias("VENT"))
             .rename({"HOURS_IN": "HOUR_IN"})
         )
-        self.observer.log("INFO", f"VentilationTagger: Matched ventilation windows count={vent_times.height}")
+        self.observer.log("INFO", f"VentilationTagger: Stage 3/3 matched ventilation windows count={vent_times.height}")
 
         iv = pl.read_parquet(proc_dir / "interventions.parquet")
         self.observer.log("INFO", f"VentilationTagger: Loaded interventions.parquet with {iv.height} rows")

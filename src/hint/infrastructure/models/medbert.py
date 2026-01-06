@@ -20,11 +20,11 @@ class MedBERTClassifier(BaseICDClassifier):
         if x_num is None:
             raise ValueError("MedBERT requires numeric input x_num")
 
-        # x_num: (Batch, Channels, Time) -> (Batch, Time, Channels)
+                                                                   
         x = x_num.permute(0, 2, 1) 
         
-        # [FIX] Generate correct attention mask for Time-Series
-        # The 'attention_mask' from args is for text (len 32), we need one for time (len 120)
+                                                               
+                                                                                             
         batch_size, seq_len, _ = x.size()
         ts_mask = torch.ones((batch_size, seq_len), dtype=torch.long, device=x.device)
 

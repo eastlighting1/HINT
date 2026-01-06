@@ -15,6 +15,14 @@ from ....domain.vo import CNNConfig, ETLConfig, ICDConfig
 
 
 def _to_python_list(val: Any) -> List[str]:
+    """Normalize a value to a list of strings.
+
+    Args:
+        val (Any): Input value to normalize.
+
+    Returns:
+        List[str]: Normalized list of strings.
+    """
     if isinstance(val, np.ndarray):
         return val.tolist()
     if isinstance(val, list):
@@ -35,7 +43,8 @@ def _to_python_list(val: Any) -> List[str]:
 class TensorConverter(PipelineComponent):
     """Convert processed features and labels into HDF5 tensors.
     
-    Optimized: Separates static (patient-level) and dynamic (time-level) data to prevent IO bottlenecks.
+    Separates static (patient-level) and dynamic (time-level) data to reduce IO
+    overhead while preparing ICD text inputs for downstream modeling.
     """
 
     def __init__(self, etl_config: ETLConfig, cnn_config: CNNConfig, icd_config: ICDConfig, registry: Registry, observer: TelemetryObserver):
@@ -46,20 +55,20 @@ class TensorConverter(PipelineComponent):
         self.observer = observer
 
     def execute(self) -> None:
-        self.observer.log("INFO", "TensorConverter: Preparing processed sources for tensorization")
+        """Generate HDF5 tensors for training, validation, and test splits."""
+        self.observer.log("INFO", "TensorConverter: Stage 1/5 preparing tensorization inputs")
         proc_dir = Path(self.etl_cfg.proc_dir)
         feat_path = proc_dir / self.etl_cfg.artifacts.features_file
         label_path = proc_dir / self.etl_cfg.artifacts.labels_file
 
-        self.observer.log("INFO", f"TensorConverter: Loading features from {feat_path}")
+        self.observer.log("INFO", f"TensorConverter: Stage 1/5 loading features from {feat_path}")
         df_feat = pl.read_parquet(feat_path)
         df_label = pl.read_parquet(label_path)
 
-        self.observer.log("INFO", "TensorConverter: Joining features and labels")
+        self.observer.log("INFO", "TensorConverter: Stage 1/5 joining features and labels")
         df = df_feat.join(df_label, on=["ICUSTAY_ID", "HOUR_IN"], how="inner")
         
-        # --- ICD Preprocessing ---
-        self.observer.log("INFO", "TensorConverter: Processing ICD codes and Partial Labels")
+        self.observer.log("INFO", "TensorConverter: Stage 2/5 processing ICD codes and partial labels")
         icd_col = "ICD9_CODES"
         unique_codes_df = df.select(["ICUSTAY_ID", icd_col]).unique()
         raw_codes_map = {row["ICUSTAY_ID"]: _to_python_list(row[icd_col]) for row in unique_codes_df.iter_rows(named=True)}
@@ -110,7 +119,7 @@ class TensorConverter(PipelineComponent):
 
         max_cands_len = max(len(m["candidates"]) for m in stay_metadata.values())
         
-        # --- Feature Selection & Encoding ---
+        self.observer.log("INFO", "TensorConverter: Stage 3/5 selecting and encoding features")
         id_cols = ["SUBJECT_ID", "HADM_ID", "ICUSTAY_ID", "HOUR_IN"]
         exclude = self.cnn_cfg.data.exclude_cols + ["VENT_CLASS", "ICD9_CODES", "LABEL"]
         
@@ -139,6 +148,7 @@ class TensorConverter(PipelineComponent):
         val_ids = teva_ids[val_idx]
         test_ids = teva_ids[test_idx]
 
+        self.observer.log("INFO", "TensorConverter: Stage 4/5 splitting cohorts and writing stats")
         cache_dir = Path(self.cnn_cfg.data.data_cache_dir)
         cache_dir.mkdir(parents=True, exist_ok=True)
         with open(cache_dir / "stats.json", "w") as f:
@@ -146,11 +156,13 @@ class TensorConverter(PipelineComponent):
 
         prefix = self.etl_cfg.artifacts.output_h5_prefix
         
+        self.observer.log("INFO", "TensorConverter: Stage 5/5 writing HDF5 splits")
         self._process_split(df.filter(pl.col("ICUSTAY_ID").is_in(train_ids)), "train", numeric_cols, categorical_cols, cache_dir, prefix, stay_metadata, max_cands_len)
         self._process_split(df.filter(pl.col("ICUSTAY_ID").is_in(val_ids)), "val", numeric_cols, categorical_cols, cache_dir, prefix, stay_metadata, max_cands_len)
         self._process_split(df.filter(pl.col("ICUSTAY_ID").is_in(test_ids)), "test", numeric_cols, categorical_cols, cache_dir, prefix, stay_metadata, max_cands_len)
 
     def _flush_batch(self, h5_datasets, buffers):
+        """Flush buffered arrays into the HDF5 datasets."""
         batch_len = len(buffers["y"])
         if batch_len == 0: return
 
@@ -168,6 +180,18 @@ class TensorConverter(PipelineComponent):
         for k in buffers: buffers[k].clear()
 
     def _process_split(self, df: pl.DataFrame, split_name: str, num_cols: List[str], cat_cols: List[str], cache_dir: Path, prefix: str, stay_metadata: Dict, max_cands: int) -> None:
+        """Process a split and write dynamic and static tensors to HDF5.
+
+        Args:
+            df (pl.DataFrame): Input dataframe for the split.
+            split_name (str): Split name such as train/val/test.
+            num_cols (List[str]): Numerical feature columns.
+            cat_cols (List[str]): Categorical feature columns.
+            cache_dir (Path): Output directory for HDF5 files.
+            prefix (str): Output file prefix.
+            stay_metadata (Dict): Per-stay ICD metadata.
+            max_cands (int): Maximum candidate length for padding.
+        """
         h5_path = cache_dir / f"{prefix}_{split_name}.h5"
         self.observer.log("INFO", f"TensorConverter: Writing {split_name} split to {h5_path}")
 
@@ -175,7 +199,6 @@ class TensorConverter(PipelineComponent):
         seq_len = self.cnn_cfg.seq_len
         bert_max_len = self.icd_cfg.max_length
 
-        # 1. Instance Normalization
         norm_exprs = []
         for col in num_cols:
             mean_expr = pl.col(col).mean().over("ICUSTAY_ID")
@@ -186,7 +209,6 @@ class TensorConverter(PipelineComponent):
         
         df = df.rename({"LABEL": "y_vent"})
         
-        # 2. Extract Columns (Zero-copy / Fast Slicing Prep)
         all_sids = df["ICUSTAY_ID"].to_numpy()
         all_hours = df["HOUR_IN"].to_numpy()
         all_y_vent = df["y_vent"].to_numpy()
@@ -201,7 +223,6 @@ class TensorConverter(PipelineComponent):
             n_num = len(num_cols)
             n_cat = len(cat_cols)
             
-            # --- Dynamic Datasets (Time-Series) ---
             ds_dynamic = {
                 "X_num": f.create_dataset("X_num", (0, n_num, seq_len), maxshape=(None, n_num, seq_len), dtype=np.float16, compression=hdf5plugin.Blosc()),
                 "X_cat": f.create_dataset("X_cat", (0, n_cat, seq_len), maxshape=(None, n_cat, seq_len), dtype=np.int32, compression=hdf5plugin.Blosc()),
@@ -211,15 +232,12 @@ class TensorConverter(PipelineComponent):
                 "hour": f.create_dataset("hour", (0,), maxshape=(None,), dtype=np.int32),
             }
             
-            # --- Static Datasets (Patient-Level) ---
-            # Stored separately to avoid massive duplication
             f.create_dataset("static_sids", data=unique_sids, dtype=np.int64)
             
-            # Prepare static arrays
             static_input_ids = []
             static_attn_mask = []
             static_candidates = []
-            valid_sids_mask = [] # To filter out SIDs that might not be in metadata
+            valid_sids_mask = []
 
             for sid in unique_sids:
                 if sid in stay_metadata:
@@ -233,7 +251,6 @@ class TensorConverter(PipelineComponent):
                     static_candidates.append(pad_cands)
                     valid_sids_mask.append(True)
                 else:
-                    # Should not happen typically, but fill defaults
                     static_input_ids.append(np.zeros(bert_max_len, dtype=np.int32))
                     static_attn_mask.append(np.zeros(bert_max_len, dtype=np.int32))
                     static_candidates.append(np.full(max_cands, -1, dtype=np.int32))
@@ -246,7 +263,6 @@ class TensorConverter(PipelineComponent):
             buffers = {k: [] for k in ds_dynamic.keys()}
             self.observer.log("INFO", f"TensorConverter: Vectorized processing for {len(unique_sids)} patients...")
 
-            # 3. Vectorized Sliding Window Loop
             for i in range(len(unique_sids)):
                 sid = unique_sids[i]
                 if sid not in stay_metadata: continue
@@ -259,11 +275,9 @@ class TensorConverter(PipelineComponent):
                 
                 seq_len_stay = len(p_y_vent)
                 
-                # Create Windows (Batch, Features, Time)
                 pad_width = ((seq_len - 1, 0), (0, 0))
                 
                 padded_x_num = np.pad(p_x_num, pad_width, constant_values=np.nan)
-                # (Time, Features, SeqLen) -> Transpose to (Time, Channels, SeqLen)
                 windows_num = sliding_window_view(padded_x_num, window_shape=seq_len, axis=0).transpose(0, 2, 1)
                 
                 if p_x_cat is not None:
@@ -282,7 +296,7 @@ class TensorConverter(PipelineComponent):
                 buffers["sid"].append(t_sid)
                 buffers["hour"].append(p_hours)
 
-                if len(buffers["y"]) >= 500: # Flush larger batches
+                if len(buffers["y"]) >= 500:
                     self._flush_batch(ds_dynamic, buffers)
 
             self._flush_batch(ds_dynamic, buffers)

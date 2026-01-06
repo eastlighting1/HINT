@@ -5,9 +5,7 @@ import numpy as np
 from ..networks import BaseICDClassifier
 
 class Sparsemax(nn.Module):
-    """
-    Sparsemax implementation.
-    """
+    """Sparsemax activation function implementation."""
     def __init__(self, dim=-1):
         super(Sparsemax, self).__init__()
         self.dim = dim
@@ -89,7 +87,7 @@ class TabNetICD(BaseICDClassifier):
                  virtual_batch_size=128, momentum=0.02, **kwargs):
         super().__init__(num_classes, input_dim, seq_len, dropout)
         
-        # Flatten Adapter Logic
+                               
         self.flatten_dim = input_dim * seq_len
         self.input_bn = nn.BatchNorm1d(self.flatten_dim, momentum=0.01)
         
@@ -125,7 +123,7 @@ class TabNetICD(BaseICDClassifier):
         self.embedding_dim = n_d 
 
     def forward(self, x_num: torch.Tensor, return_embeddings: bool = False, **kwargs) -> torch.Tensor:
-        # Adapter: Flatten 3D (B, C, T) -> 2D (B, C*T)
+                                                      
         x = x_num.reshape(x_num.size(0), -1)
         x = self.input_bn(x)
         
@@ -133,31 +131,31 @@ class TabNetICD(BaseICDClassifier):
         priors = torch.ones(x.shape, device=x.device)
         out_accum = torch.zeros(batch_size, self.n_d, device=x.device)
         
-        # Initial Feature Step
+                              
         masked_x = x
         x_processed = torch.zeros(batch_size, self.n_d + self.n_a, device=x.device)
         
-        # Apply shared layers (Initial Pass)
+                                            
         for layer in self.shared_layers:
-            x_processed = torch.add(x_processed, layer(masked_x)) * 0.7071 # sqrt(0.5)
-            masked_x = x_processed # [Correct] Update input for next layer
+            x_processed = torch.add(x_processed, layer(masked_x)) * 0.7071            
+            masked_x = x_processed                                        
 
         for step in range(self.n_steps):
             mask = self.att_transformers[step](priors, x_processed[:, self.n_d:])
             
-            # Update priors
+                           
             priors = torch.mul(priors, (self.gamma - mask))
             
-            # Mask features
+                           
             masked_x = torch.mul(mask, x)
             
-            # Apply Shared Layers again (Step Pass)
+                                                   
             x_processed = torch.zeros(batch_size, self.n_d + self.n_a, device=x.device)
             for layer in self.shared_layers:
                 x_processed = torch.add(x_processed, layer(masked_x)) * 0.7071
-                masked_x = x_processed # [FIXED] Update masked_x so dimensions match for the next shared layer
+                masked_x = x_processed                                                                        
             
-            # Apply Independent Layers
+                                      
             for layer in self.feat_transformers[step]:
                 x_processed = torch.add(x_processed, layer(x_processed)) * 0.7071
             
