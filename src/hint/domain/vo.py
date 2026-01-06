@@ -1,5 +1,7 @@
 from pydantic import BaseModel, Field, ConfigDict
 from typing import List, Tuple, Union, Optional, Dict, Any
+from enum import Enum
+from pathlib import Path
 
 class HyperparamVO(BaseModel):
     model_config = ConfigDict(frozen=True)
@@ -10,15 +12,39 @@ class ArtifactsConfig(HyperparamVO):
     vitals_mean_file: str = "vitals_labs_mean.parquet"
     interventions_file: str = "interventions.parquet"
     features_file: str = "dataset_123.parquet"
+    vent_targets_file: str = "targets_vent.parquet"
+    icd_targets_file: str = "targets_icd.parquet"
+    icd_meta_file: str = "meta_icd_classes.json"
     labels_file: str = "labels.parquet"
     output_h5_prefix: str = "train_coding"
     model_name: Optional[str] = None
+
+class ETLKeys(str, Enum):
+    """Keys managed by ETL process (Inputs & Identifiers)"""
+    STAY_ID = "sid"
+    HOUR_IN = "hour"
+    INPUT_DYN_VITALS = "X_num"
+    INPUT_DYN_CATEGORICAL = "X_cat"
+    STATIC_INPUT_IDS = "static_input_ids"
+    STATIC_ATTN_MASK = "static_attention_mask"
+    STATIC_CANDS = "static_candidates"
+
+class ICDKeys(str, Enum):
+    """Keys specific to ICD Training (Zone 2)"""
+    TARGET_ICD_MULTI = "y"
+    FEATURE_ICD_EMBEDDING = "X_icd"
+
+class InterventionKeys(str, Enum):
+    """Keys specific to Intervention Prediction (Zone 3)"""
+    TARGET_VENT_STATE = "y_vent"
 
 class ETLConfig(HyperparamVO):
     raw_dir: str = "./data/raw"
     proc_dir: str = "./data/processed"
     resources_dir: str = "./resources"
     artifacts: ArtifactsConfig = Field(default_factory=ArtifactsConfig)
+    keys: ETLKeys = Field(default_factory=lambda: ETLKeys)
+
     min_los_icu_days: float = 0.0
     min_duration_hours: int = 0
     max_duration_hours: int = 999999
@@ -28,41 +54,14 @@ class ETLConfig(HyperparamVO):
     pred_window_h: int = 4
     age_bin_edges: Tuple[int, int, int, int] = (15, 40, 65, 90)
     
-    exact_level2_104: List[str] = Field(default_factory=lambda: [
-        "alanine aminotransferase", "albumin", "albumin ascites", "albumin pleural", 
-        "albumin urine", "alkaline phosphate", "anion gap", "aspartate aminotransferase",
-        "basophils", "bicarbonate", "bilirubin", "blood urea nitrogen", "calcium",
-        "calcium ionized", "calcium urine", "cardiac index", "cardiac output fick",
-        "cardiac output thermodilution", "central venous pressure", "chloride",
-        "chloride urine", "cholesterol", "cholesterol hdl", "cholesterol ldl", "co2",
-        "co2 (etco2, pco2, etc.)", "creatinine", "creatinine ascites", 
-        "creatinine body fluid", "creatinine pleural", "creatinine urine", 
-        "diastolic blood pressure", "eosinophils", "fibrinogen", 
-        "fraction inspired oxygen", "fraction inspired oxygen set", 
-        "glascow coma scale total", "glucose", "heart rate", "height", "hematocrit", 
-        "hemoglobin", "lactate", "lactate dehydrogenase", 
-        "lactate dehydrogenase pleural", "lactic acid", "lymphocytes", 
-        "lymphocytes ascites", "lymphocytes atypical", "lymphocytes atypical csf", 
-        "lymphocytes body fluid", "lymphocytes percent", "lymphocytes pleural", 
-        "magnesium", "mean blood pressure", "mean corpuscular hemoglobin", 
-        "mean corpuscular hemoglobin concentration", "mean corpuscular volume", 
-        "monocytes", "monocytes csf", "neutrophils", "oxygen saturation", 
-        "partial pressure of carbon dioxide", "partial pressure of oxygen", 
-        "partial thromboplastin time", "peak inspiratory pressure", "ph", "ph urine", 
-        "phosphate", "phosphorous", "plateau pressure", "platelets", 
-        "positive end-expiratory pressure", "positive end-expiratory pressure set", 
-        "post void residual", "potassium", "potassium serum", "prothrombin time inr", 
-        "prothrombin time pt", "pulmonary artery pressure mean", 
-        "pulmonary artery pressure systolic", "pulmonary capillary wedge pressure", 
-        "red blood cell count", "red blood cell count ascites", 
-        "red blood cell count csf", "red blood cell count pleural", 
-        "red blood cell count urine", "respiratory rate", "respiratory rate set", 
-        "sodium", "systemic vascular resistance", "systolic blood pressure", 
-        "temperature", "tidal volume observed", "tidal volume set", 
-        "tidal volume spontaneous", "total protein", "total protein urine", 
-        "troponin-i", "troponin-t", "venous pvo2", "weight", "white blood cell count", 
-        "white blood cell count urine"
-    ])
+    def _load_exact_features() -> List[str]:
+        path = Path("resources/exact_level2_104.txt")
+        if path.exists():
+            with open(path, "r", encoding="utf-8") as f:
+                return [line.strip() for line in f if line.strip()]
+        return []
+    
+    exact_level2_104: List[str] = Field(default_factory=_load_exact_features)
 
 class ICDDataConfig(HyperparamVO):
     input_h5_prefix: str = "train_coding"
@@ -74,20 +73,18 @@ class ICDArtifactsConfig(HyperparamVO):
     model_name: str = "icd_model"
     stacker_name: str = "icd_stacker"
 
-                                                 
 class ExecutionConfig(HyperparamVO):
     subset_ratio: float = 1.0
 
 class ICDConfig(HyperparamVO):
     data: ICDDataConfig = Field(default_factory=ICDDataConfig)
     artifacts: ICDArtifactsConfig = Field(default_factory=ICDArtifactsConfig)
+    keys: ICDKeys = Field(default_factory=lambda: ICDKeys)
     
-                                                 
     execution: ExecutionConfig = Field(default_factory=ExecutionConfig)
     models_to_run: List[str] = Field(default_factory=lambda: ["MedBERT"])
     model_configs: Dict[str, Any] = Field(default_factory=dict)
     
-                                                            
     loss_type: str = "clpl"
 
     model_name: str = "Charangan/MedBERT"
@@ -126,6 +123,8 @@ class CNNArtifactsConfig(HyperparamVO):
 class CNNConfig(HyperparamVO):
     data: CNNDataConfig = Field(default_factory=CNNDataConfig)
     artifacts: CNNArtifactsConfig = Field(default_factory=CNNArtifactsConfig)
+    keys: InterventionKeys = Field(default_factory=lambda: InterventionKeys)
+    
     seq_len: int = 120
     batch_size: int = 512
     epochs: int = 100

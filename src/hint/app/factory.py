@@ -10,7 +10,6 @@ from ..infrastructure.telemetry import RichTelemetryObserver
 from ..infrastructure.datasource import HDF5StreamingSource, ParquetSource
 from ..infrastructure.networks import GFINet_CNN
 
-                                
 from ..services.etl.service import ETLService
 from ..services.etl.components.assembler import FeatureAssembler
 from ..services.etl.components.tensor import TensorConverter
@@ -44,9 +43,14 @@ class AppFactory:
         observer = self.create_telemetry()
         
         assembler = FeatureAssembler(etl_cfg, registry, observer)
-        label_gen = LabelGenerator(etl_cfg, registry, observer)
+        label_gen = LabelGenerator(
+            etl_config=etl_cfg,
+            icd_config=icd_cfg,
+            cnn_config=cnn_cfg,
+            registry=registry,
+            observer=observer
+        )
         
-                                          
         tensor_converter = TensorConverter(
             etl_config=etl_cfg,
             cnn_config=cnn_cfg,
@@ -65,20 +69,16 @@ class AppFactory:
 
     def create_icd_service(self) -> ICDService:
         cfg = self.ctx.icd
-                                                         
         registry = self.create_registry()
         observer = self.create_telemetry()
         
-                                                                                   
-                                                                     
         cache_dir = Path(cfg.data.data_cache_dir)
         prefix = cfg.data.input_h5_prefix
         
         train_path = cache_dir / f"{prefix}_train.h5"
         val_path = cache_dir / f"{prefix}_val.h5"
         test_path = cache_dir / f"{prefix}_test.h5"
-
-                                                                     
+        
         try:
             train_source = HDF5StreamingSource(train_path, label_key="y")
             val_source = HDF5StreamingSource(val_path, label_key="y")
@@ -103,14 +103,12 @@ class AppFactory:
         registry = self.create_registry()
         observer = self.create_telemetry()
         
-                                                                                     
         cache_dir = Path(cfg.data.data_cache_dir)
         prefix = cfg.data.input_h5_prefix 
         train_path = cache_dir / f"{prefix}_train.h5"
         val_path = cache_dir / f"{prefix}_val.h5"
         
         try:
-                                                                                                              
             train_source = HDF5StreamingSource(train_path, seq_len=cfg.seq_len)
             val_source = HDF5StreamingSource(val_path, seq_len=cfg.seq_len)
             vocab_sizes = train_source.get_real_vocab_sizes()
