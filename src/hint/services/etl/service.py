@@ -2,10 +2,14 @@ from typing import List
 from ...foundation.interfaces import TelemetryObserver, PipelineComponent, Registry
 
 class ETLService:
-    """Orchestrator for the ETL pipeline.
+    """Orchestrate ETL pipeline component execution.
 
-    Executes registered pipeline components sequentially with progress
-    reporting and structured logging.
+    This service runs each ETL component in sequence and logs progress.
+
+    Attributes:
+        registry (Registry): Artifact registry for outputs.
+        observer (TelemetryObserver): Logging and metric observer.
+        components (List[PipelineComponent]): Ordered pipeline steps.
     """
     def __init__(
         self, 
@@ -13,12 +17,19 @@ class ETLService:
         observer: TelemetryObserver,
         components: List[PipelineComponent]
     ):
+        """Initialize the ETL service.
+
+        Args:
+            registry (Registry): Artifact registry for outputs.
+            observer (TelemetryObserver): Logging and metric observer.
+            components (List[PipelineComponent]): Pipeline components in order.
+        """
         self.registry = registry
         self.observer = observer
         self.components = components
 
     def run_pipeline(self) -> None:
-        """Execute all configured pipeline steps sequentially."""
+        """Run all configured ETL components in order."""
         self.observer.log("INFO", "ETL Service: Starting pipeline execution.")
         
         total_steps = len(self.components)

@@ -10,7 +10,29 @@ from ....infrastructure.components import CBFocalLoss, CLPLLoss
 from ....foundation.dtos import TensorBatch
 
 class ICDTrainer(BaseTrainer):
+    """Trainer for ICD classification models.
+
+    Attributes:
+        cfg (ICDConfig): Training configuration.
+        entity (ICDModelEntity): Model entity wrapper.
+        class_freq (np.ndarray): Class frequency estimates.
+        ignored_indices (List[int]): Label indices to ignore.
+        scaler (Optional[torch.amp.GradScaler]): AMP gradient scaler.
+        use_adaptive_softmax (bool): Flag for adaptive softmax.
+        adaptive_loss_fn (Optional[nn.AdaptiveLogSoftmaxWithLoss]): Loss module.
+    """
     def __init__(self, config: ICDConfig, entity: ICDModelEntity, registry, observer, device, class_freq: np.ndarray = None, ignored_indices: Optional[List[int]] = None):
+        """Initialize the ICD trainer.
+
+        Args:
+            config (ICDConfig): Training configuration.
+            entity (ICDModelEntity): Model entity wrapper.
+            registry (Any): Artifact registry.
+            observer (Any): Logging observer.
+            device (Any): Target device.
+            class_freq (np.ndarray): Class frequency estimates.
+            ignored_indices (Optional[List[int]]): Label indices to ignore.
+        """
         super().__init__(registry, observer, device)
         self.cfg = config
         self.entity = entity
@@ -55,6 +77,14 @@ class ICDTrainer(BaseTrainer):
             self.observer.log("INFO", f"Initialized AdaptiveLogSoftmaxWithLoss with cutoffs: {cutoffs}")
 
     def _prepare_inputs(self, batch: TensorBatch) -> Dict[str, torch.Tensor]:
+        """Prepare model inputs from a TensorBatch.
+
+        Args:
+            batch (TensorBatch): Batch of features and labels.
+
+        Returns:
+            Dict[str, torch.Tensor]: Input tensors for the model.
+        """
         inputs = {}
         inputs["x_num"] = batch.x_num.to(self.device).float()
         
@@ -79,6 +109,13 @@ class ICDTrainer(BaseTrainer):
         return inputs
 
     def train(self, train_loader: DataLoader, val_loader: DataLoader, evaluator: BaseEvaluator) -> None:
+        """Run the training loop with evaluation.
+
+        Args:
+            train_loader (DataLoader): Training data loader.
+            val_loader (DataLoader): Validation data loader.
+            evaluator (BaseEvaluator): Evaluator instance.
+        """
         self.entity.to(self.device)
         self.observer.log("INFO", f"ICDTrainer: Start training for {self.cfg.epochs} epochs (AMP + Mode: {self.cfg.loss_type}).")
         

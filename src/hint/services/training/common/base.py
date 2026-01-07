@@ -3,55 +3,69 @@ from typing import Any, Dict, Optional
 from hint.foundation.interfaces import Registry, TelemetryObserver
 
 class BaseComponent(ABC):
-    """Shared base for training components.
+    """Base class for training components.
 
-    Manages common infrastructure such as the artifact registry, telemetry
-    observer, and device configuration for trainers and evaluators.
+    Attributes:
+        registry (Registry): Artifact registry.
+        observer (TelemetryObserver): Logging observer.
+        device (str): Target device identifier.
     """
     def __init__(self, registry: Registry, observer: TelemetryObserver, device: str):
+        """Initialize the component dependencies.
+
+        Args:
+            registry (Registry): Artifact registry.
+            observer (TelemetryObserver): Logging observer.
+            device (str): Target device identifier.
+        """
         self.registry = registry
         self.observer = observer
         self.device = device
 
 class BaseTrainer(BaseComponent):
-    """Abstract trainer that encapsulates the training loop contract.
-
-    Concrete implementations should run optimization and validation cycles.
-    """
+    """Abstract base class for model trainers."""
     @abstractmethod
     def train(self, train_loader: Any, val_loader: Any, evaluator: 'BaseEvaluator', **kwargs) -> None:
-        """Run the training loop over the provided loaders.
+        """Train a model using the provided data loaders.
 
         Args:
             train_loader (Any): Training data loader.
             val_loader (Any): Validation data loader.
-            evaluator (BaseEvaluator): Evaluator used during validation.
+            evaluator (BaseEvaluator): Evaluation helper.
+            **kwargs (Any): Additional training options.
         """
-        pass
+        raise NotImplementedError
 
 class BaseEvaluator(BaseComponent):
-    """Abstract evaluator responsible for metrics and validation logic."""
+    """Abstract base class for evaluators."""
     @abstractmethod
     def evaluate(self, loader: Any, **kwargs) -> Dict[str, float]:
-        """Run evaluation and return metrics.
+        """Evaluate a model on the provided data loader.
 
         Args:
             loader (Any): Evaluation data loader.
+            **kwargs (Any): Additional evaluation options.
 
         Returns:
-            Dict[str, float]: Metric name to value mapping.
+            Dict[str, float]: Aggregated metrics.
         """
-        pass
+        raise NotImplementedError
 
 class BaseDomainService(ABC):
-    """Orchestrator that prepares data and runs domain workflows.
+    """Abstract base class for domain services.
 
-    Coordinates component assembly and execution order for a service.
+    Attributes:
+        observer (TelemetryObserver): Logging observer.
     """
     def __init__(self, observer: TelemetryObserver):
+        """Initialize the service with a telemetry observer.
+
+        Args:
+            observer (TelemetryObserver): Logging observer.
+        """
         self.observer = observer
 
     @abstractmethod
     def execute(self) -> None:
-        """Execute the service pipeline."""
-        pass
+        """Execute the service workflow."""
+        raise NotImplementedError

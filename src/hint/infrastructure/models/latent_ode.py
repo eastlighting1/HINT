@@ -4,11 +4,30 @@ from typing import Optional
 from ..networks import BaseICDClassifier
 
 class RK4Solver(nn.Module):
+    """Runge-Kutta 4th order ODE solver.
+
+    Attributes:
+        func (nn.Module): ODE function to integrate.
+    """
     def __init__(self, func):
+        """Initialize the solver with an ODE function.
+
+        Args:
+            func (nn.Module): ODE function module.
+        """
         super().__init__()
         self.func = func
 
     def forward(self, z0, t_span):
+        """Integrate the ODE across the provided time span.
+
+        Args:
+            z0 (torch.Tensor): Initial latent state.
+            t_span (torch.Tensor): 1D tensor of time points.
+
+        Returns:
+            torch.Tensor: Latent states at each time point.
+        """
                                 
         dt = (t_span[-1] - t_span[0]) / (len(t_span) - 1)
         z = z0
@@ -24,7 +43,18 @@ class RK4Solver(nn.Module):
         return torch.stack(zs)
 
 class ODEFunc(nn.Module):
+    """Neural ODE function for latent dynamics.
+
+    Attributes:
+        net (nn.Sequential): Feed-forward network for derivatives.
+    """
     def __init__(self, latent_dim, hidden_dim=64):
+        """Initialize the ODE function network.
+
+        Args:
+            latent_dim (int): Latent dimension size.
+            hidden_dim (int): Hidden layer size.
+        """
         super().__init__()
         self.net = nn.Sequential(
             nn.Linear(latent_dim, hidden_dim),
@@ -32,10 +62,40 @@ class ODEFunc(nn.Module):
             nn.Linear(hidden_dim, latent_dim)
         )
     def forward(self, t, x):
+        """Compute derivatives for the latent state.
+
+        Args:
+            t (torch.Tensor): Time value.
+            x (torch.Tensor): Latent state.
+
+        Returns:
+            torch.Tensor: Time derivative of the state.
+        """
         return self.net(x)
 
 class LatentODEClassifier(BaseICDClassifier):
+    """Latent ODE classifier for irregular time-series data.
+
+    Attributes:
+        rnn (nn.GRU): Encoder RNN for initial state.
+        fc_mean (nn.Linear): Latent mean projection.
+        fc_std (nn.Linear): Latent std projection.
+        ode_func (ODEFunc): Latent dynamics function.
+        solver (RK4Solver): ODE integration solver.
+        classifier (nn.Sequential): Classifier head.
+        latent_dim (int): Latent dimension size.
+    """
     def __init__(self, num_classes: int, input_dim: int, seq_len: int, latent_dim: int = 64, rec_dim: int = 128, **kwargs):
+        """Initialize the latent ODE classifier.
+
+        Args:
+            num_classes (int): Number of output classes.
+            input_dim (int): Input feature dimension.
+            seq_len (int): Sequence length.
+            latent_dim (int): Latent dimension size.
+            rec_dim (int): RNN hidden dimension.
+            **kwargs (Any): Additional model arguments.
+        """
         super().__init__(num_classes, input_dim, seq_len)
         
                                                                         
@@ -54,6 +114,18 @@ class LatentODEClassifier(BaseICDClassifier):
         self.latent_dim = latent_dim
 
     def forward(self, x_num: Optional[torch.Tensor] = None, **kwargs) -> torch.Tensor:
+        """Run the forward pass on numeric time-series data.
+
+        Args:
+            x_num (Optional[torch.Tensor]): Numeric input features.
+            **kwargs (Any): Additional model inputs.
+
+        Returns:
+            torch.Tensor: Class logits.
+
+        Raises:
+            ValueError: If x_num is not provided.
+        """
                                        
         if x_num is None: raise ValueError("LatentODE requires x_num")
         x = x_num.permute(0, 2, 1)

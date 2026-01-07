@@ -9,7 +9,23 @@ from ....domain.entities import InterventionModelEntity
 from ....domain.vo import CNNConfig
 
 class InterventionEvaluator(BaseEvaluator):
+    """Evaluator for intervention prediction models.
+
+    Attributes:
+        cfg (CNNConfig): Evaluation configuration.
+        entity (InterventionModelEntity): Model entity wrapper.
+        class_names (List[str]): Ordered class labels.
+    """
     def __init__(self, config: CNNConfig, entity: InterventionModelEntity, registry, observer, device):
+        """Initialize the evaluator with model and configuration.
+
+        Args:
+            config (CNNConfig): Evaluation configuration.
+            entity (InterventionModelEntity): Model entity wrapper.
+            registry (Any): Artifact registry.
+            observer (Any): Logging observer.
+            device (Any): Target device.
+        """
         super().__init__(registry, observer, device)
         self.cfg = config
         self.entity = entity
@@ -17,6 +33,15 @@ class InterventionEvaluator(BaseEvaluator):
         self.class_names = ["ONSET", "WEAN", "STAY ON", "STAY OFF"]
 
     def evaluate(self, loader, **kwargs) -> Dict[str, float]:
+        """Evaluate the model on the provided data loader.
+
+        Args:
+            loader (Any): Evaluation data loader.
+            **kwargs (Any): Additional options.
+
+        Returns:
+            Dict[str, float]: Aggregated evaluation metrics.
+        """
         self.entity.network.eval()
         
         all_preds = []

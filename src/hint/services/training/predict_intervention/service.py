@@ -9,6 +9,19 @@ from ....foundation.interfaces import TelemetryObserver, Registry
 from ....infrastructure.datasource import collate_tensor_batch
 
 class InterventionService(BaseDomainService):
+    """Service that trains the intervention prediction model.
+
+    This service builds data loaders, initializes trainers, and executes
+    the training loop for intervention targets.
+
+    Attributes:
+        cfg (CNNConfig): Intervention configuration.
+        registry (Registry): Artifact registry.
+        entity (InterventionModelEntity): Model entity wrapper.
+        train_ds (Dataset): Training dataset.
+        val_ds (Dataset): Validation dataset.
+        device (str): Target device identifier.
+    """
     def __init__(
         self,
         config: CNNConfig,
@@ -18,6 +31,16 @@ class InterventionService(BaseDomainService):
         train_dataset: Dataset,
         val_dataset: Dataset
     ):
+        """Initialize the service with datasets and dependencies.
+
+        Args:
+            config (CNNConfig): Intervention configuration.
+            registry (Registry): Artifact registry.
+            observer (TelemetryObserver): Logging observer.
+            entity (InterventionModelEntity): Model entity wrapper.
+            train_dataset (Dataset): Training dataset.
+            val_dataset (Dataset): Validation dataset.
+        """
         super().__init__(observer)
         self.cfg = config
         self.registry = registry
@@ -27,7 +50,7 @@ class InterventionService(BaseDomainService):
         self.device = "cuda" if torch.cuda.is_available() else "cpu"
 
     def execute(self) -> None:
-        """Execute the intervention prediction training workflow."""
+        """Run the training workflow for intervention prediction."""
         self.observer.log("INFO", "InterventionService: Stage 1/3 building dataloaders.")
         
         dl_tr = DataLoader(

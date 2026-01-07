@@ -22,24 +22,50 @@ from ..services.training.automatic_icd_coding.service import ICDService
 from ..services.training.predict_intervention.service import InterventionService
 
 class AppFactory:
-    """Factory to assemble application services and components.
+    """Factory for application services and infrastructure.
 
-    Initializes configuration, telemetry, registry, and downstream services
-    using dependency injection.
+    This class constructs registries, telemetry observers, and service
+    instances using the resolved configuration.
+
+    Attributes:
+        loader (HydraConfigLoader): Hydra configuration loader.
+        raw_cfg (Any): Raw Hydra configuration object.
+        ctx (AppContext): Parsed application context.
     """
     def __init__(self, config_name: str = "config", config_path: str = "configs"):
+        """Initialize the factory and load configuration.
+
+        Args:
+            config_name (str): Hydra config name.
+            config_path (str): Hydra config directory.
+        """
         self.loader = HydraConfigLoader(config_name=config_name, config_path=config_path)
         self.raw_cfg = self.loader.load()
         self.ctx = load_app_context(self.raw_cfg)
 
     def create_registry(self) -> Registry:
+        """Create the artifact registry.
+
+        Returns:
+            Registry: Registry implementation for saving artifacts.
+        """
         path = self.raw_cfg.get("logging", {}).get("artifacts_dir", "artifacts")
         return FileSystemRegistry(base_dir=path)
 
     def create_telemetry(self) -> TelemetryObserver:
+        """Create the telemetry observer used by services.
+
+        Returns:
+            TelemetryObserver: Logging and metric observer.
+        """
         return RichTelemetryObserver()
 
     def create_etl_service(self) -> ETLService:
+        """Construct the ETL service with configured components.
+
+        Returns:
+            ETLService: Ready-to-run ETL service.
+        """
         etl_cfg = self.ctx.etl
         cnn_cfg = self.ctx.cnn
         icd_cfg = self.ctx.icd
@@ -84,6 +110,11 @@ class AppFactory:
         return ETLService(registry, observer, components)
 
     def create_icd_service(self) -> ICDService:
+        """Construct the ICD training service.
+
+        Returns:
+            ICDService: Service configured for ICD training/inference.
+        """
         cfg = self.ctx.icd
         registry = self.create_registry()
         observer = self.create_telemetry()
@@ -117,6 +148,11 @@ class AppFactory:
         )
 
     def create_intervention_service(self) -> InterventionService:
+        """Construct the intervention training service.
+
+        Returns:
+            InterventionService: Service configured for intervention training.
+        """
         cfg = self.ctx.cnn
         registry = self.create_registry()
         observer = self.create_telemetry()
@@ -127,8 +163,6 @@ class AppFactory:
         train_path = cache_dir / f"{prefix}_train.h5"
         val_path = cache_dir / f"{prefix}_val.h5"
         
-        # [FIX] Explicitly use 'y_vent' (or configured key) as label_key
-        # Defaulting to 'y' causes it to read ICD targets which leads to CUDA errors
         target_key = cfg.keys.TARGET_VENT_STATE if hasattr(cfg.keys, "TARGET_VENT_STATE") else "y_vent"
 
         try:
@@ -153,8 +187,6 @@ class AppFactory:
 
         observer.log("INFO", "AppFactory: Building intervention model network")
         
-        # Note: n_cls=4 is hardcoded here. If binary task (0/1), consider changing to 2.
-        # But keeping as 4 to match FocalLoss default and potentially multi-state logic.
         network = GFINet_CNN(
             in_chs=[num_channels],
             n_cls=4, 

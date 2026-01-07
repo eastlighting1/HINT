@@ -1,35 +1,38 @@
 class HINTError(Exception):
     """Base exception for the HINT application.
 
-    Serves as the common root for domain-specific errors raised across
-    ETL, training, and inference workflows.
+    Use this type as the root for domain-specific errors across the
+    pipeline to enable consistent exception handling.
     """
     pass
 
 class ConfigurationError(HINTError):
-    """Raised when configuration is invalid or missing.
+    """Raised when configuration loading or validation fails.
 
-    Indicates that required settings are absent or malformed.
+    This error signals missing files, invalid settings, or unsupported
+    configuration values.
     """
     pass
 
 class PipelineError(HINTError):
-    """Raised when a pipeline component fails.
+    """Raised when a pipeline stage fails to execute.
 
-    Wraps failures in ETL or training stages to simplify error handling.
+    This error captures failures during ETL or training workflows.
     """
     pass
 
 class DataError(HINTError):
-    """Raised when data validation fails or files are missing.
+    """Raised when data loading or processing fails.
 
-    Signals missing inputs or inconsistent data shape/format issues.
+    This error is used for missing data, schema mismatches, and invalid
+    input values.
     """
     pass
 
 class ModelError(HINTError):
-    """Raised during model training or inference failures.
+    """Raised when model initialization or inference fails.
 
-    Covers runtime errors encountered during forward/backward passes.
+    This error signals invalid model configuration or runtime issues
+    during forward passes.
     """
     pass

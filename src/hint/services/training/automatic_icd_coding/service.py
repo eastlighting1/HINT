@@ -15,8 +15,23 @@ from ....infrastructure.datasource import HDF5StreamingSource, collate_tensor_ba
 from ....infrastructure.networks import get_network_class
 
 class ICDService(BaseDomainService):
-    """Service orchestrating ICD model training, validation, and testing."""
+    """Service that trains and evaluates ICD models.
+
+    Attributes:
+        cfg (ICDConfig): ICD configuration.
+        registry (Registry): Artifact registry.
+        device (torch.device): Target device.
+        ignored_indices (List[int]): Label indices to ignore.
+    """
     def __init__(self, config: ICDConfig, registry: Registry, observer: TelemetryObserver, **kwargs):
+        """Initialize the ICD service.
+
+        Args:
+            config (ICDConfig): ICD configuration.
+            registry (Registry): Artifact registry.
+            observer (TelemetryObserver): Logging observer.
+            **kwargs (Any): Additional dependencies.
+        """
         super().__init__(observer)
         self.cfg = config
         self.registry = registry
@@ -24,7 +39,7 @@ class ICDService(BaseDomainService):
         self.ignored_indices = []
 
     def execute(self) -> None:
-        """Run the ICD training workflow across configured models."""
+        """Run the ICD training and evaluation workflow."""
         cache_dir = Path(self.cfg.data.data_cache_dir)
         stats_path = cache_dir / "stats.json"
         
@@ -59,14 +74,11 @@ class ICDService(BaseDomainService):
                 
                 if "y" in f:
                     y_data = f["y"][:]
-                    # [FIX] Safe type casting for bincount compatibility
                     if y_data.ndim == 1:
-                        # Indices (int)
                         if y_data.dtype.kind == 'f':
                             y_data = y_data.astype(np.int64)
                         target_counts = np.bincount(y_data, minlength=num_classes)
                     else:
-                        # Multi-hot (float/int)
                         target_counts = np.sum(y_data, axis=0)
                 else:
                     target_counts = np.ones(num_classes)
@@ -77,7 +89,6 @@ class ICDService(BaseDomainService):
         self.observer.log("INFO", f"ICDService: Computed input shape num_feats={num_feats} seq_len={seq_len}")
         self.observer.log("INFO", "ICDService: Stage 4/4 building dataloaders")
         
-        # [FIX] Add drop_last=True to prevent batch size of 1 which crashes BatchNorm
         dl_tr = DataLoader(
             train_source, 
             batch_size=self.cfg.batch_size, 
@@ -147,7 +158,6 @@ class ICDService(BaseDomainService):
                         self.observer.log("WARNING", f"[{model_name}] No best checkpoint found. Using current state.")
                         
                 except RuntimeError as e:
-                    # [FIX] Handle size mismatch safely
                     if "size mismatch" in str(e):
                         if self.cfg.epochs > 0:
                             self.observer.log("WARNING", f"[{model_name}] Checkpoint size mismatch. Ignoring old checkpoint and using newly trained weights.")
@@ -176,8 +186,10 @@ class ICDService(BaseDomainService):
                 continue
 
     def generate_intervention_dataset(self, cnn_config) -> None:
-        """
-        Generates an intervention dataset by running inference with the trained ICD model.
+        """Generate intervention datasets using an ICD model.
+
+        Args:
+            cnn_config (Any): CNN configuration for output settings.
         """
         self.observer.log("INFO", "ICDService: Starting intervention dataset generation.")
         

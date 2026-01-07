@@ -7,8 +7,23 @@ from typing import List, Optional, Dict, Any
 from sklearn.decomposition import PCA
 
 class FocalLoss(nn.Module):
-    """Multi-class focal loss with optional class weights and label smoothing."""
+    """Focal loss for multi-class classification.
+
+    Attributes:
+        alpha (Optional[torch.Tensor]): Per-class weighting factors.
+        gamma (float): Focusing parameter.
+        label_smoothing (float): Label smoothing factor.
+        num_classes (int): Number of classes.
+    """
     def __init__(self, alpha: Optional[torch.Tensor] = None, gamma: float = 2.0, label_smoothing: float = 0.0, num_classes: int = 4):
+        """Initialize focal loss parameters.
+
+        Args:
+            alpha (Optional[torch.Tensor]): Optional class weights.
+            gamma (float): Focusing parameter.
+            label_smoothing (float): Label smoothing factor.
+            num_classes (int): Number of classes.
+        """
         super().__init__()
         self.alpha = alpha
         self.gamma = gamma
@@ -16,6 +31,15 @@ class FocalLoss(nn.Module):
         self.num_classes = num_classes
 
     def forward(self, logits: torch.Tensor, targets: torch.Tensor) -> torch.Tensor:
+        """Compute focal loss for the given logits and targets.
+
+        Args:
+            logits (torch.Tensor): Model logits.
+            targets (torch.Tensor): Target class indices.
+
+        Returns:
+            torch.Tensor: Scalar loss value.
+        """
         log_probs = F.log_softmax(logits, dim=1)
         probs = F.softmax(logits, dim=1)
         targets_ohe = F.one_hot(targets, self.num_classes).float()
@@ -36,8 +60,21 @@ class FocalLoss(nn.Module):
         return loss.mean()
 
 class CBFocalLoss(nn.Module):
-    """Class-balanced focal loss."""
+    """Class-balanced focal loss.
+
+    Attributes:
+        class_weights (torch.Tensor): Computed class weights.
+        gamma (float): Focusing parameter.
+    """
     def __init__(self, class_counts: np.ndarray, beta: float = 0.999, gamma: float = 1.5, device: str = 'cpu'):
+        """Initialize class-balanced focal loss.
+
+        Args:
+            class_counts (np.ndarray): Class sample counts.
+            beta (float): Class-balanced beta parameter.
+            gamma (float): Focusing parameter.
+            device (str): Target device for weights.
+        """
         super().__init__()
                                                          
         class_counts = np.array(class_counts)
@@ -54,6 +91,15 @@ class CBFocalLoss(nn.Module):
         self.gamma = gamma
 
     def forward(self, logits, targets):
+        """Compute class-balanced focal loss.
+
+        Args:
+            logits (torch.Tensor): Model logits.
+            targets (torch.Tensor): Target class indices.
+
+        Returns:
+            torch.Tensor: Scalar loss value.
+        """
         if self.class_weights.device != logits.device:
             self.class_weights = self.class_weights.to(logits.device)
             
@@ -63,20 +109,17 @@ class CBFocalLoss(nn.Module):
         return focal_loss.mean()
 
 class CLPLLoss(nn.Module):
-    """Convex loss for partial labels.
-
-    Implements the convex surrogate from "Learning from Partial Labels" (Cour et al., 2011)
-    by maximizing candidate scores and minimizing non-candidate scores.
-    """
+    """Candidate label partial loss."""
     def __init__(self):
+        """Initialize the CLPL loss."""
         super().__init__()
 
     def forward(self, logits: torch.Tensor, candidate_mask: torch.Tensor) -> torch.Tensor:
-        """Compute the CLPL loss.
+        """Compute CLPL loss for candidate masks.
 
         Args:
-            logits (torch.Tensor): (Batch, Num_Classes) logits.
-            candidate_mask (torch.Tensor): (Batch, Num_Classes) candidate indicator.
+            logits (torch.Tensor): Model logits.
+            candidate_mask (torch.Tensor): Mask of candidate labels.
 
         Returns:
             torch.Tensor: Scalar loss value.
@@ -103,15 +146,38 @@ class CLPLLoss(nn.Module):
         return loss.mean()
 
 class TemperatureScaler(nn.Module):
-    """Post-hoc temperature scaling for probability calibration."""
+    """Learnable temperature scaling for calibration.
+
+    Attributes:
+        temperature (nn.Parameter): Temperature parameter.
+    """
     def __init__(self):
+        """Initialize the temperature parameter."""
         super().__init__()
         self.temperature = nn.Parameter(torch.ones(1) * 1.5)
 
     def forward(self, logits: torch.Tensor) -> torch.Tensor:
+        """Scale logits by the learned temperature.
+
+        Args:
+            logits (torch.Tensor): Model logits.
+
+        Returns:
+            torch.Tensor: Scaled logits.
+        """
         return logits / self.temperature
 
     def fit(self, logits_list: List[torch.Tensor], labels_list: List[torch.Tensor], device: str) -> float:
+        """Fit the temperature parameter using validation logits.
+
+        Args:
+            logits_list (List[torch.Tensor]): List of logits tensors.
+            labels_list (List[torch.Tensor]): List of label tensors.
+            device (str): Target device for optimization.
+
+        Returns:
+            float: Learned temperature value.
+        """
         self.to(device)
         optimizer = torch.optim.LBFGS([self.temperature], lr=0.01, max_iter=50)
         criterion = nn.CrossEntropyLoss().to(device)
@@ -120,6 +186,11 @@ class TemperatureScaler(nn.Module):
         labels_all = torch.cat(labels_list).detach()
 
         def _closure():
+            """LBFGS closure for temperature optimization.
+
+            Returns:
+                torch.Tensor: Loss value for the current temperature.
+            """
             optimizer.zero_grad()
             loss = criterion(logits_all / self.temperature, labels_all)
             loss.backward()
@@ -129,23 +200,65 @@ class TemperatureScaler(nn.Module):
         return float(self.temperature.item())
 
 class XGBoostStacker:
-    """Wrapper for XGBoost stacking with optional PCA."""
+    """XGBoost stacking model with optional PCA preprocessing.
+
+    Attributes:
+        params (Dict): XGBoost parameters.
+        model (xgb.XGBClassifier): Underlying classifier.
+        pca (Optional[PCA]): Optional PCA transformer.
+    """
     def __init__(self, params: Dict):
+        """Initialize the stacker with XGBoost parameters.
+
+        Args:
+            params (Dict): XGBoost parameter dictionary.
+        """
         self.params = params
         self.params["n_jobs"] = -1
         self.model = xgb.XGBClassifier(**self.params)
         self.pca: Optional[PCA] = None
 
     def fit_pca(self, X, n_components=0.95):
+        """Fit PCA on features and return transformed data.
+
+        Args:
+            X (Any): Input features.
+            n_components (float): Variance ratio or component count.
+
+        Returns:
+            Any: Transformed feature matrix.
+        """
         self.pca = PCA(n_components=n_components)
         return self.pca.fit_transform(X)
         
     def transform_pca(self, X):
+        """Transform features with PCA if fitted.
+
+        Args:
+            X (Any): Input features.
+
+        Returns:
+            Any: Transformed feature matrix.
+        """
         if self.pca is None: return X
         return self.pca.transform(X)
 
     def fit(self, X, y):
+        """Fit the XGBoost classifier.
+
+        Args:
+            X (Any): Training features.
+            y (Any): Target labels.
+        """
         self.model.fit(X, y)
 
     def predict(self, X):
+        """Predict labels using the trained classifier.
+
+        Args:
+            X (Any): Input features.
+
+        Returns:
+            Any: Predicted labels.
+        """
         return self.model.predict(X)

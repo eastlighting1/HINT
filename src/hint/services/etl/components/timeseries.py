@@ -4,21 +4,27 @@ from ....foundation.interfaces import PipelineComponent, Registry, TelemetryObse
 from ....domain.vo import ETLConfig
 
 class TimeSeriesAggregator(PipelineComponent):
-    """Aggregate time-series events into hourly vitals and labs.
+    """Aggregate time-series events into hourly features.
 
-    Reflects mimic-extract logic:
-    1. Handles schema inference and type casting for IDs.
-    2. Maps LabEvents via HADM_ID with a -6h to +0h lookback window.
-    3. Performs unit conversion (F->C, lbs->kg, etc.).
-    4. Applies variable range limits (outlier filtering).
+    Attributes:
+        cfg (ETLConfig): ETL configuration.
+        registry (Registry): Artifact registry.
+        observer (TelemetryObserver): Logging observer.
     """
     def __init__(self, config: ETLConfig, registry: Registry, observer: TelemetryObserver):
+        """Initialize the time-series aggregator.
+
+        Args:
+            config (ETLConfig): ETL configuration.
+            registry (Registry): Artifact registry.
+            observer (TelemetryObserver): Logging observer.
+        """
         self.cfg = config
         self.registry = registry
         self.observer = observer
 
     def execute(self) -> None:
-        """Build vitals and labs aggregates from raw events."""
+        """Run aggregation of chart and lab events."""
         raw_dir = Path(self.cfg.raw_dir)
         resources_dir = Path(self.cfg.resources_dir)
         proc_dir = Path(self.cfg.proc_dir)
@@ -59,6 +65,15 @@ class TimeSeriesAggregator(PipelineComponent):
         ]).select(["ICUSTAY_ID", "HADM_ID", "INTIME_DT", "OUTTIME_DT"]).unique(subset=["ICUSTAY_ID"])
 
         def process_events(table: str, time_col: str) -> pl.LazyFrame:
+            """Load and preprocess event tables into a lazy frame.
+
+            Args:
+                table (str): Table name.
+                time_col (str): Timestamp column name.
+
+            Returns:
+                pl.LazyFrame: Preprocessed lazy frame.
+            """
             fpath = raw_dir / f"{table.upper()}.csv.gz"
             if not fpath.exists(): 
                 fpath = raw_dir / f"{table.upper()}.csv"
@@ -196,7 +211,14 @@ class TimeSeriesAggregator(PipelineComponent):
 
     @staticmethod
     def _to_datetime_iso(col: str) -> pl.Expr:
-        """Helper to safely parse timestamps."""
+        """Parse a column into a UTC timestamp expression.
+
+        Args:
+            col (str): Column name.
+
+        Returns:
+            pl.Expr: Polars expression for timestamps.
+        """
         base = pl.col(col).str.to_datetime(time_unit="us", time_zone="UTC", strict=False)
         return pl.when(base.is_null() & pl.col(col).is_not_null()).then(
             pl.col(col).str.replace(r"Z$", "+00:00", literal=False).str.to_datetime(time_unit="us", time_zone="UTC", strict=False)

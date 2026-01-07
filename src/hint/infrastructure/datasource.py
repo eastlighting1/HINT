@@ -12,15 +12,13 @@ from ..foundation.dtos import TensorBatch
 from ..foundation.exceptions import DataError
 
 def _to_python_list(val: Any) -> List[str]:
-    """Normalize a value to a list of strings.
-
-    Handles numpy arrays, Python lists, and stringified list values.
+    """Normalize a value into a list of strings.
 
     Args:
-        val (Any): Input value to normalize.
+        val (Any): Raw value to convert.
 
     Returns:
-        List[str]: List of string tokens.
+        List[str]: Normalized list of strings.
     """
     if isinstance(val, np.ndarray):
         return val.tolist()
@@ -39,15 +37,15 @@ def _to_python_list(val: Any) -> List[str]:
     return []
 
 def custom_collate(batch, tokenizer, max_length):
-    """Batch ICD samples and optionally tokenize text fields.
+    """Custom collate function for ICD data with optional tokenization.
 
     Args:
-        batch (Any): Batch of sample dictionaries.
+        batch (Any): Batch items from the dataset.
         tokenizer (Any): Optional tokenizer instance.
-        max_length (int): Maximum token length.
+        max_length (Any): Maximum token length.
 
     Returns:
-        Any: Collated batch with optional tokenized fields.
+        Any: Collated batch dictionary.
     """
     nums, labs, lists, cands = zip(*[(b["num"], b["lab"], b["lst"], b["cand"]) for b in batch])
 
@@ -77,11 +75,24 @@ def custom_collate(batch, tokenizer, max_length):
     return bt
 
 class ICDDataset(Dataset):
-    """Dataset wrapper for numerical features and ICD code lists.
+    """Dataset wrapper for ICD tabular inputs.
 
-    Used by ICDService for legacy training and evaluation paths.
+    Attributes:
+        X (np.ndarray): Feature matrix.
+        y (np.ndarray): Target labels.
+        lst (list): List features for tokenization.
+        cand (list): Candidate indices per sample.
     """
     def __init__(self, df, feats, label_col, list_col, cand_col="candidate_indices"):
+        """Initialize the dataset from a dataframe.
+
+        Args:
+            df (Any): Input dataframe.
+            feats (Any): Feature column names.
+            label_col (Any): Label column name.
+            list_col (Any): List column name.
+            cand_col (Any): Candidate column name.
+        """
         self.X = df[feats].to_numpy(dtype=np.float32, copy=True)
         self.y = df[label_col].astype(np.int64).to_numpy()
         self.lst = df[list_col].tolist()
@@ -92,9 +103,18 @@ class ICDDataset(Dataset):
             self.cand = [[int(lbl)] for lbl in self.y]
 
     def __len__(self):
+        """Return the dataset length."""
         return len(self.y)
 
     def __getitem__(self, i):
+        """Return a single sample by index.
+
+        Args:
+            i (int): Sample index.
+
+        Returns:
+            Dict[str, Any]: Sample dictionary.
+        """
         num = torch.tensor(self.X[i], dtype=torch.float32)
                                          
         num = torch.nan_to_num(num, nan=0.0, posinf=0.0, neginf=0.0)
@@ -108,13 +128,13 @@ class ICDDataset(Dataset):
         }
 
 def collate_tensor_batch(batch: List[TensorBatch]) -> TensorBatch:
-    """Stack TensorBatch objects into a single batch.
+    """Collate a list of TensorBatch items into a single batch.
 
     Args:
-        batch (List[TensorBatch]): List of TensorBatch objects.
+        batch (List[TensorBatch]): List of TensorBatch instances.
 
     Returns:
-        TensorBatch: Stacked batch with optional dynamic fields.
+        TensorBatch: Batched TensorBatch instance.
     """
     x_num = torch.stack([b.x_num for b in batch])
     y = torch.stack([b.y for b in batch])
@@ -172,11 +192,18 @@ def collate_tensor_batch(batch: List[TensorBatch]) -> TensorBatch:
     return tb
 
 class ParquetSource(StreamingSource):
-    """Streaming source for parquet files.
+    """Streaming source for parquet datasets.
 
-    Used in legacy ICD paths and factory loading.
+    Attributes:
+        file_path (Path): Path to parquet file.
+        _df (Optional[pl.DataFrame]): Cached dataframe.
     """
     def __init__(self, file_path: Union[str, Path]):
+        """Initialize the parquet source.
+
+        Args:
+            file_path (Union[str, Path]): Parquet file path.
+        """
         self.file_path = Path(file_path)
         if not self.file_path.exists():
             if not self.file_path.is_absolute():
@@ -188,6 +215,11 @@ class ParquetSource(StreamingSource):
         self._df: Optional[pl.DataFrame] = None
         
     def load(self) -> pl.DataFrame:
+        """Load the parquet file into a dataframe.
+
+        Returns:
+            pl.DataFrame: Loaded dataframe.
+        """
         try:
             if self._df is None:
                 self._df = pl.read_parquet(self.file_path)
@@ -196,6 +228,11 @@ class ParquetSource(StreamingSource):
             raise DataError(f"Failed to load parquet file: {e}")
 
     def __iter__(self) -> Generator[Dict[str, Any], None, None]:
+        """Yield rows from the parquet file.
+
+        Returns:
+            Generator[Dict[str, Any], None, None]: Row dictionaries.
+        """
         try:
             if self._df is None:
                 self._df = pl.read_parquet(self.file_path)
@@ -205,11 +242,7 @@ class ParquetSource(StreamingSource):
             raise DataError(f"Failed to stream data: {e}")
 
     def __len__(self) -> int:
-        """Return the number of rows in the parquet file.
-
-        Returns:
-            int: Row count in the parquet file.
-        """
+        """Return the number of rows in the parquet file."""
         try:
             return pl.scan_parquet(self.file_path).select(pl.len()).collect().item()
         except Exception as e:
@@ -217,12 +250,22 @@ class ParquetSource(StreamingSource):
 
 
 class HDF5StreamingSource(Dataset):
-    """Optimized HDF5 source for ICD coding tasks.
+    """Streaming dataset backed by an HDF5 file.
 
-    Reads flat-schema HDF5 data, converts float16 to float32, computes
-    masks and deltas for GRU-D, and exposes PLL fields when available.
+    Attributes:
+        h5_path (Path): Path to the HDF5 file.
+        h5_file (Optional[h5py.File]): Open HDF5 handle.
+        _len (int): Cached dataset length.
+        label_key (str): Dataset key for labels.
     """
     def __init__(self, h5_path: Path, seq_len: int = 0, label_key: str = "y"):
+        """Initialize the HDF5 streaming source.
+
+        Args:
+            h5_path (Path): HDF5 file path.
+            seq_len (int): Optional sequence length.
+            label_key (str): Label dataset key.
+        """
         self.h5_path = Path(h5_path)
         self.h5_file: Optional[h5py.File] = None
         self._len = 0
@@ -240,16 +283,17 @@ class HDF5StreamingSource(Dataset):
             raise DataError(f"Failed to initialize HDF5 source: {e}")
 
     def __len__(self) -> int:
+        """Return the dataset length."""
         return self._len
 
     def _compute_delta(self, mask: torch.Tensor) -> torch.Tensor:
-        """Compute time intervals between observations.
+        """Compute time-since-last-observed deltas.
 
         Args:
-            mask (torch.Tensor): (Channels, Time) tensor with 1=observed, 0=missing.
+            mask (torch.Tensor): Observation mask.
 
         Returns:
-            torch.Tensor: (Channels, Time) delta tensor.
+            torch.Tensor: Delta tensor.
         """
         channels, seq_len = mask.shape
                                                 
@@ -270,6 +314,14 @@ class HDF5StreamingSource(Dataset):
         return torch.from_numpy(d_np)
 
     def __getitem__(self, idx: int) -> TensorBatch:
+        """Fetch a sample from the HDF5 file.
+
+        Args:
+            idx (int): Sample index.
+
+        Returns:
+            TensorBatch: Tensor batch for the sample.
+        """
         if self.h5_file is None:
             self.h5_file = h5py.File(self.h5_path, "r")
 
@@ -297,12 +349,9 @@ class HDF5StreamingSource(Dataset):
         
         y_val = self.h5_file[self.label_key][idx]
         
-        # [FIX] Check dimensions to handle both scalar labels (ICD) and time-series/vector labels (Ventilation)
         if y_val.ndim == 0:
-            # Scalar label for classification (e.g. ICD code index)
             y = torch.tensor(int(y_val), dtype=torch.long)
         else:
-            # Array label for regression or dense prediction (e.g. Ventilation mask)
             y = torch.from_numpy(y_val).float()
         
         sid = -1
@@ -346,6 +395,11 @@ class HDF5StreamingSource(Dataset):
         return tb
     
     def get_real_vocab_sizes(self) -> List[int]:
+        """Compute vocabulary sizes from categorical features.
+
+        Returns:
+            List[int]: List of vocabulary sizes.
+        """
         should_close = False
         if self.h5_file is None:
             self.h5_file = h5py.File(self.h5_path, "r")
@@ -357,12 +411,9 @@ class HDF5StreamingSource(Dataset):
             data = self.h5_file["X_cat"][:]
             if data.size == 0: return []
             
-            # [FIX] Dynamically handle 2D (Static) or 3D (Temporal) categorical features
             if data.ndim == 2:
-                # Shape: (Samples, Features) -> Max along axis 0
                 max_indices = np.max(data, axis=0)
             else:
-                # Shape: (Samples, Features, Time) -> Max along axis 0 and 2
                 max_indices = np.max(data, axis=(0, 2))
                 
             return [int(s) + 1 for s in max_indices]
@@ -370,6 +421,7 @@ class HDF5StreamingSource(Dataset):
             if should_close: self.close()
 
     def close(self):
+        """Close the open HDF5 file handle."""
         if self.h5_file is not None:
             self.h5_file.close()
             self.h5_file = None

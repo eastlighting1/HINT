@@ -10,16 +10,13 @@ from ....foundation.interfaces import PipelineComponent, Registry, TelemetryObse
 from ....domain.vo import ETLConfig, ICDConfig, CNNConfig
 
 def _to_python_list(val: Any) -> List[str]:
-    """Normalize mixed list representations into a Python list.
-
-    This helper handles arrays, lists, and stringified lists as encountered
-    in Parquet data sources.
+    """Normalize a value into a list of strings.
 
     Args:
-        val (Any): Raw value that may represent a list of strings.
+        val (Any): Raw value to convert.
 
     Returns:
-        List[str]: Parsed list of strings.
+        List[str]: Normalized list of strings.
     """
     if isinstance(val, np.ndarray):
         return val.tolist()
@@ -38,20 +35,26 @@ def _to_python_list(val: Any) -> List[str]:
     return []
 
 class LabelGenerator(PipelineComponent):
-    """Generate ventilation and ICD targets for downstream training tasks.
-
-    This component produces dynamic ventilation labels and static ICD labels
-    from the prepared feature dataset.
+    """Generate ventilation and ICD target labels.
 
     Attributes:
-        etl_cfg (ETLConfig): ETL settings.
-        icd_cfg (ICDConfig): ICD settings for ICD target generation.
-        cnn_cfg (CNNConfig): CNN settings for ventilation window sizing.
-        registry (Registry): Registry for artifact resolution.
-        observer (TelemetryObserver): Telemetry adapter for logging progress.
+        etl_cfg (ETLConfig): ETL configuration.
+        icd_cfg (ICDConfig): ICD configuration.
+        cnn_cfg (CNNConfig): CNN configuration.
+        registry (Registry): Artifact registry.
+        observer (TelemetryObserver): Logging observer.
     """
 
     def __init__(self, etl_config: ETLConfig, icd_config: ICDConfig, cnn_config: CNNConfig, registry: Registry, observer: TelemetryObserver):
+        """Initialize the label generator.
+
+        Args:
+            etl_config (ETLConfig): ETL configuration.
+            icd_config (ICDConfig): ICD configuration.
+            cnn_config (CNNConfig): CNN configuration.
+            registry (Registry): Artifact registry.
+            observer (TelemetryObserver): Logging observer.
+        """
         self.etl_cfg = etl_config
         self.icd_cfg = icd_config
         self.cnn_cfg = cnn_config
@@ -59,11 +62,7 @@ class LabelGenerator(PipelineComponent):
         self.observer = observer
 
     def execute(self) -> None:
-        """Run label generation for all downstream targets.
-
-        This method loads the feature dataset and writes both ventilation and
-        ICD label artifacts to the processed directory.
-        """
+        """Run label generation for ventilation and ICD targets."""
         proc_dir = Path(self.etl_cfg.proc_dir)
         if not proc_dir.exists():
             proc_dir.mkdir(parents=True, exist_ok=True)
@@ -80,11 +79,11 @@ class LabelGenerator(PipelineComponent):
         self._generate_icd_targets(ds, proc_dir)
 
     def _generate_vent_targets(self, ds: pl.DataFrame, proc_dir: Path) -> None:
-        """Generate sliding window labels for ventilation interventions.
+        """Generate ventilation targets and persist them.
 
         Args:
-            ds (pl.DataFrame): Feature dataset with ventilation flags.
-            proc_dir (Path): Output directory for target artifacts.
+            ds (pl.DataFrame): Feature dataset.
+            proc_dir (Path): Output directory.
         """
         self.observer.log("INFO", "LabelGenerator: Generating Zone 3 (Ventilation) targets")
         bounds = (
@@ -153,11 +152,11 @@ class LabelGenerator(PipelineComponent):
         self.observer.log("INFO", f"LabelGenerator: Saved Vent targets to {out_path} rows={final_labels.height}")
 
     def _generate_icd_targets(self, ds: pl.DataFrame, proc_dir: Path) -> None:
-        """Generate primary ICD targets per admission.
+        """Generate ICD targets and persist them.
 
         Args:
-            ds (pl.DataFrame): Feature dataset with ICD code lists.
-            proc_dir (Path): Output directory for target artifacts.
+            ds (pl.DataFrame): Feature dataset.
+            proc_dir (Path): Output directory.
         """
         self.observer.log("INFO", "LabelGenerator: Generating Zone 2 (ICD) targets")
 

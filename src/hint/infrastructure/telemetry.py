@@ -12,19 +12,31 @@ from ..foundation.interfaces import TelemetryObserver
 
 
 class RichTelemetryObserver(TelemetryObserver):
-    """Telemetry observer that logs to Rich and Hydra log files.
+    """Telemetry observer with Rich console and Loguru file output.
 
-    Emits terminal logs through Rich while mirroring the same messages to the
-    Hydra-managed log file via loguru without creating a new file.
+    This implementation logs structured messages to the console and
+    a Hydra-managed log file when available.
+
+    Attributes:
+        console (Console): Rich console instance.
+        metrics (Dict[str, list]): Collected metrics keyed by name.
+        console_logger (logging.Logger): Console logger with Rich handler.
+        file_logger (Any): Loguru logger bound to the hint channel.
     """
 
     def __init__(self) -> None:
+        """Initialize console and file loggers."""
         self.console = Console()
         self.metrics: Dict[str, list] = {}
         self.console_logger = self._build_console_logger()
         self.file_logger = self._build_file_logger()
 
     def _build_console_logger(self) -> logging.Logger:
+        """Create a Rich-enabled console logger.
+
+        Returns:
+            logging.Logger: Configured console logger.
+        """
         logger = logging.getLogger("hint.console")
         logger.handlers.clear()
         logger.setLevel(logging.INFO)
@@ -40,6 +52,11 @@ class RichTelemetryObserver(TelemetryObserver):
         return logger
 
     def _resolve_hydra_log_file(self) -> Optional[Path]:
+        """Resolve the Hydra-managed log file path if present.
+
+        Returns:
+            Optional[Path]: Path to a log file when found, otherwise None.
+        """
         try:
             hydra_cfg = HydraConfig.get()
             output_dir = Path(hydra_cfg.runtime.output_dir)
@@ -57,6 +74,11 @@ class RichTelemetryObserver(TelemetryObserver):
         return None
 
     def _build_file_logger(self):
+        """Create a Loguru logger bound to the hint channel.
+
+        Returns:
+            Any: Loguru logger instance bound with a channel field.
+        """
         loguru_logger.remove()
         log_path = self._resolve_hydra_log_file()
         if log_path is not None:
@@ -69,21 +91,34 @@ class RichTelemetryObserver(TelemetryObserver):
         return loguru_logger.bind(channel="hint")
 
     def log(self, level: str, message: str) -> None:
+        """Record a message to console and file loggers.
+
+        Args:
+            level (str): Logging level name.
+            message (str): Log message content.
+        """
         normalized = level.upper()
         self.console_logger.log(getattr(logging, normalized, logging.INFO), message)
         self.file_logger.log(normalized, message)
 
     def track_metric(self, name: str, value: float, step: int) -> None:
+        """Store a metric value for later inspection.
+
+        Args:
+            name (str): Metric name.
+            value (float): Metric value.
+            step (int): Step index.
+        """
         if name not in self.metrics:
             self.metrics[name] = []
         self.metrics[name].append({"step": step, "value": value})
 
     def create_progress(self, desc: str, total: int) -> Progress:
-        """Create a Rich progress display for multi-step tasks.
+        """Create a Rich progress bar for long-running tasks.
 
         Args:
-            desc (str): Description to show in the progress header.
-            total (int): Number of steps in the task.
+            desc (str): Task description.
+            total (int): Total progress count.
 
         Returns:
             Progress: Configured Rich progress instance.

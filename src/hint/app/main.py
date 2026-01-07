@@ -2,7 +2,11 @@ import sys
 from hint.app.factory import AppFactory
 
 def main() -> None:
-    """Run the application based on the configured mode."""
+    """Run the application entry point based on configured mode.
+
+    This function builds the application factory and executes ETL,
+    ICD training, and intervention training stages as requested.
+    """
     factory = AppFactory()
     mode = factory.ctx.mode
     logged_start = False

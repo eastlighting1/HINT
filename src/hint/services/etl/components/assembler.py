@@ -6,26 +6,33 @@ from ....domain.vo import ETLConfig
 
 
 class FeatureAssembler(PipelineComponent):
-    """Assemble hourly features from vitals, interventions, and static data.
+    """Assemble feature tables for downstream modeling.
 
-    This component assumes that upstream components (StaticExtractor, TimeSeriesAggregator,
-    OutcomesBuilder, VentilationTagger) have successfully generated the required parquet artifacts.
-    It applies lazy loading, cohort-restricted label normalization, and early joins to reduce overhead.
+    Attributes:
+        cfg (ETLConfig): ETL configuration.
+        registry (Registry): Artifact registry.
+        observer (TelemetryObserver): Logging observer.
     """
 
     def __init__(self, config: ETLConfig, registry: Registry, observer: TelemetryObserver):
+        """Initialize the feature assembler.
+
+        Args:
+            config (ETLConfig): ETL configuration.
+            registry (Registry): Artifact registry.
+            observer (TelemetryObserver): Logging observer.
+        """
         self.cfg = config
         self.registry = registry
         self.observer = observer
 
     def execute(self) -> None:
-        """Create the feature parquet used by downstream labeling and modeling."""
+        """Run feature assembly for static and dynamic inputs."""
         proc_dir = Path(self.cfg.proc_dir)
         raw_dir = Path(self.cfg.raw_dir)
         
         proc_dir.mkdir(parents=True, exist_ok=True)
 
-        # 1. Check all upstream dependencies upfront
         patients_path = proc_dir / self.cfg.artifacts.patients_file
         vitals_path = proc_dir / self.cfg.artifacts.vitals_mean_file
         interventions_path = proc_dir / self.cfg.artifacts.interventions_file
@@ -44,7 +51,6 @@ class FeatureAssembler(PipelineComponent):
             self.observer.log("ERROR", error_msg)
             raise FileNotFoundError(error_msg)
 
-        # 2. Load Cohort (Patients)
         self.observer.log("INFO", f"FeatureAssembler: Stage 1/6 loading cohort from {patients_path}")
         patients = pl.read_parquet(patients_path).with_columns(
             [
@@ -74,13 +80,11 @@ class FeatureAssembler(PipelineComponent):
         )
         self.observer.log("INFO", f"FeatureAssembler: Stage 1/6 cohort filters complete stays={pat.height}")
 
-        # 3. Load Vitals & Interventions
         vitals_lazy = pl.scan_parquet(vitals_path)
         
         self.observer.log("INFO", "FeatureAssembler: Stage 2/6 loading interventions and vitals sources")
         interventions = pl.read_parquet(interventions_path)
 
-        # 4. Resolve ICD9 Codes
         self.observer.log("INFO", "FeatureAssembler: Stage 3/6 resolving ICD9 source")
         cand = raw_dir / "DIAGNOSES_ICD.csv"
         if not cand.exists() and (raw_dir / "DIAGNOSES_ICD.csv.gz").exists():
@@ -106,29 +110,30 @@ class FeatureAssembler(PipelineComponent):
             self.observer.log("WARNING", "FeatureAssembler: DIAGNOSES_ICD source not found. Using empty ICD codes.")
             icd9 = patients.select(["SUBJECT_ID", "HADM_ID"]).unique().with_columns(pl.lit([]).cast(pl.List(pl.Utf8)).alias("ICD9_CODES"))
 
-        # 5. Prepare Vitals Pivot
         self.observer.log("INFO", "FeatureAssembler: Stage 4/6 preparing vitals pivot")
         
-        # [FIX] Helper function for consistent normalization (pure python implementation for config list)
         def normalize_name_py(s: str) -> str:
+            """Normalize a string for column naming.
+
+            Args:
+                s (str): Raw string input.
+
+            Returns:
+                str: Normalized string.
+            """
             s = s.lower()
             s = re.sub(r"[^a-z0-9]+", "_", s)
             s = re.sub(r"^_+|_+$", "", s)
             return s
 
-        # [FIX] Normalize Config Variables to match Data (Space -> Underscore)
         target_vars = set([normalize_name_py(s) for s in self.cfg.exact_level2_104])
         
-        # [FIX] Join on ICUSTAY_ID only, without secondary varmap join
-        # We assume upstream (TimeSeriesAggregator) has already mapped items to LEVEL2 names in the LABEL column.
         vitals_filtered = vitals_lazy.rename({"HOURS_IN": "HOUR_IN"}).join(
             pat.select(["SUBJECT_ID", "HADM_ID", "ICUSTAY_ID"]).lazy(),
             on="ICUSTAY_ID",
             how="inner"
         )
         
-        # [FIX] Direct normalization of parquet LABEL column using Polars expressions
-        # This aligns the data's 'Heart Rate' -> 'heart_rate' with the config's 'heart rate' -> 'heart_rate'
         vitals_norm = (
             vitals_filtered
             .with_columns(
@@ -154,43 +159,31 @@ class FeatureAssembler(PipelineComponent):
             self.observer.log("WARNING", "FeatureAssembler: No matching vitals found after normalization. Check 'exact_level2_104' config.")
             vl_wide = pat.select(["SUBJECT_ID", "HADM_ID", "ICUSTAY_ID"]).with_columns(pl.lit(0).alias("HOUR_IN"))
 
-        # 6. Align Vitals Columns
         self.observer.log("INFO", "FeatureAssembler: Stage 5/6 aligning vitals columns and names")
         
-        # Ensure all columns exist, even if missing in data batch
         v_cols_raw = [normalize_name_py(n) for n in self.cfg.exact_level2_104]
         for col_name in v_cols_raw:
             if col_name not in vl_wide.columns:
                 vl_wide = vl_wide.with_columns(pl.lit(None).cast(pl.Float64).alias(col_name))
 
-        # Rename to standardized V__ prefix
         rename_map = {c: f"V__{c}" for c in vl_wide.columns if c not in ["SUBJECT_ID", "HADM_ID", "ICUSTAY_ID", "HOUR_IN"]}
         vl_wide = vl_wide.rename(rename_map)
 
-        # Select columns in strict order
         v_cols = [f"V__{normalize_name_py(n)}" for n in self.cfg.exact_level2_104]
         vl_wide = vl_wide.select(["SUBJECT_ID", "HADM_ID", "ICUSTAY_ID", "HOUR_IN"] + v_cols)
 
-        # ==============================================================================
-        # [IMPUTATION FIX] Thesis 3.2.2 Data Preprocessing (p.18)
-        # "Forward fill first, then Median (or 0) for remaining missing values."
-        # ==============================================================================
         self.observer.log("INFO", "FeatureAssembler: Applying Imputation (Forward-Fill -> Zero-Fill) as per Thesis p.18")
 
-        # 1. Sort by ID and Time to ensure correct Forward Fill
         vl_wide = vl_wide.sort(["ICUSTAY_ID", "HOUR_IN"])
 
-        # 2. Forward Fill: Propagate last valid observation within the same ICU stay
         vl_wide = vl_wide.with_columns([
             pl.col(c).forward_fill().over("ICUSTAY_ID") for c in v_cols
         ])
 
-        # 3. Zero Fill (Fallback): Fill remaining nulls (start of stay or completely missing features) with 0.0
         vl_wide = vl_wide.with_columns([
             pl.col(c).fill_null(0.0) for c in v_cols
         ])
 
-        # 7. Join Static & Interventions
         self.observer.log("INFO", "FeatureAssembler: Stage 6/6 joining static and intervention features")
         
         vent_df = interventions.select(["SUBJECT_ID", "HADM_ID", "ICUSTAY_ID", "HOUR_IN", "VENT", "OUTCOME_FLAG"])
@@ -215,6 +208,17 @@ class FeatureAssembler(PipelineComponent):
         )
 
         def one_hot_fixed(df, col, levels, prefix):
+            """Create fixed one-hot columns for a categorical field.
+
+            Args:
+                df (Any): Input dataframe.
+                col (Any): Column name to encode.
+                levels (Any): Fixed set of category levels.
+                prefix (Any): Prefix for output columns.
+
+            Returns:
+                Any: Dataframe with one-hot columns.
+            """
             d = df.select([pl.col(col)]).to_dummies(columns=[col])
             for lv in levels:
                 cname = f"{col}_{lv}"

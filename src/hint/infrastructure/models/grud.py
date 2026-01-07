@@ -5,8 +5,31 @@ from typing import Optional
 from ..networks import BaseICDClassifier
 
 class GRUDClassifier(BaseICDClassifier):
-    """GRU-D classifier for time-series with missingness handling."""
+    """GRU-D classifier for irregular time-series data.
+
+    Attributes:
+        hidden_dim (int): Hidden state dimension.
+        input_dim (int): Input feature dimension.
+        w_gamma_x (nn.Parameter): Input decay weights.
+        b_gamma_x (nn.Parameter): Input decay bias.
+        lin_gamma_h (nn.Linear): Hidden decay projection.
+        z_layer (nn.Linear): Update gate projection.
+        r_layer (nn.Linear): Reset gate projection.
+        h_layer (nn.Linear): Candidate state projection.
+        fc (nn.Linear): Output projection to class logits.
+        dropout (nn.Dropout): Dropout layer.
+    """
     def __init__(self, num_classes: int, input_dim: int, seq_len: int, hidden_dim: int = 64, dropout: float = 0.3, **kwargs):
+        """Initialize the GRU-D classifier.
+
+        Args:
+            num_classes (int): Number of output classes.
+            input_dim (int): Input feature dimension.
+            seq_len (int): Sequence length.
+            hidden_dim (int): Hidden dimension.
+            dropout (float): Dropout probability.
+            **kwargs (Any): Additional model arguments.
+        """
         super().__init__(num_classes, input_dim, seq_len, dropout=dropout, **kwargs)
         self.hidden_dim = hidden_dim
         self.input_dim = input_dim
@@ -29,6 +52,7 @@ class GRUDClassifier(BaseICDClassifier):
         self._init_parameters()
 
     def _init_parameters(self):
+        """Initialize GRU-D parameters."""
         nn.init.xavier_uniform_(self.z_layer.weight)
         nn.init.xavier_uniform_(self.r_layer.weight)
         nn.init.xavier_uniform_(self.h_layer.weight)
@@ -39,16 +63,19 @@ class GRUDClassifier(BaseICDClassifier):
                 mask: Optional[torch.Tensor] = None, 
                 delta: Optional[torch.Tensor] = None, 
                 **kwargs) -> torch.Tensor:
-        """Run the GRU-D forward pass.
+        """Run the forward pass for irregular time-series data.
 
         Args:
-            x_num (Optional[torch.Tensor]): (Batch, Channels, Time) input tensor.
-            mask (Optional[torch.Tensor]): (Batch, Channels, Time) observation mask.
-            delta (Optional[torch.Tensor]): (Batch, Channels, Time) time gaps.
-            **kwargs: Unused extra inputs for interface compatibility.
+            x_num (Optional[torch.Tensor]): Numeric input features.
+            mask (Optional[torch.Tensor]): Observation mask.
+            delta (Optional[torch.Tensor]): Time gaps since last observation.
+            **kwargs (Any): Additional model inputs.
 
         Returns:
-            torch.Tensor: Logits for each class.
+            torch.Tensor: Class logits.
+
+        Raises:
+            ValueError: If x_num is not provided.
         """
         if x_num is None: 
             raise ValueError("GRU-D requires x_num")

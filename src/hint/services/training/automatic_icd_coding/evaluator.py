@@ -10,6 +10,16 @@ from ....domain.vo import ICDConfig
 from ....foundation.dtos import TensorBatch
 
 class ICDEvaluator(BaseEvaluator):
+    """Evaluator for ICD model validation and testing.
+
+    This evaluator runs inference on data loaders and reports accuracy
+    and related metrics, with optional label masking.
+
+    Attributes:
+        cfg (ICDConfig): ICD configuration.
+        entity (ICDModelEntity): Model entity wrapper.
+        ignored_indices (List[int]): Label indices to exclude from scoring.
+    """
     def __init__(
         self, 
         config: ICDConfig, 
@@ -19,14 +29,29 @@ class ICDEvaluator(BaseEvaluator):
         device,
         ignored_indices: Optional[List[int]] = None
     ):
+        """Initialize the evaluator with config and model entity.
+
+        Args:
+            config (ICDConfig): ICD configuration.
+            entity (ICDModelEntity): Model entity wrapper.
+            registry (Any): Artifact registry.
+            observer (Any): Logging observer.
+            device (Any): Target device.
+            ignored_indices (Optional[List[int]]): Labels to ignore.
+        """
         super().__init__(registry, observer, device)
         self.cfg = config
         self.entity = entity
         self.ignored_indices = ignored_indices if ignored_indices else []
 
     def _prepare_inputs(self, batch: TensorBatch) -> Dict[str, torch.Tensor]:
-        """
-        Duplicate of _prepare_inputs from Trainer to ensure standalone functionality.
+        """Prepare model inputs from a TensorBatch.
+
+        Args:
+            batch (TensorBatch): Batch of features and labels.
+
+        Returns:
+            Dict[str, torch.Tensor]: Input tensors for the model.
         """
         inputs = {}
         inputs["x_num"] = batch.x_num.to(self.device).float()
@@ -52,6 +77,14 @@ class ICDEvaluator(BaseEvaluator):
         return inputs
 
     def evaluate(self, dataloader: DataLoader) -> Dict[str, float]:
+        """Run evaluation on a dataloader and return metrics.
+
+        Args:
+            dataloader (DataLoader): Data loader with evaluation data.
+
+        Returns:
+            Dict[str, float]: Aggregated evaluation metrics.
+        """
         self.entity.model.eval()
         self.observer.log("INFO", "ICDEvaluator: Starting validation/test pass.")
         

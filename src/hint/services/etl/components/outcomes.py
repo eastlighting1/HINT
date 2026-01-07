@@ -5,18 +5,28 @@ from ....foundation.interfaces import PipelineComponent, Registry, TelemetryObse
 from ....domain.vo import ETLConfig
 
 class OutcomesBuilder(PipelineComponent):
-    """Generate the dense intervention skeleton (time grid) for each patient.
-    
-    Instead of relying on sparse OUTPUTEVENTS, this builds a continuous hourly grid 
-    (0 to STAY_HOURS) for every patient in the cohort, initializing outcome flags to 0.
+    """Build the dense hourly outcomes skeleton.
+
+    Attributes:
+        cfg (ETLConfig): ETL configuration.
+        registry (Registry): Artifact registry.
+        observer (TelemetryObserver): Logging observer.
     """
 
     def __init__(self, config: ETLConfig, registry: Registry, observer: TelemetryObserver):
+        """Initialize the outcomes builder.
+
+        Args:
+            config (ETLConfig): ETL configuration.
+            registry (Registry): Artifact registry.
+            observer (TelemetryObserver): Logging observer.
+        """
         self.cfg = config
         self.registry = registry
         self.observer = observer
 
     def execute(self) -> None:
+        """Generate and persist the outcomes skeleton."""
         proc_dir = Path(self.cfg.proc_dir)
         patients_path = proc_dir / self.cfg.artifacts.patients_file
 

@@ -3,11 +3,26 @@ import torch.nn as nn
 from typing import Optional, Union, Sequence, List
 
 class BaseICDClassifier(nn.Module):
-    """Abstract base class for ICD classifiers.
+    """Base class for ICD classification networks.
 
-    Standardizes inputs for text tokens and time-series features.
+    This class stores core configuration fields used by ICD classifiers.
+
+    Attributes:
+        num_classes (int): Number of output classes.
+        input_dim (int): Number of input features.
+        seq_len (int): Sequence length for time-series input.
+        dropout_val (float): Dropout probability.
     """
     def __init__(self, num_classes: int, input_dim: int, seq_len: int, dropout: float = 0.3, **kwargs):
+        """Initialize common classifier metadata.
+
+        Args:
+            num_classes (int): Number of output classes.
+            input_dim (int): Number of input features.
+            seq_len (int): Sequence length for time-series input.
+            dropout (float): Dropout probability.
+            **kwargs (Any): Additional model arguments.
+        """
         super().__init__()
         self.num_classes = num_classes
         self.input_dim = input_dim
@@ -19,37 +34,38 @@ class BaseICDClassifier(nn.Module):
                 x_num: Optional[torch.Tensor] = None,
                 return_embeddings: bool = False,
                 **kwargs) -> torch.Tensor:
-        """Run the forward pass for classification.
+        """Run the classifier forward pass.
 
         Args:
-            input_ids (Optional[torch.Tensor]): Token ids for text inputs.
-            attention_mask (Optional[torch.Tensor]): Attention mask for text tokens.
-            x_num (Optional[torch.Tensor]): Time-series input shaped (Batch, Channels, Time).
-            return_embeddings (bool): Whether to return embeddings instead of logits.
-            **kwargs: Additional model-specific inputs.
+            input_ids (Optional[torch.Tensor]): Optional token IDs.
+            attention_mask (Optional[torch.Tensor]): Optional attention mask.
+            x_num (Optional[torch.Tensor]): Optional numeric features.
+            return_embeddings (bool): Whether to return embeddings.
+            **kwargs (Any): Additional model inputs.
 
         Returns:
-            torch.Tensor: Model logits or embeddings, depending on configuration.
+            torch.Tensor: Model outputs or logits.
         """
         raise NotImplementedError
 
 def get_network_class(model_name: str) -> type:
-    """Resolve a model class by name.
+    """Resolve a model name to its network class.
 
     Args:
-        model_name (str): Model identifier from configuration.
+        model_name (str): Name of the model architecture.
 
     Returns:
-        type: Model class matching the name.
+        type: Network class for the requested model.
+
+    Raises:
+        ValueError: If the model name is unknown.
     """
-                                 
     from .models.medbert import MedBERTClassifier
     from .models.grud import GRUDClassifier
     from .models.tst import TSTClassifier
-    from .models.latent_ode import LatentODEClassifier    
+    from .models.latent_ode import LatentODEClassifier     
     from .models.itransformer import iTransformerClassifier
     
-                              
     from .models.tabnet import TabNetICD
     from .models.dcn_v2 import DCNv2ICD
     from .models.ft_transformer import FTTransformerICD
@@ -69,12 +85,33 @@ def get_network_class(model_name: str) -> type:
         raise ValueError(f"Model {model_name} not found. Options: {list(mapping.keys())}")
     return mapping[model_name]
 
-                                                                               
-                                                         
-                                                                               
 
 class DilatedResidualBlock(nn.Module):
+    """Residual block with dilated temporal convolutions.
+
+    Attributes:
+        conv1 (nn.Conv1d): First dilated convolution.
+        bn1 (nn.BatchNorm1d): Batch norm after conv1.
+        relu1 (nn.ReLU): Activation for conv1 output.
+        drop1 (nn.Dropout): Dropout after conv1.
+        conv2 (nn.Conv1d): Second dilated convolution.
+        bn2 (nn.BatchNorm1d): Batch norm after conv2.
+        relu2 (nn.ReLU): Activation for conv2 output.
+        drop2 (nn.Dropout): Dropout after conv2.
+        shortcut (Optional[nn.Conv1d]): Projection for residual path.
+        relu_out (nn.ReLU): Final activation.
+    """
     def __init__(self, in_c: int, out_c: int, kernel: int, stride: int, dilation: int, dropout: float) -> None:
+        """Initialize the dilated residual block.
+
+        Args:
+            in_c (int): Input channel count.
+            out_c (int): Output channel count.
+            kernel (int): Convolution kernel size.
+            stride (int): Convolution stride.
+            dilation (int): Dilation factor.
+            dropout (float): Dropout probability.
+        """
         super().__init__()
         padding = (kernel - 1) * dilation
         self.conv1 = nn.Conv1d(in_c, out_c, kernel, stride=stride, padding=padding, dilation=dilation, bias=False)
@@ -89,6 +126,14 @@ class DilatedResidualBlock(nn.Module):
         self.relu_out = nn.ReLU()
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
+        """Apply residual block transformation.
+
+        Args:
+            x (torch.Tensor): Input tensor of shape [B, C, T].
+
+        Returns:
+            torch.Tensor: Output tensor with matching temporal length.
+        """
         identity = x if self.shortcut is None else self.shortcut(x)
         out = self.conv1(x)[..., : x.size(2)]
         out = self.relu1(self.bn1(out))
@@ -100,11 +145,48 @@ class DilatedResidualBlock(nn.Module):
         return self.relu_out(out)
 
 class GFINet_CNN(nn.Module):
+    """Temporal CNN model for intervention prediction.
+
+    This network combines numeric time-series, categorical embeddings,
+    and optional ICD features into a shared prediction head.
+
+    Attributes:
+        embed_dim (int): Embedding dimension for numeric branch.
+        numeric_branch (nn.Module): TCN stack for numeric features.
+        cat_embeddings (nn.ModuleList): Embeddings for categorical inputs.
+        cat_branches (nn.ModuleList): TCN stacks for categorical inputs.
+        icd_dim (int): ICD feature dimensionality.
+        icd_projector (Optional[nn.Module]): Projection for ICD features.
+        head (nn.Module): Prediction head.
+    """
     def __init__(self, in_chs: Union[int, Sequence[int]], n_cls: int, vocab_sizes: List[int], icd_dim: int = 0, embed_dim: int = 128, cat_embed_dim: int = 32, head_drop: float = 0.3, tcn_drop: float = 0.2, kernel: int = 5, layers: int = 5) -> None:
+        """Initialize the intervention CNN model.
+
+        Args:
+            in_chs (Union[int, Sequence[int]]): Numeric input channel counts.
+            n_cls (int): Number of output classes.
+            vocab_sizes (List[int]): Vocabulary sizes for categorical inputs.
+            icd_dim (int): ICD feature dimensionality.
+            embed_dim (int): Numeric embedding dimension.
+            cat_embed_dim (int): Categorical embedding dimension.
+            head_drop (float): Dropout for the head layer.
+            tcn_drop (float): Dropout for TCN blocks.
+            kernel (int): TCN kernel size.
+            layers (int): Number of TCN layers.
+        """
         super().__init__()
         self.embed_dim = embed_dim
         dilations = [2**i for i in range(layers)]
         def build_tcn_stack(in_dim: int, out_dim: int) -> nn.Sequential:
+            """Build a temporal convolution stack.
+
+            Args:
+                in_dim (int): Input channel count.
+                out_dim (int): Output channel count.
+
+            Returns:
+                nn.Sequential: TCN stack module.
+            """
             base: List[nn.Module] = [nn.Sequential(nn.Conv1d(in_dim, out_dim, 1), nn.BatchNorm1d(out_dim), nn.ReLU())]
             for d in dilations: base.append(DilatedResidualBlock(out_dim, out_dim, kernel, 1, d, tcn_drop))
             return nn.Sequential(*base)
@@ -125,15 +207,32 @@ class GFINet_CNN(nn.Module):
         self.head = nn.Sequential(nn.Linear(total_feature_dim, total_feature_dim // 2), nn.ReLU(), nn.Dropout(head_drop), nn.Linear(total_feature_dim // 2, n_cls))
 
     def forward(self, x_num: torch.Tensor, x_cat: torch.Tensor, x_icd: Optional[torch.Tensor] = None) -> torch.Tensor:
+        """Run the forward pass for intervention prediction.
+
+        Args:
+            x_num (torch.Tensor): Numeric time-series inputs.
+            x_cat (torch.Tensor): Categorical time-series inputs.
+            x_icd (Optional[torch.Tensor]): Optional ICD feature vector.
+
+        Returns:
+            torch.Tensor: Class logits for intervention prediction.
+        """
         num_out = self.numeric_branch(x_num)
         num_pool = num_out[:, :, -1] 
         cat_pool_list = []
+        
         if x_cat is not None and len(self.cat_embeddings) > 0:
             for i, (emb, branch) in enumerate(zip(self.cat_embeddings, self.cat_branches)):
-                feat = x_cat[:, i, :]
-                x_emb = emb(feat).permute(0, 2, 1)
-                cat_out = branch(x_emb)
-                cat_pool_list.append(cat_out[:, :, -1])
+                if x_cat.dim() == 2:
+                    feat = x_cat[:, i]
+                    x_emb = emb(feat)
+                    cat_pool_list.append(x_emb)
+                else:
+                    feat = x_cat[:, i, :]
+                    x_emb = emb(feat).permute(0, 2, 1)
+                    cat_out = branch(x_emb)
+                    cat_pool_list.append(cat_out[:, :, -1])
+
         icd_feat = None
         if self.icd_projector is not None and x_icd is not None: icd_feat = self.icd_projector(x_icd)
         feats = [num_pool] + cat_pool_list

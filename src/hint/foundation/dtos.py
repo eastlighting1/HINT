@@ -5,10 +5,17 @@ from hint.domain.vo import ETLConfig, ICDConfig, CNNConfig
 
 @dataclass
 class AppContext:
-    """Runtime configuration container for the application.
+    """Container for resolved application configuration.
 
-    Aggregates ETL, ICD, and CNN configuration objects alongside run mode
-    and seed settings for service initialization.
+    This dataclass bundles ETL, ICD, and CNN configuration objects along
+    with runtime mode and seed values.
+
+    Attributes:
+        etl (ETLConfig): ETL configuration values.
+        icd (ICDConfig): ICD training configuration values.
+        cnn (CNNConfig): Intervention model configuration values.
+        mode (str): Execution mode for the application.
+        seed (int): Random seed for reproducibility.
     """
     etl: ETLConfig
     icd: ICDConfig
@@ -18,21 +25,21 @@ class AppContext:
 
 @dataclass
 class TensorBatch:
-    """Unified tensor batch for training and evaluation.
+    """Bundle of tensor inputs and targets for model execution.
 
-    Bundles numerical features, optional categorical features, and labels,
-    with optional fields for partial-label learning and text inputs.
+    This dataclass groups dynamic features, static features, and labels
+    to simplify device transfers and data loading.
 
     Attributes:
-        x_num (torch.Tensor): Numerical feature tensor.
-        x_cat (Optional[torch.Tensor]): Categorical feature tensor.
-        y (torch.Tensor): Target labels tensor.
-        ids (Optional[torch.Tensor]): Optional sample identifiers.
-        mask (Optional[torch.Tensor]): Optional observation mask tensor.
-        x_icd (Optional[torch.Tensor]): Optional ICD-related features.
-        input_ids (Optional[torch.Tensor]): Optional token ids for text inputs.
-        attention_mask (Optional[torch.Tensor]): Optional attention mask.
-        candidates (Optional[torch.Tensor]): Optional candidate label indices.
+        x_num (torch.Tensor): Numeric time-series features.
+        x_cat (Optional[torch.Tensor]): Categorical time-series features.
+        y (torch.Tensor): Target labels.
+        ids (Optional[torch.Tensor]): Optional identifier tensor.
+        mask (Optional[torch.Tensor]): Optional attention or padding mask.
+        x_icd (Optional[torch.Tensor]): Optional ICD embedding features.
+        input_ids (Optional[torch.Tensor]): Token IDs for static text.
+        attention_mask (Optional[torch.Tensor]): Attention mask for tokens.
+        candidates (Optional[torch.Tensor]): Optional candidate indices.
     """
     x_num: torch.Tensor
     x_cat: Optional[torch.Tensor]
@@ -46,13 +53,16 @@ class TensorBatch:
     candidates: Optional[torch.Tensor] = None
     
     def to(self, device: str) -> 'TensorBatch':
-        """Move all available tensors in the batch to a target device.
+        """Move all tensors in the batch to the requested device.
+
+        This method returns a new TensorBatch with all non-null tensors
+        moved to the given device.
 
         Args:
-            device (str): Device identifier such as "cpu" or "cuda".
+            device (str): Target device identifier.
 
         Returns:
-            TensorBatch: New batch instance with tensors moved to the device.
+            TensorBatch: New batch with tensors on the target device.
         """
         return TensorBatch(
             x_num=self.x_num.to(device),
@@ -68,9 +78,16 @@ class TensorBatch:
 
 @dataclass
 class PredictionResult:
-    """Container for prediction outputs.
+    """Result container for model predictions.
 
-    Stores logits, probabilities, predicted labels, and optional targets.
+    This dataclass carries raw logits, probabilities, and discrete
+    predictions with optional targets for evaluation.
+
+    Attributes:
+        logits (torch.Tensor): Raw model outputs.
+        probs (torch.Tensor): Post-processed probabilities.
+        preds (torch.Tensor): Final predicted labels.
+        targets (Optional[torch.Tensor]): Optional ground-truth labels.
     """
     logits: torch.Tensor
     probs: torch.Tensor

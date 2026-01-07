@@ -6,13 +6,36 @@ from ....domain.vo import CNNConfig
 from ....infrastructure.components import FocalLoss
 
 class InterventionTrainer(BaseTrainer):
+    """Trainer for intervention prediction models.
+
+    Attributes:
+        cfg (CNNConfig): Training configuration.
+        entity (InterventionModelEntity): Model entity wrapper.
+        loss_fn (nn.Module): Loss function.
+    """
     def __init__(self, config: CNNConfig, entity: InterventionModelEntity, registry, observer, device):
+        """Initialize the intervention trainer.
+
+        Args:
+            config (CNNConfig): Training configuration.
+            entity (InterventionModelEntity): Model entity wrapper.
+            registry (Any): Artifact registry.
+            observer (Any): Logging observer.
+            device (Any): Target device.
+        """
         super().__init__(registry, observer, device)
         self.cfg = config
         self.entity = entity
         self.loss_fn = FocalLoss(gamma=self.cfg.focal_gamma, label_smoothing=self.cfg.label_smoothing).to(device)
 
     def train(self, train_loader: DataLoader, val_loader: DataLoader, evaluator: BaseEvaluator) -> None:
+        """Run the training loop with periodic evaluation.
+
+        Args:
+            train_loader (DataLoader): Training data loader.
+            val_loader (DataLoader): Validation data loader.
+            evaluator (BaseEvaluator): Evaluator instance.
+        """
         self.entity.to(self.device)
         self.entity.network.train()
         
@@ -44,6 +67,13 @@ class InterventionTrainer(BaseTrainer):
         self.observer.log("INFO", f"InterventionTrainer: Training complete with best validation accuracy {self.entity.best_metric:.4f}.")
 
     def _train_epoch(self, epoch: int, loader: DataLoader, optimizer: torch.optim.Optimizer) -> None:
+        """Train for a single epoch.
+
+        Args:
+            epoch (int): Epoch index.
+            loader (DataLoader): Training data loader.
+            optimizer (torch.optim.Optimizer): Optimizer instance.
+        """
         self.entity.network.train()
         total_loss = 0.0
         steps = 0

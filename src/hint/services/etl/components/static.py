@@ -4,17 +4,28 @@ from ....foundation.interfaces import PipelineComponent, Registry, TelemetryObse
 from ....domain.vo import ETLConfig
 
 class StaticExtractor(PipelineComponent):
-    """Extract static patient attributes from MIMIC tables.
+    """Extract static cohort features from raw CSV files.
 
-    Parses ICU stays, admissions, and patient demographics into a cohort table.
+    Attributes:
+        cfg (ETLConfig): ETL configuration.
+        registry (Registry): Artifact registry.
+        observer (TelemetryObserver): Logging observer.
     """
 
     def __init__(self, config: ETLConfig, registry: Registry, observer: TelemetryObserver):
+        """Initialize the static extractor.
+
+        Args:
+            config (ETLConfig): ETL configuration.
+            registry (Registry): Artifact registry.
+            observer (TelemetryObserver): Logging observer.
+        """
         self.cfg = config
         self.registry = registry
         self.observer = observer
 
     def execute(self) -> None:
+        """Run static cohort extraction workflow."""
         raw_dir = Path(self.cfg.raw_dir)
         proc_dir = Path(self.cfg.proc_dir)
         proc_dir.mkdir(parents=True, exist_ok=True)
@@ -22,6 +33,14 @@ class StaticExtractor(PipelineComponent):
         self.observer.log("INFO", f"StaticExtractor: Searching raw CSVs under {raw_dir}")
 
         def find_raw_file(table: str) -> Path:
+            """Resolve a raw CSV or CSV.GZ file for the given table.
+
+            Args:
+                table (str): Table name.
+
+            Returns:
+                Path: Path to the raw file.
+            """
             cand_gz = raw_dir / f"{table}.csv.gz"
             cand_csv = raw_dir / f"{table}.csv"
             if cand_gz.exists(): return cand_gz
@@ -29,6 +48,14 @@ class StaticExtractor(PipelineComponent):
             raise FileNotFoundError(f"No raw file for '{table}' in {raw_dir}")
 
         def to_datetime_iso(col: str) -> pl.Expr:
+            """Parse a column into a UTC timestamp expression.
+
+            Args:
+                col (str): Column name.
+
+            Returns:
+                pl.Expr: Polars expression for timestamps.
+            """
             base = pl.col(col).str.to_datetime(time_unit="us", time_zone="UTC", strict=False)
             return pl.when(base.is_null() & pl.col(col).is_not_null()).then(
                 pl.col(col).str.replace(r"Z$", "+00:00", literal=False).str.to_datetime(time_unit="us", time_zone="UTC", strict=False)

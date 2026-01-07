@@ -4,18 +4,28 @@ from ....foundation.interfaces import PipelineComponent, Registry, TelemetryObse
 from ....domain.vo import ETLConfig
 
 class VentilationTagger(PipelineComponent):
-    """Annotate ventilation status on intervention events.
+    """Tag ventilation events in the interventions dataset.
 
-    Reads extracted Vitals/Labs (Chartevents), identifies ventilation-related items,
-    and updates the dense intervention skeleton.
+    Attributes:
+        cfg (ETLConfig): ETL configuration.
+        registry (Registry): Artifact registry.
+        observer (TelemetryObserver): Logging observer.
     """
 
     def __init__(self, config: ETLConfig, registry: Registry, observer: TelemetryObserver):
+        """Initialize the ventilation tagger.
+
+        Args:
+            config (ETLConfig): ETL configuration.
+            registry (Registry): Artifact registry.
+            observer (TelemetryObserver): Logging observer.
+        """
         self.cfg = config
         self.registry = registry
         self.observer = observer
 
     def execute(self) -> None:
+        """Apply ventilation labels to the interventions dataset."""
         resources_dir = Path(self.cfg.resources_dir)
         proc_dir = Path(self.cfg.proc_dir)
 
