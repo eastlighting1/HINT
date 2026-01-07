@@ -1,4 +1,5 @@
 import polars as pl
+import re
 from pathlib import Path
 from ....foundation.interfaces import PipelineComponent, Registry, TelemetryObserver
 from ....domain.vo import ETLConfig
@@ -107,57 +108,42 @@ class FeatureAssembler(PipelineComponent):
 
         # 5. Prepare Vitals Pivot
         self.observer.log("INFO", "FeatureAssembler: Stage 4/6 preparing vitals pivot")
-        varmap_fp = Path(self.cfg.resources_dir) / "itemid_to_variable_map.csv"
         
-        if varmap_fp.exists():
-            self.observer.log("INFO", "FeatureAssembler: Optimizing vitals pivot via unique label mapping")
-            
-            varmap = (
-                pl.read_csv(varmap_fp, infer_schema_length=0)
-                .select(["MIMIC LABEL", "LEVEL2"])
-                .drop_nulls()
-                .with_columns(
-                    [
-                        pl.col("MIMIC LABEL").str.to_lowercase()
-                        .str.replace_all(r"[^a-z0-9]+", "_")
-                        .str.replace_all(r"^_+|_+$", "")
-                        .alias("MIMIC_NORM"),
-                        pl.col("LEVEL2").str.to_lowercase().alias("LEVEL2_NORM"),
-                    ]
-                )
-                .unique()
-            )
+        # [FIX] Helper function for consistent normalization (pure python implementation for config list)
+        def normalize_name_py(s: str) -> str:
+            s = s.lower()
+            s = re.sub(r"[^a-z0-9]+", "_", s)
+            s = re.sub(r"^_+|_+$", "", s)
+            return s
 
-            # [FIX] Join on ICUSTAY_ID only to retrieve subject/hadm ids from cohort
-            vitals_filtered = vitals_lazy.rename({"HOURS_IN": "HOUR_IN"}).join(
-                pat.select(["SUBJECT_ID", "HADM_ID", "ICUSTAY_ID"]).lazy(),
-                on="ICUSTAY_ID",
-                how="inner"
+        # [FIX] Normalize Config Variables to match Data (Space -> Underscore)
+        target_vars = set([normalize_name_py(s) for s in self.cfg.exact_level2_104])
+        
+        # [FIX] Join on ICUSTAY_ID only, without secondary varmap join
+        # We assume upstream (TimeSeriesAggregator) has already mapped items to LEVEL2 names in the LABEL column.
+        vitals_filtered = vitals_lazy.rename({"HOURS_IN": "HOUR_IN"}).join(
+            pat.select(["SUBJECT_ID", "HADM_ID", "ICUSTAY_ID"]).lazy(),
+            on="ICUSTAY_ID",
+            how="inner"
+        )
+        
+        # [FIX] Direct normalization of parquet LABEL column using Polars expressions
+        # This aligns the data's 'Heart Rate' -> 'heart_rate' with the config's 'heart rate' -> 'heart_rate'
+        vitals_norm = (
+            vitals_filtered
+            .with_columns(
+                pl.col("LABEL").str.to_lowercase()
+                .str.replace_all(r"[^a-z0-9]+", "_")
+                .str.replace_all(r"^_+|_+$", "")
+                .alias("LEVEL2_NORM")
             )
+            .filter(pl.col("LEVEL2_NORM").is_in(target_vars))
+            .group_by(["SUBJECT_ID", "HADM_ID", "ICUSTAY_ID", "HOUR_IN", "LEVEL2_NORM"])
+            .agg(pl.col("MEAN").mean().alias("VALUE"))
+            .collect()
+        )
 
-            unique_labels = vitals_filtered.select("LABEL").unique().collect()
-            
-            label_mapping = (
-                unique_labels
-                .with_columns(
-                    pl.col("LABEL").str.to_lowercase()
-                    .str.replace_all(r"[^a-z0-9]+", "_")
-                    .str.replace_all(r"^_+|_+$", "")
-                    .alias("LABEL_NORM")
-                )
-                .join(varmap, left_on="LABEL_NORM", right_on="MIMIC_NORM", how="inner")
-                .filter(pl.col("LEVEL2_NORM").is_in([s.lower() for s in self.cfg.exact_level2_104]))
-                .select(["LABEL", "LEVEL2_NORM"])
-            )
-
-            vitals_norm = (
-                vitals_filtered
-                .join(label_mapping.lazy(), on="LABEL", how="inner")
-                .group_by(["SUBJECT_ID", "HADM_ID", "ICUSTAY_ID", "HOUR_IN", "LEVEL2_NORM"])
-                .agg(pl.col("MEAN").mean().alias("VALUE"))
-                .collect()
-            )
-
+        if vitals_norm.height > 0:
             vl_wide = vitals_norm.pivot(
                 values="VALUE", 
                 index=["SUBJECT_ID", "HADM_ID", "ICUSTAY_ID", "HOUR_IN"], 
@@ -165,30 +151,29 @@ class FeatureAssembler(PipelineComponent):
                 aggregate_function="mean"
             )
         else:
-            self.observer.log("WARNING", "FeatureAssembler: Variable map missing; pivot skipped")
+            self.observer.log("WARNING", "FeatureAssembler: No matching vitals found after normalization. Check 'exact_level2_104' config.")
             vl_wide = pat.select(["SUBJECT_ID", "HADM_ID", "ICUSTAY_ID"]).with_columns(pl.lit(0).alias("HOUR_IN"))
 
         # 6. Align Vitals Columns
         self.observer.log("INFO", "FeatureAssembler: Stage 5/6 aligning vitals columns and names")
         
         # Ensure all columns exist, even if missing in data batch
-        v_cols_raw = [n.lower() for n in self.cfg.exact_level2_104]
+        v_cols_raw = [normalize_name_py(n) for n in self.cfg.exact_level2_104]
         for col_name in v_cols_raw:
             if col_name not in vl_wide.columns:
                 vl_wide = vl_wide.with_columns(pl.lit(None).cast(pl.Float64).alias(col_name))
 
         # Rename to standardized V__ prefix
-        rename_map = {c: f"V__{c.replace(' ', '_')}" for c in vl_wide.columns if c not in ["SUBJECT_ID", "HADM_ID", "ICUSTAY_ID", "HOUR_IN"]}
+        rename_map = {c: f"V__{c}" for c in vl_wide.columns if c not in ["SUBJECT_ID", "HADM_ID", "ICUSTAY_ID", "HOUR_IN"]}
         vl_wide = vl_wide.rename(rename_map)
 
         # Select columns in strict order
-        v_cols = [f"V__{n.replace(' ', '_').lower()}" for n in self.cfg.exact_level2_104]
+        v_cols = [f"V__{normalize_name_py(n)}" for n in self.cfg.exact_level2_104]
         vl_wide = vl_wide.select(["SUBJECT_ID", "HADM_ID", "ICUSTAY_ID", "HOUR_IN"] + v_cols)
 
         # ==============================================================================
         # [IMPUTATION FIX] Thesis 3.2.2 Data Preprocessing (p.18)
         # "Forward fill first, then Median (or 0) for remaining missing values."
-        # This prevents NaN values from propagating to X_num in the final tensor.
         # ==============================================================================
         self.observer.log("INFO", "FeatureAssembler: Applying Imputation (Forward-Fill -> Zero-Fill) as per Thesis p.18")
 

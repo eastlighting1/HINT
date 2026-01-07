@@ -2,6 +2,7 @@ from pydantic import BaseModel, Field, ConfigDict
 from typing import List, Tuple, Union, Optional, Dict, Any
 from enum import Enum
 from pathlib import Path
+import os
 
 class HyperparamVO(BaseModel):
     model_config = ConfigDict(frozen=True)
@@ -38,6 +39,26 @@ class InterventionKeys(str, Enum):
     """Keys specific to Intervention Prediction (Zone 3)"""
     TARGET_VENT_STATE = "y_vent"
 
+# [FIX] Helper function to load features reliably from package root
+def _load_exact_features() -> List[str]:
+    # Try multiple likely paths to find the resource file
+    candidates = [
+        Path("resources/exact_level2_104.txt"),
+        Path("./resources/exact_level2_104.txt"),
+        Path(__file__).parent.parent.parent.parent.parent / "resources" / "exact_level2_104.txt"
+    ]
+    
+    for path in candidates:
+        if path.exists():
+            try:
+                with open(path, "r", encoding="utf-8") as f:
+                    return [line.strip() for line in f if line.strip()]
+            except Exception:
+                continue
+                
+    # Return empty list if not found (Validation will occur in Assembler)
+    return []
+
 class ETLConfig(HyperparamVO):
     raw_dir: str = "./data/raw"
     proc_dir: str = "./data/processed"
@@ -53,13 +74,6 @@ class ETLConfig(HyperparamVO):
     gap_h: int = 6
     pred_window_h: int = 4
     age_bin_edges: Tuple[int, int, int, int] = (15, 40, 65, 90)
-    
-    def _load_exact_features() -> List[str]:
-        path = Path("resources/exact_level2_104.txt")
-        if path.exists():
-            with open(path, "r", encoding="utf-8") as f:
-                return [line.strip() for line in f if line.strip()]
-        return []
     
     exact_level2_104: List[str] = Field(default_factory=_load_exact_features)
 

@@ -296,7 +296,14 @@ class HDF5StreamingSource(Dataset):
             x_cat = torch.from_numpy(self.h5_file["X_cat"][idx]).long()
         
         y_val = self.h5_file[self.label_key][idx]
-        y = torch.tensor(int(y_val), dtype=torch.long)
+        
+        # [FIX] Check dimensions to handle both scalar labels (ICD) and time-series/vector labels (Ventilation)
+        if y_val.ndim == 0:
+            # Scalar label for classification (e.g. ICD code index)
+            y = torch.tensor(int(y_val), dtype=torch.long)
+        else:
+            # Array label for regression or dense prediction (e.g. Ventilation mask)
+            y = torch.from_numpy(y_val).float()
         
         sid = -1
         if "sid" in self.h5_file:
@@ -349,7 +356,15 @@ class HDF5StreamingSource(Dataset):
                 
             data = self.h5_file["X_cat"][:]
             if data.size == 0: return []
-            max_indices = np.max(data, axis=(0, 2))
+            
+            # [FIX] Dynamically handle 2D (Static) or 3D (Temporal) categorical features
+            if data.ndim == 2:
+                # Shape: (Samples, Features) -> Max along axis 0
+                max_indices = np.max(data, axis=0)
+            else:
+                # Shape: (Samples, Features, Time) -> Max along axis 0 and 2
+                max_indices = np.max(data, axis=(0, 2))
+                
             return [int(s) + 1 for s in max_indices]
         finally:
             if should_close: self.close()

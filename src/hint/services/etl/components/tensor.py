@@ -124,6 +124,10 @@ class TensorConverter(PipelineComponent):
             # PyTorch models usually expect (Batch, Channels, Time)
             f.create_dataset("X_num", (n_samples, n_features, seq_len), dtype='f4')
             
+            # [FIX] Create static features dataset (Batch, Features)
+            if cat_cols:
+                f.create_dataset("X_cat", (n_samples, len(cat_cols)), dtype='i4')
+            
         self.observer.log("INFO", f"TensorConverter: Vectorized processing for {n_samples} patients...")
         
         sorted_df = split_df.sort(["ICUSTAY_ID", "HOUR_IN"])
@@ -134,6 +138,10 @@ class TensorConverter(PipelineComponent):
         agg_exprs = []
         if "y" in sorted_df.columns:
             agg_exprs.append(pl.col("y").first())
+        
+        # [FIX] Collect static categorical values (taking first value per stay)
+        if cat_cols:
+            agg_exprs.extend([pl.col(c).first() for c in cat_cols])
             
         grouped = sorted_df.group_by("ICUSTAY_ID", maintain_order=True).agg(agg_exprs)
         
@@ -177,6 +185,13 @@ class TensorConverter(PipelineComponent):
         
         with h5py.File(out_path, "a") as f:
             f["X_num"][:] = X_num_transposed
+            
+            # [FIX] Write Static Features
+            if cat_cols:
+                # Grouped dataframe is already sorted by ICUSTAY_ID same as stay_ids order
+                # because we used maintain_order=True and sort upfront.
+                x_cat_data = grouped.select(cat_cols).to_numpy().astype(np.int32)
+                f["X_cat"][:] = x_cat_data
             
             # Write Targets
             if vent_col in valid_window.columns:

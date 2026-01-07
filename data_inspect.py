@@ -6,8 +6,9 @@ import random
 import numpy as np
 import pandas as pd
 import sys
+import os
 from pathlib import Path
-from contextlib import redirect_stdout  # [추가] 출력을 파일로 돌리기 위해 사용
+from contextlib import redirect_stdout
 from transformers import AutoTokenizer
 
 # 출력 포맷 설정
@@ -99,7 +100,6 @@ def inspect_hdf5_structure(f):
     print("-" * 80)
     return structure_info
 
-# [추가] 라벨 분포 분석 함수
 def analyze_label_distribution(f, meta):
     """
     전체 데이터셋의 라벨 분포를 분석하여 출력합니다.
@@ -181,8 +181,25 @@ def inspect_sample_features(f, idx, meta, tokenizer):
         print(f"   - Raw Shape: {data_tensor.shape}")
         
         if data_tensor.ndim == 2:
-            data_vector = data_tensor[:, -1] 
-            print("   - Showing values at last timestamp (t=-1)")
+            # (Channels, Time) 구조로 가정
+            # 0이 아닌 유효한 데이터가 있는지 확인
+            # axis=0 (Channel) 기준으로 합산하여 값이 있는 Time Step을 찾음
+            non_zero_timestamps = np.where(np.sum(np.abs(data_tensor), axis=0) > 0)[0]
+            
+            if len(non_zero_timestamps) > 0:
+                # [수정] 랜덤하게 유효한 시점 선택
+                rand_t = random.choice(non_zero_timestamps)
+                data_vector = data_tensor[:, rand_t]
+                
+                print(f"   - ✅ Found {len(non_zero_timestamps)} valid time steps.")
+                print(f"   - Valid Time Range: t={non_zero_timestamps[0]} ~ t={non_zero_timestamps[-1]}")
+                print(f"   - Showing values at random VALID timestamp (t={rand_t})")
+            else:
+                # [경고] 진짜로 데이터가 없는 경우
+                rand_t = random.randint(0, data_tensor.shape[1] - 1)
+                data_vector = data_tensor[:, rand_t]
+                print(f"   - Showing values at random timestamp (t={rand_t})")
+                print("   ⚠️ WARNING: This sample contains ALL ZEROS (Empty Patient or Parsing Error).")
         else:
             data_vector = data_tensor
 
@@ -197,23 +214,23 @@ def inspect_sample_features(f, idx, meta, tokenizer):
         df_num = pd.DataFrame({
             "Index": range(min_len),
             "Feature Name": feat_names[:min_len],
-            "Value (Last Step)": data_vector[:min_len],
+            "Value (Selected Step)": data_vector[:min_len],
         })
         
-        # [수정] NaN 검사 및 경고 (중요: NaN을 0이 아닌 값으로 오인하지 않도록 수정)
-        is_nan = df_num["Value (Last Step)"].isna()
+        # NaN 검사 및 경고
+        is_nan = df_num["Value (Selected Step)"].isna()
         if is_nan.any():
             print(f"   ⚠️ WARNING: Found {is_nan.sum()} NaN values in this sample!")
 
-        # [수정] 0이 아니면서 동시에 NaN도 아닌 값만 필터링
-        non_zero_df = df_num[(df_num["Value (Last Step)"] != 0) & (~is_nan)]
-        print(f"   - Non-zero Features: {len(non_zero_df)} / {len(df_num)}")
+        # 0이 아니면서 동시에 NaN도 아닌 값만 필터링
+        non_zero_df = df_num[(df_num["Value (Selected Step)"] != 0) & (~is_nan)]
+        print(f"   - Non-zero Features at this step: {len(non_zero_df)} / {len(df_num)}")
         
         if not non_zero_df.empty:
             print(f"   👉 Top 20 Non-zero Values:")
             print(non_zero_df.head(20).to_string(index=False))
         else:
-            print("   👉 All values are zero (Sparse/Masked).")
+            print("   👉 All values are zero at this step.")
     else:
         print("\n[1] Numeric Features: Not found.")
 
@@ -274,12 +291,19 @@ def main():
     
     h5_path = data_dir / f"train_coding_{split_name}.h5"
     
-    # [추가] 결과물 저장 경로 설정
+    # 결과물 저장 경로 설정
     output_txt_path = data_dir / f"inspection_report_{split_name}.txt"
 
     if not h5_path.exists():
-        print(f"❌ 데이터 파일을 찾을 수 없습니다: {h5_path}")
-        return
+        # 파일이 없으면 캐시 폴더의 다른 h5 파일 검색 (fallback)
+        import glob
+        files = glob.glob(str(data_dir / "*.h5"))
+        if files:
+            h5_path = Path(files[0])
+            print(f"⚠️ Configured file not found. Inspecting found file: {h5_path.name}")
+        else:
+            print(f"❌ 데이터 파일을 찾을 수 없습니다: {h5_path}")
+            return
 
     meta = load_metadata(data_dir)
     try:
@@ -290,14 +314,14 @@ def main():
     print(f"🚀 Analyzing {h5_path.name}...")
     print(f"📄 Report will be saved to: {output_txt_path}")
 
-    # [수정] 파일을 열고 stdout을 리다이렉트하여 모든 print 문이 파일에 쓰이도록 함
+    # 파일을 열고 stdout을 리다이렉트하여 모든 print 문이 파일에 쓰이도록 함
     with open(output_txt_path, "w", encoding="utf-8") as out_f:
         with redirect_stdout(out_f):
             with h5py.File(h5_path, "r") as f:
                 # 1. 구조 확인
                 inspect_hdf5_structure(f)
                 
-                # 2. [추가] 라벨 분포 확인
+                # 2. 라벨 분포 확인
                 analyze_label_distribution(f, meta)
                 
                 # 3. 랜덤 샘플 확인
