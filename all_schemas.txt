@@ -1,0 +1,223 @@
+### File: patients.parquet
+Path: ./data/processed/patients.parquet
+Columns: 25
+-------------------- Schema Info --------------------
+ROW_ID: large_string
+SUBJECT_ID: int64
+HADM_ID: int64
+ICUSTAY_ID: int64
+DBSOURCE: large_string
+FIRST_CAREUNIT: large_string
+LAST_CAREUNIT: large_string
+FIRST_WARDID: large_string
+LAST_WARDID: large_string
+INTIME: timestamp[us, tz=UTC]
+OUTTIME: timestamp[us, tz=UTC]
+LOS: large_string
+LOS_ICU: double
+STAY_HOURS: int32
+ADMITTIME: timestamp[us, tz=UTC]
+DISCHTIME: timestamp[us, tz=UTC]
+DEATHTIME: timestamp[us, tz=UTC]
+ETHNICITY: large_string
+ADMISSION_TYPE: large_string
+INSURANCE: large_string
+DOB: timestamp[us, tz=UTC]
+DOD: timestamp[us, tz=UTC]
+AGE: int32
+MORT_ICU: int32
+MORT_HOSP: int32
+
+==================================================
+
+### File: vitals_labs_mean.parquet
+Path: ./data/processed/vitals_labs_mean.parquet
+Columns: 4
+-------------------- Schema Info --------------------
+ICUSTAY_ID: int64
+HOURS_IN: int32
+LABEL: large_string
+MEAN: double
+
+==================================================
+
+### File: targets_icd.parquet
+Path: ./data/processed/targets_icd.parquet
+Columns: 2
+-------------------- Schema Info --------------------
+ICUSTAY_ID: int64
+target_icd: int64
+
+==================================================
+
+### File: targets_vent.parquet
+Path: ./data/processed/targets_vent.parquet
+Columns: 3
+-------------------- Schema Info --------------------
+ICUSTAY_ID: int64
+HOUR_IN: int64
+target_vent: int64
+
+==================================================
+
+### File: interventions.parquet
+Path: ./data/processed/interventions.parquet
+Columns: 7
+-------------------- Schema Info --------------------
+SUBJECT_ID: int64
+HADM_ID: int64
+ICUSTAY_ID: int64
+HOUR_IN: int32
+OUTCOME_FLAG: int8
+VASO: int8
+VENT: int8
+
+==================================================
+
+### File: vitals_labs.parquet
+Path: ./data/processed/vitals_labs.parquet
+Columns: 6
+-------------------- Schema Info --------------------
+ICUSTAY_ID: int64
+HOURS_IN: int32
+LABEL: large_string
+MEAN: double
+COUNT: uint32
+STDDEV: double
+
+==================================================
+
+### File: dataset_123.parquet
+Path: ./data/processed/dataset_123.parquet
+Columns: 125
+-------------------- Schema Info --------------------
+SUBJECT_ID: int64
+HADM_ID: int64
+ICUSTAY_ID: int64
+HOUR_IN: int32
+V__alanine_aminotransferase: double
+V__albumin: double
+V__albumin_ascites: double
+V__albumin_pleural: double
+V__albumin_urine: double
+V__alkaline_phosphate: double
+V__anion_gap: double
+V__aspartate_aminotransferase: double
+V__basophils: double
+V__bicarbonate: double
+V__bilirubin: double
+V__blood_urea_nitrogen: double
+V__calcium: double
+V__calcium_ionized: double
+V__calcium_urine: double
+V__cardiac_index: double
+V__cardiac_output_fick: double
+V__cardiac_output_thermodilution: double
+V__central_venous_pressure: double
+V__chloride: double
+V__chloride_urine: double
+V__cholesterol: double
+V__cholesterol_hdl: double
+V__cholesterol_ldl: double
+V__co2: double
+V__co2_(etco2,_pco2,_etc.): double
+V__creatinine: double
+V__creatinine_ascites: double
+V__creatinine_body_fluid: double
+V__creatinine_pleural: double
+V__creatinine_urine: double
+V__diastolic_blood_pressure: double
+V__eosinophils: double
+V__fibrinogen: double
+V__fraction_inspired_oxygen: double
+V__fraction_inspired_oxygen_set: double
+V__glascow_coma_scale_total: double
+V__glucose: double
+V__heart_rate: double
+V__height: double
+V__hematocrit: double
+V__hemoglobin: double
+V__lactate: double
+V__lactate_dehydrogenase: double
+V__lactate_dehydrogenase_pleural: double
+V__lactic_acid: double
+V__lymphocytes: double
+V__lymphocytes_ascites: double
+V__lymphocytes_atypical: double
+V__lymphocytes_atypical_csf: double
+V__lymphocytes_body_fluid: double
+V__lymphocytes_percent: double
+V__lymphocytes_pleural: double
+V__magnesium: double
+V__mean_blood_pressure: double
+V__mean_corpuscular_hemoglobin: double
+V__mean_corpuscular_hemoglobin_concentration: double
+V__mean_corpuscular_volume: double
+V__monocytes: double
+V__monocytes_csf: double
+V__neutrophils: double
+V__oxygen_saturation: double
+V__partial_pressure_of_carbon_dioxide: double
+V__partial_pressure_of_oxygen: double
+V__partial_thromboplastin_time: double
+V__peak_inspiratory_pressure: double
+V__ph: double
+V__ph_urine: double
+V__phosphate: double
+V__phosphorous: double
+V__plateau_pressure: double
+V__platelets: double
+V__positive_end-expiratory_pressure: double
+V__positive_end-expiratory_pressure_set: double
+V__post_void_residual: double
+V__potassium: double
+V__potassium_serum: double
+V__prothrombin_time_inr: double
+V__prothrombin_time_pt: double
+V__pulmonary_artery_pressure_mean: double
+V__pulmonary_artery_pressure_systolic: double
+V__pulmonary_capillary_wedge_pressure: double
+V__red_blood_cell_count: double
+V__red_blood_cell_count_ascites: double
+V__red_blood_cell_count_csf: double
+V__red_blood_cell_count_pleural: double
+V__red_blood_cell_count_urine: double
+V__respiratory_rate: double
+V__respiratory_rate_set: double
+V__sodium: double
+V__systemic_vascular_resistance: double
+V__systolic_blood_pressure: double
+V__temperature: double
+V__tidal_volume_observed: double
+V__tidal_volume_set: double
+V__tidal_volume_spontaneous: double
+V__total_protein: double
+V__total_protein_urine: double
+V__troponin-i: double
+V__troponin-t: double
+V__venous_pvo2: double
+V__weight: double
+V__white_blood_cell_count: double
+V__white_blood_cell_count_urine: double
+HOD: int8
+VENT: int8
+OUTCOME_FLAG: int8
+ICD9_CODES: large_list<element: large_string>
+  child 0, element: large_string
+ETHNICITY: large_string
+ADMISSION_TYPE: large_string
+INSURANCE: large_string
+AGE: int32
+INTIME: timestamp[us]
+ADM4: large_string
+ETH4: large_string
+INS5: large_string
+S__AGE__AGE_15_39: uint8
+S__AGE__AGE_40_64: uint8
+S__AGE__AGE_65_89: uint8
+S__AGE__AGE_90PLUS: uint8
+literal: large_list<element: large_string>
+  child 0, element: large_string
+
+==================================================
+

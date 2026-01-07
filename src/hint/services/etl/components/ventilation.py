@@ -5,7 +5,7 @@ from ....domain.vo import ETLConfig
 
 class VentilationTagger(PipelineComponent):
     """Annotate ventilation status on intervention events.
-    
+
     Reads extracted Vitals/Labs (Chartevents), identifies ventilation-related items,
     and updates the dense intervention skeleton.
     """
@@ -18,12 +18,12 @@ class VentilationTagger(PipelineComponent):
     def execute(self) -> None:
         resources_dir = Path(self.cfg.resources_dir)
         proc_dir = Path(self.cfg.proc_dir)
-        
+
         vitals_path = proc_dir / self.cfg.artifacts.vitals_mean_file
         interventions_path = proc_dir / self.cfg.artifacts.interventions_file
 
         if not vitals_path.exists() or not interventions_path.exists():
-             raise FileNotFoundError(f"Missing artifacts. Ensure TimeSeriesAggregator and OutcomesBuilder ran.")
+            raise FileNotFoundError("Missing artifacts. Ensure TimeSeriesAggregator and OutcomesBuilder ran.")
 
         self.observer.log("INFO", "VentilationTagger: Stage 1/3 Resolving ventilation labels")
 
@@ -39,29 +39,29 @@ class VentilationTagger(PipelineComponent):
         itemmap = pl.read_csv(resources_dir / "itemid_to_variable_map.csv").with_columns(
             pl.col("ITEMID").cast(pl.Int64)
         )
-        
+
         vent_labels_df = (
             itemmap.filter(pl.col("ITEMID").is_in(list(vent_itemids)))
             .select(pl.col("MIMIC LABEL").alias("LABEL"))
             .unique()
         )
-        
+
         vent_labels = vent_labels_df.to_series().to_list()
         self.observer.log("INFO", f"VentilationTagger: Found {len(vent_labels)} labels for ventilation.")
 
         vl = pl.read_parquet(vitals_path)
-        
+
         vent_events = (
             vl.filter(pl.col("LABEL").is_in(vent_labels))
             .select(["ICUSTAY_ID", "HOURS_IN"])
             .unique()
             .with_columns(pl.lit(1).cast(pl.Int8).alias("VENT_NEW"))
         )
-        
+
         self.observer.log("INFO", f"VentilationTagger: Stage 2/3 Matched {vent_events.height} ventilation hours.")
 
         skeleton = pl.read_parquet(interventions_path)
-        
+
         if "VENT" in skeleton.columns:
             skeleton = skeleton.drop("VENT")
 
@@ -72,4 +72,4 @@ class VentilationTagger(PipelineComponent):
         )
 
         merged.write_parquet(interventions_path)
-        self.observer.log("INFO", f"VentilationTagger: Updated {interventions_path.name} with ventilation flags.")
+        self.observer.log("INFO", f"VentilationTagger: Stage 3/3 updated {interventions_path.name} with ventilation flags.")
