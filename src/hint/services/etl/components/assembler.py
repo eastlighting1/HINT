@@ -170,16 +170,40 @@ class FeatureAssembler(PipelineComponent):
 
         # 6. Align Vitals Columns
         self.observer.log("INFO", "FeatureAssembler: Stage 5/6 aligning vitals columns and names")
-        for name in self.cfg.exact_level2_104:
-            col_name = name.lower()
+        
+        # Ensure all columns exist, even if missing in data batch
+        v_cols_raw = [n.lower() for n in self.cfg.exact_level2_104]
+        for col_name in v_cols_raw:
             if col_name not in vl_wide.columns:
                 vl_wide = vl_wide.with_columns(pl.lit(None).cast(pl.Float64).alias(col_name))
 
+        # Rename to standardized V__ prefix
         rename_map = {c: f"V__{c.replace(' ', '_')}" for c in vl_wide.columns if c not in ["SUBJECT_ID", "HADM_ID", "ICUSTAY_ID", "HOUR_IN"]}
         vl_wide = vl_wide.rename(rename_map)
 
+        # Select columns in strict order
         v_cols = [f"V__{n.replace(' ', '_').lower()}" for n in self.cfg.exact_level2_104]
-        vl_wide = vl_wide.select(["SUBJECT_ID", "HADM_ID", "ICUSTAY_ID", "HOUR_IN"] + [c for c in v_cols if c in vl_wide.columns])
+        vl_wide = vl_wide.select(["SUBJECT_ID", "HADM_ID", "ICUSTAY_ID", "HOUR_IN"] + v_cols)
+
+        # ==============================================================================
+        # [IMPUTATION FIX] Thesis 3.2.2 Data Preprocessing (p.18)
+        # "Forward fill first, then Median (or 0) for remaining missing values."
+        # This prevents NaN values from propagating to X_num in the final tensor.
+        # ==============================================================================
+        self.observer.log("INFO", "FeatureAssembler: Applying Imputation (Forward-Fill -> Zero-Fill) as per Thesis p.18")
+
+        # 1. Sort by ID and Time to ensure correct Forward Fill
+        vl_wide = vl_wide.sort(["ICUSTAY_ID", "HOUR_IN"])
+
+        # 2. Forward Fill: Propagate last valid observation within the same ICU stay
+        vl_wide = vl_wide.with_columns([
+            pl.col(c).forward_fill().over("ICUSTAY_ID") for c in v_cols
+        ])
+
+        # 3. Zero Fill (Fallback): Fill remaining nulls (start of stay or completely missing features) with 0.0
+        vl_wide = vl_wide.with_columns([
+            pl.col(c).fill_null(0.0) for c in v_cols
+        ])
 
         # 7. Join Static & Interventions
         self.observer.log("INFO", "FeatureAssembler: Stage 6/6 joining static and intervention features")

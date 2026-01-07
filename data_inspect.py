@@ -200,7 +200,13 @@ def inspect_sample_features(f, idx, meta, tokenizer):
             "Value (Last Step)": data_vector[:min_len],
         })
         
-        non_zero_df = df_num[df_num["Value (Last Step)"] != 0]
+        # [수정] NaN 검사 및 경고 (중요: NaN을 0이 아닌 값으로 오인하지 않도록 수정)
+        is_nan = df_num["Value (Last Step)"].isna()
+        if is_nan.any():
+            print(f"   ⚠️ WARNING: Found {is_nan.sum()} NaN values in this sample!")
+
+        # [수정] 0이 아니면서 동시에 NaN도 아닌 값만 필터링
+        non_zero_df = df_num[(df_num["Value (Last Step)"] != 0) & (~is_nan)]
         print(f"   - Non-zero Features: {len(non_zero_df)} / {len(df_num)}")
         
         if not non_zero_df.empty:
