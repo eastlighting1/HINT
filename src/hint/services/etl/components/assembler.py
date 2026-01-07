@@ -1,5 +1,4 @@
 import polars as pl
-import re
 from pathlib import Path
 from ....foundation.interfaces import PipelineComponent, Registry, TelemetryObserver
 from ....domain.vo import ETLConfig
@@ -8,8 +7,8 @@ from ....domain.vo import ETLConfig
 class FeatureAssembler(PipelineComponent):
     """Assemble hourly features from vitals, interventions, and static data.
 
-    Applies lazy loading, cohort-restricted label normalization, and early
-    joins to reduce memory and compute overhead.
+    This component assumes that upstream components (StaticExtractor, TimeSeriesAggregator,
+    OutcomesBuilder, VentilationTagger) have successfully generated the required parquet artifacts.
     """
 
     def __init__(self, config: ETLConfig, registry: Registry, observer: TelemetryObserver):
@@ -22,19 +21,27 @@ class FeatureAssembler(PipelineComponent):
         proc_dir = Path(self.cfg.proc_dir)
         raw_dir = Path(self.cfg.raw_dir)
 
+        proc_dir.mkdir(parents=True, exist_ok=True)
         patients_path = proc_dir / self.cfg.artifacts.patients_file
-        if not patients_path.exists():
-            raise FileNotFoundError(f"Dependency missing: {patients_path}")
+        vitals_path = proc_dir / self.cfg.artifacts.vitals_mean_file
+        interventions_path = proc_dir / self.cfg.artifacts.interventions_file
+
+        missing_deps = []
+        if not patients_path.exists(): missing_deps.append(f"Patients ({patients_path.name})")
+        if not vitals_path.exists(): missing_deps.append(f"Vitals ({vitals_path.name})")
+        if not interventions_path.exists(): missing_deps.append(f"Interventions ({interventions_path.name})")
+
+        if missing_deps:
+            error_msg = (
+                f"FeatureAssembler: Missing dependencies: {', '.join(missing_deps)}. "
+                "Ensure StaticExtractor, TimeSeriesAggregator, OutcomesBuilder, and VentilationTagger "
+                "have been executed successfully."
+            )
+            self.observer.log("ERROR", error_msg)
+            raise FileNotFoundError(error_msg)
 
         self.observer.log("INFO", f"FeatureAssembler: Stage 1/6 loading cohort from {patients_path}")
-        patients = pl.read_parquet(patients_path).with_columns(
-            [
-                pl.col("SUBJECT_ID").cast(pl.Int64),
-                pl.col("HADM_ID").cast(pl.Int64),
-                pl.col("ICUSTAY_ID").cast(pl.Int64),
-                pl.col("INTIME").cast(pl.Datetime),
-            ]
-        )
+        patients = pl.read_parquet(patients_path)
 
         first_icustay = (
             patients.select(["SUBJECT_ID", "ICUSTAY_ID", "INTIME"])
@@ -55,11 +62,10 @@ class FeatureAssembler(PipelineComponent):
         )
         self.observer.log("INFO", f"FeatureAssembler: Stage 1/6 cohort filters complete stays={pat.height}")
 
-        vitals_path = proc_dir / self.cfg.artifacts.vitals_mean_file
         vitals_lazy = pl.scan_parquet(vitals_path)
-        
+
         self.observer.log("INFO", "FeatureAssembler: Stage 2/6 loading interventions and vitals sources")
-        interventions = pl.read_parquet(proc_dir / self.cfg.artifacts.interventions_file)
+        interventions = pl.read_parquet(interventions_path)
 
         self.observer.log("INFO", "FeatureAssembler: Stage 3/6 resolving ICD9 source")
         cand = raw_dir / "DIAGNOSES_ICD.csv"
@@ -83,14 +89,15 @@ class FeatureAssembler(PipelineComponent):
                 .agg([pl.col("ICD9_CODE").unique().sort().alias("ICD9_CODES")])
             )
         else:
-            self.observer.log("WARNING", "FeatureAssembler: DIAGNOSES_ICD source not found")
+            self.observer.log("WARNING", "FeatureAssembler: DIAGNOSES_ICD source not found. Using empty ICD codes.")
             icd9 = patients.select(["SUBJECT_ID", "HADM_ID"]).unique().with_columns(pl.lit([]).cast(pl.List(pl.Utf8)).alias("ICD9_CODES"))
 
         self.observer.log("INFO", "FeatureAssembler: Stage 4/6 preparing vitals pivot")
         varmap_fp = Path(self.cfg.resources_dir) / "itemid_to_variable_map.csv"
+
         if varmap_fp.exists():
             self.observer.log("INFO", "FeatureAssembler: Optimizing vitals pivot via unique label mapping")
-            
+
             varmap = (
                 pl.read_csv(varmap_fp, infer_schema_length=0)
                 .select(["MIMIC LABEL", "LEVEL2"])
@@ -114,7 +121,7 @@ class FeatureAssembler(PipelineComponent):
             )
 
             unique_labels = vitals_filtered.select("LABEL").unique().collect()
-            
+
             label_mapping = (
                 unique_labels
                 .with_columns(
@@ -159,6 +166,7 @@ class FeatureAssembler(PipelineComponent):
         vl_wide = vl_wide.select(["SUBJECT_ID", "HADM_ID", "ICUSTAY_ID", "HOUR_IN"] + [c for c in v_cols if c in vl_wide.columns])
 
         self.observer.log("INFO", "FeatureAssembler: Stage 6/6 joining static and intervention features")
+
         vent_df = interventions.select(["SUBJECT_ID", "HADM_ID", "ICUSTAY_ID", "HOUR_IN", "VENT", "OUTCOME_FLAG"])
 
         base = (

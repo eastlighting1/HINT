@@ -15,9 +15,6 @@ artifacts:
 models_to_run:
   - "TabNet"
   - "DCNv2"
-  - "FTTransformer"
-  # - "MedBERT"
-  # - "GRU-D"
 
 # Common Hyperparameters
 dropout: 0.3

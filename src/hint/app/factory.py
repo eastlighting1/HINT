@@ -11,6 +11,10 @@ from ..infrastructure.datasource import HDF5StreamingSource, ParquetSource
 from ..infrastructure.networks import GFINet_CNN
 
 from ..services.etl.service import ETLService
+from ..services.etl.components.static import StaticExtractor
+from ..services.etl.components.timeseries import TimeSeriesAggregator
+from ..services.etl.components.outcomes import OutcomesBuilder
+from ..services.etl.components.ventilation import VentilationTagger
 from ..services.etl.components.assembler import FeatureAssembler
 from ..services.etl.components.tensor import TensorConverter
 from ..services.etl.components.labels import LabelGenerator
@@ -41,7 +45,13 @@ class AppFactory:
         icd_cfg = self.ctx.icd
         registry = self.create_registry()
         observer = self.create_telemetry()
-        
+
+        observer.log("INFO", "AppFactory: Building ETL pipeline components")
+        static_extractor = StaticExtractor(etl_cfg, registry, observer)
+        ts_aggregator = TimeSeriesAggregator(etl_cfg, registry, observer)
+        outcomes_builder = OutcomesBuilder(etl_cfg, registry, observer)
+        vent_tagger = VentilationTagger(etl_cfg, registry, observer)
+
         assembler = FeatureAssembler(etl_cfg, registry, observer)
         label_gen = LabelGenerator(
             etl_config=etl_cfg,
@@ -58,20 +68,27 @@ class AppFactory:
             registry=registry,
             observer=observer
         )
-        
+
+        observer.log("INFO", "AppFactory: Ordering ETL pipeline stages")
         components: List[PipelineComponent] = [
+            static_extractor,
+            ts_aggregator,
+            outcomes_builder,
+            vent_tagger,
             assembler,
             label_gen,
             tensor_converter
         ]
-        
+
+        observer.log("INFO", "AppFactory: ETL service ready")
         return ETLService(registry, observer, components)
 
     def create_icd_service(self) -> ICDService:
         cfg = self.ctx.icd
         registry = self.create_registry()
         observer = self.create_telemetry()
-        
+
+        observer.log("INFO", "AppFactory: Preparing ICD training data sources")
         cache_dir = Path(cfg.data.data_cache_dir)
         prefix = cfg.data.input_h5_prefix
         
@@ -88,7 +105,8 @@ class AppFactory:
             train_source = None
             val_source = None
             test_source = None
-        
+
+        observer.log("INFO", "AppFactory: ICD service ready")
         return ICDService(
             config=cfg,
             registry=registry,
@@ -102,7 +120,8 @@ class AppFactory:
         cfg = self.ctx.cnn
         registry = self.create_registry()
         observer = self.create_telemetry()
-        
+
+        observer.log("INFO", "AppFactory: Preparing intervention training data sources")
         cache_dir = Path(cfg.data.data_cache_dir)
         prefix = cfg.data.input_h5_prefix 
         train_path = cache_dir / f"{prefix}_train.h5"
@@ -112,7 +131,7 @@ class AppFactory:
             train_source = HDF5StreamingSource(train_path, seq_len=cfg.seq_len)
             val_source = HDF5StreamingSource(val_path, seq_len=cfg.seq_len)
             vocab_sizes = train_source.get_real_vocab_sizes()
-            
+
             if len(train_source) > 0:
                 dummy = train_source[0]
                 num_channels = dummy.x_num.shape[0]
@@ -128,6 +147,7 @@ class AppFactory:
             num_channels = 1
             icd_dim = 0
 
+        observer.log("INFO", "AppFactory: Building intervention model network")
         network = GFINet_CNN(
             in_chs=[num_channels],
             n_cls=4,
@@ -140,9 +160,10 @@ class AppFactory:
             kernel=cfg.tcn_kernel_size,
             layers=cfg.tcn_layers
         )
-        
+
         entity = InterventionModelEntity(network)
-        
+
+        observer.log("INFO", "AppFactory: Intervention service ready")
         return InterventionService(
             config=cfg,
             registry=registry,
