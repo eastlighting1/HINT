@@ -127,9 +127,13 @@ class AppFactory:
         train_path = cache_dir / f"{prefix}_train.h5"
         val_path = cache_dir / f"{prefix}_val.h5"
         
+        # [FIX] Explicitly use 'y_vent' (or configured key) as label_key
+        # Defaulting to 'y' causes it to read ICD targets which leads to CUDA errors
+        target_key = cfg.keys.TARGET_VENT_STATE if hasattr(cfg.keys, "TARGET_VENT_STATE") else "y_vent"
+
         try:
-            train_source = HDF5StreamingSource(train_path, seq_len=cfg.seq_len)
-            val_source = HDF5StreamingSource(val_path, seq_len=cfg.seq_len)
+            train_source = HDF5StreamingSource(train_path, seq_len=cfg.seq_len, label_key=target_key)
+            val_source = HDF5StreamingSource(val_path, seq_len=cfg.seq_len, label_key=target_key)
             vocab_sizes = train_source.get_real_vocab_sizes()
 
             if len(train_source) > 0:
@@ -148,9 +152,12 @@ class AppFactory:
             icd_dim = 0
 
         observer.log("INFO", "AppFactory: Building intervention model network")
+        
+        # Note: n_cls=4 is hardcoded here. If binary task (0/1), consider changing to 2.
+        # But keeping as 4 to match FocalLoss default and potentially multi-state logic.
         network = GFINet_CNN(
             in_chs=[num_channels],
-            n_cls=4,
+            n_cls=4, 
             vocab_sizes=vocab_sizes,
             icd_dim=icd_dim,
             embed_dim=cfg.embed_dim,

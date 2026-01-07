@@ -22,7 +22,6 @@ class FeatureAssembler(PipelineComponent):
         proc_dir = Path(self.cfg.proc_dir)
         raw_dir = Path(self.cfg.raw_dir)
         
-        # Ensure processing directory exists
         proc_dir.mkdir(parents=True, exist_ok=True)
 
         # 1. Check all upstream dependencies upfront
@@ -31,12 +30,9 @@ class FeatureAssembler(PipelineComponent):
         interventions_path = proc_dir / self.cfg.artifacts.interventions_file
 
         missing_deps = []
-        if not patients_path.exists():
-            missing_deps.append(f"Patients ({patients_path.name})")
-        if not vitals_path.exists():
-            missing_deps.append(f"Vitals ({vitals_path.name})")
-        if not interventions_path.exists():
-            missing_deps.append(f"Interventions ({interventions_path.name})")
+        if not patients_path.exists(): missing_deps.append(f"Patients ({patients_path.name})")
+        if not vitals_path.exists(): missing_deps.append(f"Vitals ({vitals_path.name})")
+        if not interventions_path.exists(): missing_deps.append(f"Interventions ({interventions_path.name})")
 
         if missing_deps:
             error_msg = (
@@ -132,11 +128,10 @@ class FeatureAssembler(PipelineComponent):
                 .unique()
             )
 
-            # [FIXED] vitals_mean.parquet only has ICUSTAY_ID. 
-            # We join with 'pat' on ICUSTAY_ID to attach SUBJECT_ID/HADM_ID.
+            # [FIX] Join on ICUSTAY_ID only to retrieve subject/hadm ids from cohort
             vitals_filtered = vitals_lazy.rename({"HOURS_IN": "HOUR_IN"}).join(
                 pat.select(["SUBJECT_ID", "HADM_ID", "ICUSTAY_ID"]).lazy(),
-                on="ICUSTAY_ID", 
+                on="ICUSTAY_ID",
                 how="inner"
             )
 
@@ -189,7 +184,6 @@ class FeatureAssembler(PipelineComponent):
         # 7. Join Static & Interventions
         self.observer.log("INFO", "FeatureAssembler: Stage 6/6 joining static and intervention features")
         
-        # interventions.parquet already has all IDs from OutcomesBuilder
         vent_df = interventions.select(["SUBJECT_ID", "HADM_ID", "ICUSTAY_ID", "HOUR_IN", "VENT", "OUTCOME_FLAG"])
 
         base = (

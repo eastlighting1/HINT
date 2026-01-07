@@ -59,10 +59,15 @@ class ICDService(BaseDomainService):
                 
                 if "y" in f:
                     y_data = f["y"][:]
-                    if y_data.ndim > 1:
-                        target_counts = np.sum(y_data, axis=0)
-                    else:
+                    # [FIX] Safe type casting for bincount compatibility
+                    if y_data.ndim == 1:
+                        # Indices (int)
+                        if y_data.dtype.kind == 'f':
+                            y_data = y_data.astype(np.int64)
                         target_counts = np.bincount(y_data, minlength=num_classes)
+                    else:
+                        # Multi-hot (float/int)
+                        target_counts = np.sum(y_data, axis=0)
                 else:
                     target_counts = np.ones(num_classes)
         except Exception as e:
@@ -71,7 +76,18 @@ class ICDService(BaseDomainService):
 
         self.observer.log("INFO", f"ICDService: Computed input shape num_feats={num_feats} seq_len={seq_len}")
         self.observer.log("INFO", "ICDService: Stage 4/4 building dataloaders")
-        dl_tr = DataLoader(train_source, batch_size=self.cfg.batch_size, collate_fn=collate_tensor_batch, shuffle=True, num_workers=4, pin_memory=True)
+        
+        # [FIX] Add drop_last=True to prevent batch size of 1 which crashes BatchNorm
+        dl_tr = DataLoader(
+            train_source, 
+            batch_size=self.cfg.batch_size, 
+            collate_fn=collate_tensor_batch, 
+            shuffle=True, 
+            num_workers=4, 
+            pin_memory=True,
+            drop_last=True 
+        )
+        
         dl_val = DataLoader(val_source, batch_size=self.cfg.batch_size, collate_fn=collate_tensor_batch, num_workers=4, pin_memory=True)
         dl_test = DataLoader(test_source, batch_size=self.cfg.batch_size, collate_fn=collate_tensor_batch, num_workers=4, pin_memory=True)
 
@@ -131,8 +147,13 @@ class ICDService(BaseDomainService):
                         self.observer.log("WARNING", f"[{model_name}] No best checkpoint found. Using current state.")
                         
                 except RuntimeError as e:
+                    # [FIX] Handle size mismatch safely
                     if "size mismatch" in str(e):
-                        self.observer.log("ERROR", f"[{model_name}] Checkpoint size mismatch (Input features changed?). Continuing with current weights. Please ensure training is sufficient.")
+                        if self.cfg.epochs > 0:
+                            self.observer.log("WARNING", f"[{model_name}] Checkpoint size mismatch. Ignoring old checkpoint and using newly trained weights.")
+                        else:
+                            self.observer.log("ERROR", f"[{model_name}] Checkpoint size mismatch with 'epochs=0'. Cannot proceed with inference. Please set epochs > 0 to retrain.")
+                            continue
                     else:
                         self.observer.log("ERROR", f"[{model_name}] Error loading checkpoint: {e}")
                 except Exception as e:
