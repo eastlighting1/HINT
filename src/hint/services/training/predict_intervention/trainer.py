@@ -1,9 +1,9 @@
 import torch
+import torch.nn as nn
 from torch.utils.data import DataLoader
 from ..common.base import BaseTrainer, BaseEvaluator
 from ....domain.entities import InterventionModelEntity
 from ....domain.vo import CNNConfig
-from ....infrastructure.components import FocalLoss
 
 class InterventionTrainer(BaseTrainer):
     """Trainer for intervention prediction models.
@@ -13,7 +13,7 @@ class InterventionTrainer(BaseTrainer):
         entity (InterventionModelEntity): Model entity wrapper.
         loss_fn (nn.Module): Loss function.
     """
-    def __init__(self, config: CNNConfig, entity: InterventionModelEntity, registry, observer, device):
+    def __init__(self, config: CNNConfig, entity: InterventionModelEntity, registry, observer, device, class_weights=None):
         """Initialize the intervention trainer.
 
         Args:
@@ -22,11 +22,23 @@ class InterventionTrainer(BaseTrainer):
             registry (Any): Artifact registry.
             observer (Any): Logging observer.
             device (Any): Target device.
+            class_weights (torch.Tensor, optional): Pre-computed class weights for handling imbalance.
         """
         super().__init__(registry, observer, device)
         self.cfg = config
         self.entity = entity
-        self.loss_fn = FocalLoss(gamma=self.cfg.focal_gamma, label_smoothing=self.cfg.label_smoothing).to(device)
+        
+        # [MODIFIED] Use Weighted CrossEntropyLoss to handle imbalance effectively
+        if class_weights is not None:
+            self.observer.log("INFO", "InterventionTrainer: Using Weighted CrossEntropyLoss.")
+            self.loss_fn = nn.CrossEntropyLoss(
+                weight=class_weights, 
+                label_smoothing=self.cfg.label_smoothing
+            ).to(device)
+        else:
+            self.loss_fn = nn.CrossEntropyLoss(
+                label_smoothing=self.cfg.label_smoothing
+            ).to(device)
 
     def train(self, train_loader: DataLoader, val_loader: DataLoader, evaluator: BaseEvaluator) -> None:
         """Run the training loop with periodic evaluation.
@@ -49,6 +61,8 @@ class InterventionTrainer(BaseTrainer):
             
             metrics = evaluator.evaluate(val_loader)
             val_acc = metrics["accuracy"]
+            # It's often better to track F1 or loss when handling imbalanced data
+            val_loss = metrics.get("loss", 0.0) 
             
             self.observer.track_metric("cnn_val_acc", val_acc, step=epoch)
             self.observer.log("INFO", f"InterventionTrainer: Epoch {epoch} val_acc={val_acc:.4f}")

@@ -158,7 +158,7 @@ class LabelGenerator(PipelineComponent):
             ds (pl.DataFrame): Feature dataset.
             proc_dir (Path): Output directory.
         """
-        self.observer.log("INFO", "LabelGenerator: Generating Zone 2 (ICD) targets")
+        self.observer.log("INFO", "LabelGenerator: Generating Zone 2 (ICD) targets with frequency sorting")
 
         icd_col = "ICD9_CODES"
         unique_codes_df = ds.select(["ICUSTAY_ID", icd_col]).unique()
@@ -171,21 +171,27 @@ class LabelGenerator(PipelineComponent):
         code_counts = Counter(all_codes)
         top_k = self.icd_cfg.top_k_labels
 
+        # 1. 빈도순 정렬 (가장 많이 등장하는 코드가 0번이 되도록)
         if top_k and len(code_counts) > top_k:
-            keep_codes = set([c for c, _ in code_counts.most_common(top_k)])
+            sorted_codes = [code for code, _ in code_counts.most_common(top_k)]
         else:
-            keep_codes = set(code_counts.keys())
+            sorted_codes = [code for code, _ in code_counts.most_common()]
 
-        le = LabelEncoder()
-        le.fit(list(keep_codes) + ["__OTHER__", "__MISSING__"])
-        class_set = set(le.classes_)
+        special_tokens = ["__OTHER__", "__MISSING__"]
+
+        # 2. 최종 클래스 리스트 및 매핑 생성
+        final_classes = sorted_codes + [t for t in special_tokens if t not in sorted_codes]
+        class_to_idx = {cls: idx for idx, cls in enumerate(final_classes)}
+        class_set = set(final_classes)
 
         target_rows = []
         for sid, codes in raw_codes_map.items():
             raw_label = codes[0] if codes else "__MISSING__"
 
             target_str = raw_label if raw_label in class_set else "__OTHER__"
-            target_idx = int(le.transform([target_str])[0])
+            
+            # 3. 매핑 딕셔너리를 사용하여 인덱스 변환
+            target_idx = class_to_idx[target_str]
 
             target_rows.append({
                 "ICUSTAY_ID": sid,
@@ -198,6 +204,7 @@ class LabelGenerator(PipelineComponent):
 
         meta_path = proc_dir / self.etl_cfg.artifacts.icd_meta_file
         with open(meta_path, "w") as f:
-            json.dump({"icd_classes": list(le.classes_)}, f, indent=2)
+            # 순서가 중요하므로 정렬된 리스트를 저장
+            json.dump({"icd_classes": final_classes}, f, indent=2)
 
-        self.observer.log("INFO", f"LabelGenerator: Saved ICD targets to {out_path} and meta to {meta_path}")
+        self.observer.log("INFO", f"LabelGenerator: Saved ICD targets to {out_path} and meta to {meta_path} (sorted by frequency)")

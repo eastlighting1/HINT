@@ -289,7 +289,7 @@ def main():
     split_name = config.get("split", "train")
     tokenizer_path = config.get("tokenizer_path", "Charangan/MedBERT")
     
-    h5_path = data_dir / f"train_coding_{split_name}.h5"
+    h5_path = data_dir / f"train_intervention_{split_name}.h5"
     
     # 결과물 저장 경로 설정
     output_txt_path = data_dir / f"inspection_report_{split_name}.txt"

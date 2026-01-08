@@ -1,4 +1,5 @@
 import torch
+import torch.nn as nn
 import h5py
 import json
 import numpy as np
@@ -228,6 +229,32 @@ class ICDService(BaseDomainService):
                 seq_len=seq_len, 
                 dropout=self.cfg.dropout
             )
+
+            # [FIX] Re-attach adaptive head if used, so state_dict can be loaded matching the checkpoint structure
+            if self.cfg.loss_type == "adaptive_softmax":
+                if hasattr(network, "embedding_dim"):
+                    in_features = network.embedding_dim
+                elif hasattr(network, "fc"):
+                    in_features = network.fc.in_features
+                else:
+                    raise AttributeError("Model must have 'embedding_dim' for adaptive_softmax.")
+                
+                if num_classes > 100000:
+                    cutoffs = [10000, 50000, num_classes - 10000]
+                elif num_classes > 10000:
+                    cutoffs = [2000, 8000]
+                else:
+                    cutoffs = [num_classes // 4, num_classes // 2]
+                
+                adaptive_head = nn.AdaptiveLogSoftmaxWithLoss(
+                    in_features=in_features,
+                    n_classes=num_classes,
+                    cutoffs=cutoffs,
+                    div_value=4.0
+                )
+                # Register as module to match the saved checkpoint keys (adaptive_head.head.weight etc.)
+                network.add_module("adaptive_head", adaptive_head)
+                self.observer.log("INFO", "ICDService: Re-attached adaptive_head for weight loading.")
             
             entity_name = f"{self.cfg.artifacts.model_name}_{model_name}"
             best_state = self.registry.load_model(entity_name, tag="best", device=str(self.device))
@@ -261,8 +288,17 @@ class ICDService(BaseDomainService):
                 with torch.no_grad():
                     for batch in dl:
                         x_num = batch.x_num.to(self.device)
-                        logits = network(x_num)
-                        probs = torch.sigmoid(logits)
+                        
+                        # [FIX] Inference logic adaptation for Adaptive Softmax
+                        if self.cfg.loss_type == "adaptive_softmax" and hasattr(network, "adaptive_head"):
+                            embeddings = network(x_num, return_embeddings=True)
+                            log_probs = network.adaptive_head.log_prob(embeddings)
+                            # Convert Log Prob to Probability
+                            probs = torch.exp(log_probs)
+                        else:
+                            logits = network(x_num)
+                            probs = torch.sigmoid(logits)
+                            
                         all_preds.append(probs.cpu().numpy())
                 
                 if not all_preds: continue
@@ -270,10 +306,23 @@ class ICDService(BaseDomainService):
                 
                 with h5py.File(src_path, "r") as f_src, h5py.File(tgt_path, "w") as f_tgt:
                     for key in f_src.keys():
+                        # [CRITICAL] Skip 'y' because it contains ICD labels
+                        if key == "y": continue 
                         f_src.copy(key, f_tgt)
                     
                     if "X_icd" in f_tgt: del f_tgt["X_icd"]
                     f_tgt.create_dataset("X_icd", data=full_preds)
+                    
+                    # [CRITICAL] Create 'y' from 'y_vent' (Last Step)
+                    # We need 1D labels for the CNN, derived from the last time step of ventilation
+                    if "y_vent" in f_src:
+                        y_vent = f_src["y_vent"][:]
+                        # Extract the label at the last time step for each sample
+                        y_new = y_vent[:, -1].astype(np.int64)
+                        f_tgt.create_dataset("y", data=y_new)
+                        self.observer.log("INFO", f"Overwrote 'y' with last-step values from 'y_vent'. Shape: {y_new.shape}")
+                    else:
+                        self.observer.log("WARNING", "y_vent not found in source. 'y' might be missing in target.")
                     
                 self.observer.log("INFO", f"Successfully created {tgt_path} with shape {full_preds.shape}")
                 

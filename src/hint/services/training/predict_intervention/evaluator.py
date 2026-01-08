@@ -1,8 +1,10 @@
 import torch
 import numpy as np
+import warnings
 from typing import Dict, List
 from sklearn.metrics import accuracy_score, f1_score, roc_auc_score, average_precision_score
 from sklearn.preprocessing import label_binarize
+from sklearn.exceptions import UndefinedMetricWarning
 
 from ..common.base import BaseTrainer, BaseEvaluator
 from ....domain.entities import InterventionModelEntity
@@ -74,27 +76,30 @@ class InterventionEvaluator(BaseEvaluator):
                                                             
         y_true_bin = label_binarize(y_true, classes=[0, 1, 2, 3])
         
-                                                                           
-        try:
-            aucs = roc_auc_score(y_true_bin, y_score, average=None, multi_class='ovr')
-            macro_auc = float(np.mean(aucs))
-            onset_auc = float(aucs[0])
-            wean_auc = float(aucs[1])
-            stay_on_auc = float(aucs[2])
-            stay_off_auc = float(aucs[3])
-        except ValueError:
+        # Suppress warnings for undefined metrics when classes are missing in the batch/dataset
+        with warnings.catch_warnings():
+            warnings.filterwarnings("ignore", category=UndefinedMetricWarning)
+            warnings.filterwarnings("ignore", category=UserWarning, message=".*No positive class found.*")
+            
+            try:
+                aucs = roc_auc_score(y_true_bin, y_score, average=None, multi_class='ovr')
+                macro_auc = float(np.mean(aucs))
+                onset_auc = float(aucs[0])
+                wean_auc = float(aucs[1])
+                stay_on_auc = float(aucs[2])
+                stay_off_auc = float(aucs[3])
+            except ValueError:
                                                                      
-            macro_auc = 0.0
-            onset_auc = 0.0
-            wean_auc = 0.0
-            stay_on_auc = 0.0
-            stay_off_auc = 0.0
+                macro_auc = 0.0
+                onset_auc = 0.0
+                wean_auc = 0.0
+                stay_on_auc = 0.0
+                stay_off_auc = 0.0
 
-                        
-        try:
-            macro_auprc = float(average_precision_score(y_true_bin, y_score, average='macro'))
-        except ValueError:
-            macro_auprc = 0.0
+            try:
+                macro_auprc = float(average_precision_score(y_true_bin, y_score, average='macro'))
+            except ValueError:
+                macro_auprc = 0.0
 
         metrics = {
             "accuracy": acc,

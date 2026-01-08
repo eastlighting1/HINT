@@ -4,6 +4,7 @@ import h5py
 import shutil
 from pathlib import Path
 from typing import List, Dict, Tuple
+from sklearn.model_selection import train_test_split
 from ....foundation.interfaces import PipelineComponent, Registry, TelemetryObserver
 from ....domain.vo import ETLConfig, ICDConfig, CNNConfig
 
@@ -66,24 +67,41 @@ class TensorConverter(PipelineComponent):
         else:
             self.observer.log("WARNING", f"TensorConverter: ICD metadata not found at {icd_meta_path}. Training may fail.")
 
-        self.observer.log("INFO", "TensorConverter: Stage 3/4 Splitting dataset")
-        subjects = df.select("SUBJECT_ID").unique()
-        n_subjects = subjects.height
-        n_train = int(n_subjects * 0.7)
-        n_val = int(n_subjects * 0.1)
+        self.observer.log("INFO", "TensorConverter: Stage 3/4 Splitting dataset (Stratified)")
         
-        subjects = subjects.sample(fraction=1.0, shuffle=True, seed=42)
-        train_ids = subjects[:n_train]["SUBJECT_ID"]
-        val_ids = subjects[n_train:n_train+n_val]["SUBJECT_ID"]
-        test_ids = subjects[n_train+n_val:]["SUBJECT_ID"]
+        # [MODIFIED] Stratified Split Logic to ensure rare classes exist in all splits
+        if "y_vent" in df.columns:
+            # Group by Subject and find the 'min' label (assuming 0=ONSET, 1=WEAN, 2=STAY ON are rarer than 3=STAY OFF)
+            subj_labels = (
+                df.select(["SUBJECT_ID", "y_vent"])
+                .fill_null(3) 
+                .group_by("SUBJECT_ID")
+                .agg(pl.col("y_vent").min().alias("stratify_label")) 
+            )
+            subjects = subj_labels["SUBJECT_ID"].to_numpy()
+            labels = subj_labels["stratify_label"].to_numpy()
+        else:
+            subjects = df.select("SUBJECT_ID").unique()["SUBJECT_ID"].to_numpy()
+            labels = np.zeros(len(subjects))
+
+        # Split: Train(70%) vs Temp(30%)
+        train_ids, temp_ids, _, temp_labels = train_test_split(
+            subjects, labels, test_size=0.3, stratify=labels, random_state=42
+        )
+        
+        # Split Temp: Val(10%) vs Test(20%) -> Val is 1/3 of Temp
+        val_ids, test_ids = train_test_split(
+            temp_ids, test_size=0.6666, stratify=temp_labels, random_state=42
+        )
+        
+        self.observer.log("INFO", f"Split sizes: Train={len(train_ids)}, Val={len(val_ids)}, Test={len(test_ids)}")
         
         prefix = self.icd_cfg.data.input_h5_prefix 
         max_cands_len = 50 
 
-        # [NEW] Calculate Global Stats on TRAIN set only
         self.observer.log("INFO", "TensorConverter: Calculating Global Mean/Std from Training Set...")
         
-        train_mask = pl.col("SUBJECT_ID").is_in(train_ids)
+        train_mask = pl.col("SUBJECT_ID").is_in(list(train_ids))
         train_df_stats = df.filter(train_mask).select(numeric_cols)
         
         global_stats = {}
@@ -91,7 +109,6 @@ class TensorConverter(PipelineComponent):
             mean_val = train_df_stats[col].mean()
             std_val = train_df_stats[col].std()
             
-            # Safe guard for constant columns
             if std_val is None or std_val == 0:
                 std_val = 1.0
             if mean_val is None:
@@ -103,28 +120,25 @@ class TensorConverter(PipelineComponent):
 
         self.observer.log("INFO", f"TensorConverter: Stage 4/4 Writing HDF5 splits with prefix '{prefix}'")
         
-        # Pass global_stats to _process_split
-        self._process_split(df.filter(pl.col("SUBJECT_ID").is_in(train_ids)), "train", numeric_cols, categorical_cols, cache_dir, prefix, max_cands_len, global_stats)
+        # Pass global_stats to _process_split using the new stratified IDs
+        self._process_split(df.filter(pl.col("SUBJECT_ID").is_in(list(train_ids))), "train", numeric_cols, categorical_cols, cache_dir, prefix, max_cands_len, global_stats)
         
         self.observer.log("INFO", f"TensorConverter: Writing val split to {cache_dir / f'{prefix}_val.h5'}")
-        self._process_split(df.filter(pl.col("SUBJECT_ID").is_in(val_ids)), "val", numeric_cols, categorical_cols, cache_dir, prefix, max_cands_len, global_stats)
+        self._process_split(df.filter(pl.col("SUBJECT_ID").is_in(list(val_ids))), "val", numeric_cols, categorical_cols, cache_dir, prefix, max_cands_len, global_stats)
         
         self.observer.log("INFO", f"TensorConverter: Writing test split to {cache_dir / f'{prefix}_test.h5'}")
-        self._process_split(df.filter(pl.col("SUBJECT_ID").is_in(test_ids)), "test", numeric_cols, categorical_cols, cache_dir, prefix, max_cands_len, global_stats)
+        self._process_split(df.filter(pl.col("SUBJECT_ID").is_in(list(test_ids))), "test", numeric_cols, categorical_cols, cache_dir, prefix, max_cands_len, global_stats)
 
     def _process_split(self, split_df: pl.DataFrame, split_name: str, num_cols: List[str], cat_cols: List[str], cache_dir: Path, prefix: str, max_cands: int, global_stats: Dict[str, Tuple[float, float]]):
         if split_df.height == 0:
             self.observer.log("WARNING", f"TensorConverter: Split {split_name} is empty. Skipping.")
             return
 
-        # [FIXED] Apply Global Standardization (Z-score)
-        # Instead of per-patient normalization (Instance Norm), we use population statistics.
         if num_cols and global_stats:
             self.observer.log("INFO", f"TensorConverter: Applying Global Standardization for split {split_name}")
             norm_exprs = []
             for col in num_cols:
                 mean_val, std_val = global_stats.get(col, (0.0, 1.0))
-                # (x - mean) / std
                 norm = (pl.col(col) - mean_val) / std_val
                 norm_exprs.append(norm.alias(col))
             

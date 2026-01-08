@@ -5,7 +5,7 @@ data:
   data_cache_dir: "data/cache"
 
 execution:
-  subset_ratio: 0.1
+  subset_ratio: 1
 
 artifacts:
   model_name: "icd_model"

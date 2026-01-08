@@ -162,12 +162,17 @@ class AppFactory:
         prefix = cfg.data.input_h5_prefix 
         train_path = cache_dir / f"{prefix}_train.h5"
         val_path = cache_dir / f"{prefix}_val.h5"
+        test_path = cache_dir / f"{prefix}_test.h5"
         
-        target_key = cfg.keys.TARGET_VENT_STATE if hasattr(cfg.keys, "TARGET_VENT_STATE") else "y_vent"
+        # [FIX] Default to "y" because ICDService.generate_intervention_dataset creates "y" derived from "y_vent"
+        target_key = cfg.keys.TARGET_VENT_STATE if hasattr(cfg.keys, "TARGET_VENT_STATE") else "y"
 
         try:
             train_source = HDF5StreamingSource(train_path, seq_len=cfg.seq_len, label_key=target_key)
             val_source = HDF5StreamingSource(val_path, seq_len=cfg.seq_len, label_key=target_key)
+            # [FIX] Initialize test source
+            test_source = HDF5StreamingSource(test_path, seq_len=cfg.seq_len, label_key=target_key) if test_path.exists() else None
+            
             vocab_sizes = train_source.get_real_vocab_sizes()
 
             if len(train_source) > 0:
@@ -181,6 +186,7 @@ class AppFactory:
             observer.log("WARNING", f"CNN Factory: Could not initialize data sources ({e}). Using dummy dims.")
             train_source = None
             val_source = None
+            test_source = None
             vocab_sizes = []
             num_channels = 1
             icd_dim = 0
@@ -209,5 +215,6 @@ class AppFactory:
             observer=observer,
             entity=entity,
             train_dataset=train_source,
-            val_dataset=val_source
+            val_dataset=val_source,
+            test_dataset=test_source
         )

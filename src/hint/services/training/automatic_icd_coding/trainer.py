@@ -67,14 +67,21 @@ class ICDTrainer(BaseTrainer):
             else:
                 cutoffs = [n_classes // 4, n_classes // 2]
                 
-            self.adaptive_loss_fn = nn.AdaptiveLogSoftmaxWithLoss(
+            # Create the Adaptive Log Softmax module
+            adaptive_head = nn.AdaptiveLogSoftmaxWithLoss(
                 in_features=in_features,
                 n_classes=n_classes,
                 cutoffs=cutoffs,
                 div_value=4.0
             ).to(self.device)
+
+            # Register it as a submodule of the model so it gets saved/loaded with state_dict
+            self.entity.model.add_module("adaptive_head", adaptive_head)
             
-            self.observer.log("INFO", f"Initialized AdaptiveLogSoftmaxWithLoss with cutoffs: {cutoffs}")
+            # Reference it for local use
+            self.adaptive_loss_fn = self.entity.model.adaptive_head
+            
+            self.observer.log("INFO", f"Initialized AdaptiveLogSoftmaxWithLoss with cutoffs: {cutoffs} and attached to model.")
 
     def _prepare_inputs(self, batch: TensorBatch) -> Dict[str, torch.Tensor]:
         """Prepare model inputs from a TensorBatch.
@@ -119,10 +126,8 @@ class ICDTrainer(BaseTrainer):
         self.entity.to(self.device)
         self.observer.log("INFO", f"ICDTrainer: Start training for {self.cfg.epochs} epochs (AMP + Mode: {self.cfg.loss_type}).")
         
-                                                         
+        # model.parameters() now includes adaptive_head parameters because of add_module
         params = list(self.entity.model.parameters())
-        if self.use_adaptive_softmax:
-            params += list(self.adaptive_loss_fn.parameters())
             
         optimizer = torch.optim.Adam(params, lr=self.cfg.lr, weight_decay=1e-5)
         
@@ -144,6 +149,8 @@ class ICDTrainer(BaseTrainer):
         for epoch in range(1, self.cfg.epochs + 1):
             self.entity.epoch = epoch
             self.entity.model.train()
+            # If adaptive_head is a submodule, calling model.train() handles it, 
+            # but explicit call is harmless.
             if self.use_adaptive_softmax:
                 self.adaptive_loss_fn.train()
             

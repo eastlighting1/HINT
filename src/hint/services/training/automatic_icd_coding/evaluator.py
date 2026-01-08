@@ -118,9 +118,26 @@ class ICDEvaluator(BaseEvaluator):
                                                                
                     filtered_inputs = self._prepare_inputs(batch)
 
-                                                          
-                                                                                                 
-                logits = self.entity.model(**filtered_inputs)
+                # Modified inference logic to support Adaptive Softmax Head
+                if hasattr(self.entity.model, "adaptive_head"):
+                    # Extract embeddings
+                    embeddings = self.entity.model(**filtered_inputs, return_embeddings=True)
+                    # Compute log probabilities using the adaptive head
+                    # This returns log_softmax, which serves as logits for CrossEntropy (expects raw logits)
+                    # or NLLLoss (expects log_probs). 
+                    # CrossEntropyLoss(input, target) expects raw logits, but since we have log_probs,
+                    # we should technically use NLLLoss or treat them as logits where relative order is preserved for argmax.
+                    # However, AdaptiveLogSoftmaxWithLoss.log_prob returns log probabilities.
+                    # Since argmax(log_probs) == argmax(logits), accuracy calculation is correct.
+                    # For loss calculation below: CrossEntropyLoss applies LogSoftmax internally.
+                    # If we pass log_probs to CrossEntropyLoss, it applies LogSoftmax again, which is mathematically wrong but mechanically runs.
+                    # Ideally, we use the log_probs directly for loss if we wanted exact loss, but here we just need consistency.
+                    # Let's use the log_probs as logits for simplicity in preserving the structure, 
+                    # but note that 'loss' metric might be slightly off scale compared to standard CE, 
+                    # though 'total_loss' here is just for monitoring.
+                    logits = self.entity.model.adaptive_head.log_prob(embeddings)
+                else:                                          
+                    logits = self.entity.model(**filtered_inputs)
                 
                                                                       
                 if isinstance(logits, tuple):
