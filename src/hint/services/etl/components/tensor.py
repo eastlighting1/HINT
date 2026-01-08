@@ -9,7 +9,7 @@ from ....foundation.interfaces import PipelineComponent, Registry, TelemetryObse
 from ....domain.vo import ETLConfig, ICDConfig, CNNConfig
 
 class TensorConverter(PipelineComponent):
-    """Convert parquet features into HDF5 tensor datasets."""
+    """Convert parquet features into HDF5 tensor datasets with Pre-padding."""
 
     def __init__(self, etl_config: ETLConfig, cnn_config: CNNConfig, icd_config: ICDConfig, registry: Registry, observer: TelemetryObserver):
         self.etl_cfg = etl_config
@@ -69,9 +69,7 @@ class TensorConverter(PipelineComponent):
 
         self.observer.log("INFO", "TensorConverter: Stage 3/4 Splitting dataset (Stratified)")
         
-        # [MODIFIED] Stratified Split Logic to ensure rare classes exist in all splits
         if "y_vent" in df.columns:
-            # Group by Subject and find the 'min' label (assuming 0=ONSET, 1=WEAN, 2=STAY ON are rarer than 3=STAY OFF)
             subj_labels = (
                 df.select(["SUBJECT_ID", "y_vent"])
                 .fill_null(3) 
@@ -84,15 +82,17 @@ class TensorConverter(PipelineComponent):
             subjects = df.select("SUBJECT_ID").unique()["SUBJECT_ID"].to_numpy()
             labels = np.zeros(len(subjects))
 
-        # Split: Train(70%) vs Temp(30%)
-        train_ids, temp_ids, _, temp_labels = train_test_split(
-            subjects, labels, test_size=0.3, stratify=labels, random_state=42
-        )
-        
-        # Split Temp: Val(10%) vs Test(20%) -> Val is 1/3 of Temp
-        val_ids, test_ids = train_test_split(
-            temp_ids, test_size=0.6666, stratify=temp_labels, random_state=42
-        )
+        try:
+            train_ids, temp_ids, _, temp_labels = train_test_split(
+                subjects, labels, test_size=0.3, stratify=labels, random_state=42
+            )
+            val_ids, test_ids = train_test_split(
+                temp_ids, test_size=0.6666, stratify=temp_labels, random_state=42
+            )
+        except ValueError as e:
+            self.observer.log("WARNING", f"Stratified split failed. Falling back to random split. {e}")
+            train_ids, temp_ids = train_test_split(subjects, test_size=0.3, random_state=42)
+            val_ids, test_ids = train_test_split(temp_ids, test_size=0.6666, random_state=42)
         
         self.observer.log("INFO", f"Split sizes: Train={len(train_ids)}, Val={len(val_ids)}, Test={len(test_ids)}")
         
@@ -118,15 +118,10 @@ class TensorConverter(PipelineComponent):
             
         self.observer.log("INFO", f"TensorConverter: Global stats computed for {len(global_stats)} features.")
 
-        self.observer.log("INFO", f"TensorConverter: Stage 4/4 Writing HDF5 splits with prefix '{prefix}'")
+        self.observer.log("INFO", f"TensorConverter: Stage 4/4 Writing HDF5 splits with prefix '{prefix}' (Pre-padding)")
         
-        # Pass global_stats to _process_split using the new stratified IDs
         self._process_split(df.filter(pl.col("SUBJECT_ID").is_in(list(train_ids))), "train", numeric_cols, categorical_cols, cache_dir, prefix, max_cands_len, global_stats)
-        
-        self.observer.log("INFO", f"TensorConverter: Writing val split to {cache_dir / f'{prefix}_val.h5'}")
         self._process_split(df.filter(pl.col("SUBJECT_ID").is_in(list(val_ids))), "val", numeric_cols, categorical_cols, cache_dir, prefix, max_cands_len, global_stats)
-        
-        self.observer.log("INFO", f"TensorConverter: Writing test split to {cache_dir / f'{prefix}_test.h5'}")
         self._process_split(df.filter(pl.col("SUBJECT_ID").is_in(list(test_ids))), "test", numeric_cols, categorical_cols, cache_dir, prefix, max_cands_len, global_stats)
 
     def _process_split(self, split_df: pl.DataFrame, split_name: str, num_cols: List[str], cat_cols: List[str], cache_dir: Path, prefix: str, max_cands: int, global_stats: Dict[str, Tuple[float, float]]):
@@ -154,7 +149,7 @@ class TensorConverter(PipelineComponent):
             if cat_cols:
                 f.create_dataset("X_cat", (n_samples, len(cat_cols)), dtype='i4')
             
-        self.observer.log("INFO", f"TensorConverter: Vectorized processing for {n_samples} patients...")
+        self.observer.log("INFO", f"TensorConverter: Vectorized processing for {n_samples} patients (Pre-padding)...")
         
         sorted_df = split_df.sort(["ICUSTAY_ID", "HOUR_IN"])
         unique_stays = sorted_df.select("ICUSTAY_ID").unique(maintain_order=True)
@@ -168,29 +163,66 @@ class TensorConverter(PipelineComponent):
             
         grouped = sorted_df.group_by("ICUSTAY_ID", maintain_order=True).agg(agg_exprs)
         
+        # Initialize tensors with 0.0 for features
         X_num = np.zeros((n_samples, seq_len, n_features), dtype=np.float32)
-        y_vent = np.zeros((n_samples, seq_len), dtype=np.int64)
+        
+        # [KEY CHANGE 1] Initialize targets with 3 (STAY OFF) for padding areas
+        # Pre-padding fills the beginning with 3s, which is logically consistent (patient not in ICU/Vent yet)
+        y_vent = np.full((n_samples, seq_len), 3, dtype=np.int64)
         y_vaso = np.zeros((n_samples, seq_len), dtype=np.int64)
         
         valid_window = sorted_df.filter((pl.col("HOUR_IN") >= 0) & (pl.col("HOUR_IN") < seq_len))
         id_map = {sid: i for i, sid in enumerate(stay_ids)}
         
+        # [KEY CHANGE 2] Calculate Pre-padding Offsets
+        # Find the max HOUR_IN for each stay to determine where the data ends.
+        # We want the data to end at (seq_len - 1).
+        # Offset = (seq_len - 1) - max_hour
+        max_hours = valid_window.group_by("ICUSTAY_ID", maintain_order=True).agg(
+            pl.col("HOUR_IN").max().alias("max_h")
+        )
+        
+        offset_map = {}
+        for row in max_hours.iter_rows():
+            sid, mh = row
+            offset = (seq_len - 1) - mh
+            offset_map[sid] = max(0, offset) # Safety clamp
+
         stay_col = valid_window["ICUSTAY_ID"].to_numpy()
         hour_col = valid_window["HOUR_IN"].to_numpy()
         row_indices = np.array([id_map[s] for s in stay_col])
-        col_indices = hour_col
+        
+        # Apply offsets to column indices
+        row_offsets = np.zeros(n_samples, dtype=np.int64)
+        for sid, off in offset_map.items():
+            if sid in id_map:
+                row_offsets[id_map[sid]] = off
+        
+        # Shift hours to the right (Pre-padding)
+        col_indices = hour_col + row_offsets[row_indices]
+        
+        # Safety check to ensure indices don't exceed bounds
+        mask = (col_indices >= 0) & (col_indices < seq_len)
+        row_indices = row_indices[mask]
+        col_indices = col_indices[mask]
+        
+        # Filter data arrays with the same mask
+        # We need to re-extract values based on the filtered rows
+        # Since we can't easily filter valid_window based on numpy mask index, 
+        # we assume logic is correct (offset guarantees last element is at seq_len-1).
+        # If HOUR_IN > seq_len is already filtered, offset shouldn't push out of bounds unless HOUR_IN negative.
         
         for i, col_name in enumerate(num_cols):
-            vals = valid_window[col_name].to_numpy().astype(np.float32)
+            vals = valid_window[col_name].to_numpy().astype(np.float32)[mask]
             X_num[row_indices, col_indices, i] = vals
             
         vent_col = "y_vent" if "y_vent" in valid_window.columns else "VENT"
         if vent_col in valid_window.columns:
-            vals = valid_window[vent_col].fill_null(0).to_numpy().astype(np.int64)
+            vals = valid_window[vent_col].fill_null(3).to_numpy().astype(np.int64)[mask]
             y_vent[row_indices, col_indices] = vals
             
         if "VASO" in valid_window.columns:
-            vals = valid_window["VASO"].fill_null(0).to_numpy().astype(np.int64)
+            vals = valid_window["VASO"].fill_null(0).to_numpy().astype(np.int64)[mask]
             y_vaso[row_indices, col_indices] = vals
             
         X_num_transposed = np.transpose(X_num, (0, 2, 1))
