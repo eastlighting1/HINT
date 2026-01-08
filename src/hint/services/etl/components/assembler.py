@@ -90,21 +90,27 @@ class FeatureAssembler(PipelineComponent):
         if not cand.exists() and (raw_dir / "DIAGNOSES_ICD.csv.gz").exists():
             cand = raw_dir / "DIAGNOSES_ICD.csv.gz"
 
+        # [FIX] Load SEQ_NUM to ensure primary diagnosis (SEQ_NUM=1) comes first
         if cand.exists():
             self.observer.log("INFO", f"FeatureAssembler: Loading ICD9 codes from {cand}")
             icd9 = (
                 pl.read_csv(cand, infer_schema_length=0)
-                .select(["SUBJECT_ID", "HADM_ID", "ICD9_CODE"])
+                .select(["SUBJECT_ID", "HADM_ID", "SEQ_NUM", "ICD9_CODE"])
                 .with_columns(
                     [
                         pl.col("SUBJECT_ID").cast(pl.Int64),
                         pl.col("HADM_ID").cast(pl.Int64),
+                        # SEQ_NUM can be null or float in raw csvs
+                        pl.col("SEQ_NUM").cast(pl.Float64),
                         pl.col("ICD9_CODE").cast(pl.Utf8),
                     ]
                 )
                 .drop_nulls()
-                .group_by(["SUBJECT_ID", "HADM_ID"])
-                .agg([pl.col("ICD9_CODE").unique().sort().alias("ICD9_CODES")])
+                # Sort by Subject, Admission, and Priority (SEQ_NUM)
+                .sort(["SUBJECT_ID", "HADM_ID", "SEQ_NUM"]) 
+                .group_by(["SUBJECT_ID", "HADM_ID"], maintain_order=True)
+                # No longer using .sort() inside agg, relying on main sort order
+                .agg([pl.col("ICD9_CODE").unique(maintain_order=True).alias("ICD9_CODES")])
             )
         else:
             self.observer.log("WARNING", "FeatureAssembler: DIAGNOSES_ICD source not found. Using empty ICD codes.")
