@@ -10,58 +10,36 @@ from ....domain.vo import ICDConfig
 from ....foundation.dtos import TensorBatch
 
 class ICDTrainer(BaseTrainer):
-    """Trainer for ICD classification with partial label learning.
-
-    This trainer uses adaptive softmax with candidate sampling for
-    partial label learning and tracks validation accuracy.
-
-    Attributes:
-        cfg (ICDConfig): Training configuration.
-        entity (ICDModelEntity): Wrapped model entity.
-        class_freq (Optional[np.ndarray]): Optional class frequency vector.
-        scaler (Optional[torch.amp.GradScaler]): AMP gradient scaler.
-        adaptive_loss_fn (Any): Adaptive softmax loss function.
-    """
+    """Trainer for ICD classification."""
     
     def __init__(self, config: ICDConfig, entity: ICDModelEntity, registry, observer, device, class_freq: np.ndarray = None, ignored_indices: Optional[List[int]] = None):
-        """Initialize the ICD trainer."""
         super().__init__(registry, observer, device)
         self.cfg = config
         self.entity = entity
         self.class_freq = class_freq
         self.scaler = torch.amp.GradScaler('cuda') if torch.cuda.is_available() else None
-        
         self.adaptive_loss_fn = self.entity.model.adaptive_head
 
     def _prepare_inputs(self, batch: TensorBatch) -> Dict[str, torch.Tensor]:
-        """Prepare 3-channel inputs from a TensorBatch.
-
-        Args:
-            batch (TensorBatch): Batch containing x_num (and optionally x_cat).
-
-        Returns:
-            Dict[str, torch.Tensor]: Dictionary with model inputs.
-        """
+        """Prepare inputs from a TensorBatch."""
         inputs = {}
+        # [수정] x_val, x_msk, x_delta 병합 로직 제거 -> x_num 직접 사용
+        if hasattr(batch, 'x_num') and batch.x_num is not None:
+            inputs["x_num"] = batch.x_num.to(self.device).float()
+        else:
+            # Fallback
+            x_val = batch.x_val.to(self.device).float()
+            x_msk = batch.x_msk.to(self.device).float()
+            x_delta = batch.x_delta.to(self.device).float()
+            inputs["x_num"] = torch.cat([x_val, x_msk, x_delta], dim=1)
         
-        # FIX: Use x_num directly as it is now pre-concatenated by TensorConverter/Loader
-        inputs["x_num"] = batch.x_num.to(self.device).float()
-        
-        # Optionally support categorical features if the model needs them
         if batch.x_cat is not None:
             inputs["x_cat"] = batch.x_cat.to(self.device).long()
         
         return inputs
 
     def _sample_target_from_candidates(self, candidates: torch.Tensor) -> torch.Tensor:
-        """Sample one valid label from each candidate set.
-
-        Args:
-            candidates (torch.Tensor): Candidate label indices.
-
-        Returns:
-            torch.Tensor: Sampled target labels.
-        """
+        """Sample one valid label from each candidate set."""
         targets = []
         candidates_np = candidates.cpu().numpy()
         for row in candidates_np:
@@ -73,13 +51,7 @@ class ICDTrainer(BaseTrainer):
         return torch.tensor(targets, device=self.device, dtype=torch.long)
 
     def train(self, train_loader: DataLoader, val_loader: DataLoader, evaluator: BaseEvaluator) -> None:
-        """Run the training loop with validation.
-
-        Args:
-            train_loader (DataLoader): Training data loader.
-            val_loader (DataLoader): Validation data loader.
-            evaluator (BaseEvaluator): Evaluator instance.
-        """
+        """Run the training loop with validation."""
         self.entity.to(self.device)
         self.entity.model.train()
         params = list(self.entity.model.parameters())

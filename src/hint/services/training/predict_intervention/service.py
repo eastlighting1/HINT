@@ -1,5 +1,3 @@
-# src/hint/services/training/predict_intervention/service.py
-
 import torch
 import h5py
 import numpy as np
@@ -8,8 +6,11 @@ from typing import Optional
 from sklearn.utils.class_weight import compute_class_weight
 from torch.utils.data import DataLoader, Dataset
 from ..common.base import BaseDomainService
-from .trainer import InterventionTrainer
-from .evaluator import InterventionEvaluator
+
+# [수정] 순환 참조 방지를 위해 Top-level import 제거
+# from .trainer import InterventionTrainer
+# from .evaluator import InterventionEvaluator
+
 from ....domain.entities import InterventionModelEntity
 from ....domain.vo import CNNConfig
 from ....foundation.interfaces import TelemetryObserver, Registry
@@ -17,31 +18,9 @@ from ....infrastructure.datasource import collate_tensor_batch, HDF5StreamingSou
 from ....infrastructure.networks import get_network_class
 
 class InterventionService(BaseDomainService):
-    """Service that trains the HINT model for intervention prediction.
-
-    This service prepares data loaders, initializes the model, executes
-    training, and evaluates performance on a held-out test set.
-
-    Attributes:
-        cfg (CNNConfig): Training configuration.
-        registry (Registry): Artifact registry for checkpoints.
-        entity (InterventionModelEntity): Model entity wrapper.
-        train_ds (Dataset): Training dataset.
-        val_ds (Dataset): Validation dataset.
-        test_ds (Optional[Dataset]): Optional test dataset.
-        device (str): Selected device string.
-    """
+    """Service that trains the HINT model for intervention prediction."""
     
-    def __init__(
-        self,
-        config: CNNConfig,
-        registry: Registry,
-        observer: TelemetryObserver,
-        entity: InterventionModelEntity,
-        train_dataset: Dataset,
-        val_dataset: Dataset,
-        test_dataset: Optional[Dataset] = None
-    ):
+    def __init__(self, config: CNNConfig, registry: Registry, observer: TelemetryObserver, entity: InterventionModelEntity, train_dataset: Dataset, val_dataset: Dataset, test_dataset: Optional[Dataset] = None):
         super().__init__(observer)
         self.cfg = config
         self.registry = registry
@@ -53,6 +32,10 @@ class InterventionService(BaseDomainService):
 
     def execute(self) -> None:
         """Execute the full intervention training workflow."""
+        # [수정] 메서드 내부에서 임포트 (Lazy Import)
+        from .trainer import InterventionTrainer
+        from .evaluator import InterventionEvaluator
+
         self.observer.log("INFO", "InterventionService: Stage 1/4 building dataloaders and class weights.")
 
         class_weights = None
@@ -71,13 +54,10 @@ class InterventionService(BaseDomainService):
                         if len(y_valid) > 0:
                             classes = np.unique(y_valid)
                             weights = compute_class_weight(class_weight='balanced', classes=classes, y=y_valid)
-                            
                             weight_map = {c: w for c, w in zip(classes, weights)}
                             final_weights = [weight_map.get(i, 1.0) for i in range(4)]
-                            
                             class_weights = torch.FloatTensor(final_weights).to(self.device)
                             class_weights = torch.clamp(class_weights, max=20.0)
-                            
                             self.observer.log("INFO", f"Computed Class Weights: {class_weights.tolist()}")
         except Exception as e:
             self.observer.log("WARNING", f"Failed to compute class weights: {e}")
@@ -91,8 +71,7 @@ class InterventionService(BaseDomainService):
         self.observer.log("INFO", "InterventionService: Stage 2/4 initializing HINT model and input dimensions.")
 
         with h5py.File(self.train_ds.h5_path, 'r') as f:
-            # FIX: Read from 'X_num' directly. 
-            # The structure is (N, Channels, Seq), so shape[1] is the number of features.
+            # [수정] X_val 대신 X_num 사용
             num_feats = f["X_num"].shape[1]
             
             icd_dim = 0
@@ -102,25 +81,10 @@ class InterventionService(BaseDomainService):
             else:
                 self.observer.log("WARNING", "X_icd not found in dataset. Gating disabled.")
 
-        # FIX: Use "TCN" instead of "HINT" to match the keys in networks.py
+        # [수정] "HINT" 대신 "TCN" 사용
         NetworkClass = get_network_class("TCN")
-        network = NetworkClass(
-            in_chs=num_feats, # TCNClassifier.__init__ expects 'in_chs' or 'num_feats' depending on implementation. Assuming it matches TCNClassifier signature.
-            # If TCNClassifier signature uses different arg names, adjust here. 
-            # Based on previous file content: TCNClassifier(in_chs, n_cls, vocab_sizes, ...)
-            # We need to adapt arguments to match TCNClassifier.__init__ signature found in networks.py
-            n_cls=4,
-            vocab_sizes=self.train_ds.get_real_vocab_sizes() if hasattr(self.train_ds, "get_real_vocab_sizes") else [],
-            icd_dim=icd_dim,
-            embed_dim=128, # or self.cfg.embed_dim
-            head_drop=self.cfg.dropout,
-            # Add other necessary args from config if needed
-        )
         
-        # Note: The previous code was instantiating with (num_feats, num_classes, ...).
-        # TCNClassifier defined earlier takes (in_chs, n_cls, vocab_sizes, ...).
-        # Let's ensure strict compatibility with the defined TCNClassifier in networks.py.
-        
+        # [수정] TCNClassifier 인자 호환성 보장
         vocab_sizes = []
         if hasattr(self.train_ds, "get_real_vocab_sizes"):
              vocab_sizes = self.train_ds.get_real_vocab_sizes()
