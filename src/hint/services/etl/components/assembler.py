@@ -8,6 +8,9 @@ from ....domain.vo import ETLConfig
 class FeatureAssembler(PipelineComponent):
     """Assemble feature tables for downstream modeling.
 
+    This component joins cohort metadata, vitals, interventions, and
+    ICD codes into a feature table for model training.
+
     Attributes:
         cfg (ETLConfig): ETL configuration.
         registry (Registry): Artifact registry.
@@ -27,7 +30,11 @@ class FeatureAssembler(PipelineComponent):
         self.observer = observer
 
     def execute(self) -> None:
-        """Run feature assembly for static and dynamic inputs."""
+        """Run feature assembly for static and dynamic inputs.
+
+        Raises:
+            FileNotFoundError: If required upstream artifacts are missing.
+        """
         proc_dir = Path(self.cfg.proc_dir)
         raw_dir = Path(self.cfg.raw_dir)
         
@@ -90,7 +97,6 @@ class FeatureAssembler(PipelineComponent):
         if not cand.exists() and (raw_dir / "DIAGNOSES_ICD.csv.gz").exists():
             cand = raw_dir / "DIAGNOSES_ICD.csv.gz"
 
-        # [FIX] Load SEQ_NUM to ensure primary diagnosis (SEQ_NUM=1) comes first
         if cand.exists():
             self.observer.log("INFO", f"FeatureAssembler: Loading ICD9 codes from {cand}")
             icd9 = (
@@ -100,16 +106,13 @@ class FeatureAssembler(PipelineComponent):
                     [
                         pl.col("SUBJECT_ID").cast(pl.Int64),
                         pl.col("HADM_ID").cast(pl.Int64),
-                        # SEQ_NUM can be null or float in raw csvs
                         pl.col("SEQ_NUM").cast(pl.Float64),
                         pl.col("ICD9_CODE").cast(pl.Utf8),
                     ]
                 )
                 .drop_nulls()
-                # Sort by Subject, Admission, and Priority (SEQ_NUM)
                 .sort(["SUBJECT_ID", "HADM_ID", "SEQ_NUM"]) 
                 .group_by(["SUBJECT_ID", "HADM_ID"], maintain_order=True)
-                # No longer using .sort() inside agg, relying on main sort order
                 .agg([pl.col("ICD9_CODE").unique(maintain_order=True).alias("ICD9_CODES")])
             )
         else:
@@ -178,6 +181,22 @@ class FeatureAssembler(PipelineComponent):
         v_cols = [f"V__{normalize_name_py(n)}" for n in self.cfg.exact_level2_104]
         vl_wide = vl_wide.select(["SUBJECT_ID", "HADM_ID", "ICUSTAY_ID", "HOUR_IN"] + v_cols)
 
+        leakage_cols = [
+            "V__tidal_volume_observed", 
+            "V__tidal_volume_set", 
+            "V__tidal_volume_spontaneous", 
+            "V__peak_inspiratory_pressure", 
+            "V__positive_end_expiratory_pressure", 
+            "V__fraction_inspired_oxygen_set", 
+            "V__respiratory_rate_set"
+        ]
+        
+        existing_leakage = [c for c in leakage_cols if c in vl_wide.columns]
+        if existing_leakage:
+            self.observer.log("INFO", f"FeatureAssembler: Dropping {len(existing_leakage)} leakage columns: {existing_leakage}")
+            vl_wide = vl_wide.drop(existing_leakage)
+            v_cols = [c for c in v_cols if c not in existing_leakage]
+
         self.observer.log("INFO", "FeatureAssembler: Applying Imputation (Forward-Fill -> Zero-Fill) as per Thesis p.18")
 
         vl_wide = vl_wide.sort(["ICUSTAY_ID", "HOUR_IN"])
@@ -218,12 +237,12 @@ class FeatureAssembler(PipelineComponent):
 
             Args:
                 df (Any): Input dataframe.
-                col (Any): Column name to encode.
-                levels (Any): Fixed set of category levels.
-                prefix (Any): Prefix for output columns.
+                col (str): Column name to encode.
+                levels (List[str]): Fixed set of category levels.
+                prefix (str): Prefix for output columns.
 
             Returns:
-                Any: Dataframe with one-hot columns.
+                Any: Dataframe with one-hot columns appended.
             """
             d = df.select([pl.col(col)]).to_dummies(columns=[col])
             for lv in levels:

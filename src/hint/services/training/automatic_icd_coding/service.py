@@ -16,22 +16,19 @@ from ....infrastructure.datasource import HDF5StreamingSource, collate_tensor_ba
 from ....infrastructure.networks import get_network_class
 
 class ICDService(BaseDomainService):
-    """Service that trains and evaluates ICD models.
+    """Service that trains and evaluates ICD models with partial label learning.
 
-    Attributes:
-        cfg (ICDConfig): ICD configuration.
-        registry (Registry): Artifact registry.
-        device (torch.device): Target device.
-        ignored_indices (List[int]): Label indices to ignore.
+    This service loads statistics, prepares datasets, and trains one or
+    more ICD models using adaptive softmax and candidate sampling.
     """
     def __init__(self, config: ICDConfig, registry: Registry, observer: TelemetryObserver, **kwargs):
         """Initialize the ICD service.
 
         Args:
             config (ICDConfig): ICD configuration.
-            registry (Registry): Artifact registry.
-            observer (TelemetryObserver): Logging observer.
-            **kwargs (Any): Additional dependencies.
+            registry (Registry): Artifact registry for checkpoints.
+            observer (TelemetryObserver): Telemetry observer for logging.
+            **kwargs (Any): Reserved keyword arguments.
         """
         super().__init__(observer)
         self.cfg = config
@@ -48,164 +45,96 @@ class ICDService(BaseDomainService):
             self.observer.log("ERROR", f"Stats file not found at {stats_path}")
             return
 
-        self.observer.log("INFO", "ICDService: Stage 1/4 loading class statistics from cache")
+        self.observer.log("INFO", "ICDService: Stage 1/4 loading class statistics.")
         with open(stats_path, "r") as f: 
             stats = json.load(f)
         
         num_classes = len(stats["icd_classes"])
         self.ignored_indices = [i for i, label in enumerate(stats["icd_classes"]) if label in ["__MISSING__", "__OTHER__"]]
-        self.observer.log("INFO", f"ICDService: Loaded class metadata classes={num_classes}")
         
         prefix = self.cfg.data.input_h5_prefix
         
-        self.observer.log("INFO", "ICDService: Stage 2/4 initializing HDF5 streaming sources")
+        self.observer.log("INFO", "ICDService: Stage 2/4 initializing HDF5 sources.")
         try:
-            train_source = HDF5StreamingSource(cache_dir / f"{prefix}_train.h5", label_key="y")
-            val_source = HDF5StreamingSource(cache_dir / f"{prefix}_val.h5", label_key="y")
-            test_source = HDF5StreamingSource(cache_dir / f"{prefix}_test.h5", label_key="y")
+            train_source = HDF5StreamingSource(cache_dir / f"{prefix}_train.h5", label_key="candidates")
+            val_source = HDF5StreamingSource(cache_dir / f"{prefix}_val.h5", label_key="candidates")
+            test_source = HDF5StreamingSource(cache_dir / f"{prefix}_test.h5", label_key="candidates")
         except Exception as e:
-            self.observer.log("ERROR", f"Failed to initialize HDF5 sources: {e}. Check if ETL pipeline produced '{prefix}_*.h5' files.")
+            self.observer.log("ERROR", f"Failed to initialize HDF5 sources: {e}")
             return
         
-        self.observer.log("INFO", "ICDService: Stage 3/4 computing class frequency statistics")
-        try:
-            with h5py.File(train_source.h5_path, "r") as f:
-                shape = f["X_num"].shape
-                num_feats, seq_len = shape[1], shape[2]
-                
-                if "y" in f:
-                    y_data = f["y"][:]
-                    if y_data.ndim == 1:
-                        if y_data.dtype.kind == 'f':
-                            y_data = y_data.astype(np.int64)
-                        target_counts = np.bincount(y_data, minlength=num_classes)
-                    else:
-                        target_counts = np.sum(y_data, axis=0)
-                else:
-                    target_counts = np.ones(num_classes)
-        except Exception as e:
-            self.observer.log("ERROR", f"Failed to compute class stats: {e}")
-            return
+        self.observer.log("INFO", "ICDService: Stage 3/4 preparing training loaders.")
+        target_counts = np.ones(num_classes)
 
-        self.observer.log("INFO", f"ICDService: Computed input shape num_feats={num_feats} seq_len={seq_len}")
-        self.observer.log("INFO", "ICDService: Stage 4/4 building dataloaders")
-        
-        dl_tr = DataLoader(
-            train_source, 
-            batch_size=self.cfg.batch_size, 
-            collate_fn=collate_tensor_batch, 
-            shuffle=True, 
-            num_workers=4, 
-            pin_memory=True,
-            drop_last=True 
-        )
-        
+        dl_tr = DataLoader(train_source, batch_size=self.cfg.batch_size, collate_fn=collate_tensor_batch, shuffle=True, num_workers=4, pin_memory=True, drop_last=True)
         dl_val = DataLoader(val_source, batch_size=self.cfg.batch_size, collate_fn=collate_tensor_batch, num_workers=4, pin_memory=True)
         dl_test = DataLoader(test_source, batch_size=self.cfg.batch_size, collate_fn=collate_tensor_batch, num_workers=4, pin_memory=True)
 
         models_to_run = self.cfg.models_to_run if self.cfg.models_to_run else ["MedBERT"]
 
         for model_name in models_to_run:
-            self.observer.log("INFO", f"========================================")
-            self.observer.log("INFO", f"Starting workflow for model: {model_name}")
-            self.observer.log("INFO", f"========================================")
-
+            self.observer.log("INFO", f"ICDService: Stage 4/4 starting workflow for model={model_name}.")
             try:
                 NetworkClass = get_network_class(model_name)
-                network = NetworkClass(
-                    num_classes=num_classes, 
-                    input_dim=num_feats, 
-                    seq_len=seq_len, 
-                    dropout=self.cfg.dropout
-                )
+                with h5py.File(train_source.h5_path, 'r') as f:
+                    input_dim = f['X_val'].shape[1] * 3
+                    seq_len = f['X_val'].shape[2]
+
+                network = NetworkClass(num_classes=num_classes, input_dim=input_dim, seq_len=seq_len, dropout=self.cfg.dropout)
                 
+                if hasattr(network, "embedding_dim"):
+                    in_features = network.embedding_dim
+                elif hasattr(network, "fc"):
+                    in_features = network.fc.in_features
+                else:
+                    in_features = 128
+                
+                if num_classes > 10000:
+                    cutoffs = [2000, 8000]
+                else:
+                    cutoffs = [num_classes // 4, num_classes // 2]
+                
+                adaptive_head = nn.AdaptiveLogSoftmaxWithLoss(
+                    in_features=in_features, n_classes=num_classes, cutoffs=cutoffs, div_value=4.0
+                )
+                network.add_module("adaptive_head", adaptive_head)
+
                 entity_name = f"{self.cfg.artifacts.model_name}_{model_name}"
                 model_entity = ICDModelEntity(network)
                 model_entity.name = entity_name
 
-                trainer = ICDTrainer(
-                    config=self.cfg, 
-                    entity=model_entity, 
-                    registry=self.registry, 
-                    observer=self.observer, 
-                    device=self.device, 
-                    class_freq=target_counts, 
-                    ignored_indices=self.ignored_indices
-                )
+                trainer = ICDTrainer(self.cfg, model_entity, self.registry, self.observer, self.device, class_freq=target_counts)
+                evaluator = ICDEvaluator(self.cfg, model_entity, self.registry, self.observer, self.device)
                 
-                evaluator = ICDEvaluator(
-                    config=self.cfg, 
-                    entity=model_entity, 
-                    registry=self.registry, 
-                    observer=self.observer, 
-                    device=self.device, 
-                    ignored_indices=self.ignored_indices
-                )
-                
-                self.observer.log("INFO", f"[{model_name}] Entering training phase")
                 trainer.train(dl_tr, dl_val, evaluator)
                 
-                self.observer.log("INFO", f"[{model_name}] Preparing best checkpoint for testing phase")
+                best_state = self.registry.load_model(entity_name, tag="best", device=str(self.device))
+                if best_state:
+                    model_entity.model.load_state_dict(best_state)
                 
-                try:
-                    best_state = self.registry.load_model(entity_name, tag="best", device=str(self.device))
-                    
-                    if best_state is not None:
-                        state_dict = best_state["model"] if "model" in best_state else best_state
-                        model_entity.model.load_state_dict(state_dict)
-                        model_entity.to(self.device)
-                        self.observer.log("INFO", f"[{model_name}] Best checkpoint loaded.")
-                    else:
-                        self.observer.log("WARNING", f"[{model_name}] No best checkpoint found. Using current state.")
-                        
-                except RuntimeError as e:
-                    if "size mismatch" in str(e):
-                        if self.cfg.epochs > 0:
-                            self.observer.log("WARNING", f"[{model_name}] Checkpoint size mismatch. Ignoring old checkpoint and using newly trained weights.")
-                        else:
-                            self.observer.log("ERROR", f"[{model_name}] Checkpoint size mismatch with 'epochs=0'. Cannot proceed with inference. Please set epochs > 0 to retrain.")
-                            continue
-                    else:
-                        self.observer.log("ERROR", f"[{model_name}] Error loading checkpoint: {e}")
-                except Exception as e:
-                    self.observer.log("ERROR", f"[{model_name}] Unexpected error loading checkpoint: {e}")
-
-                self.observer.log("INFO", f"[{model_name}] Entering test phase")
                 test_metrics = evaluator.evaluate(dl_test)
-                
-                self.observer.log("INFO", f"[{model_name}] FINAL TEST RESULTS: {json.dumps(test_metrics, indent=2)}")
-                
-                self.observer.track_metric(f"{model_name}_test_acc", test_metrics.get("accuracy", 0.0), step=-1)
-                self.observer.track_metric(f"{model_name}_test_loss", test_metrics.get("loss", 0.0), step=-1)
-
-                self.observer.log("INFO", f"Successfully finished workflow for {model_name}")
+                self.observer.log("INFO", f"Final Test Metrics: {json.dumps(test_metrics, indent=2)}")
 
             except Exception as e:
                 self.observer.log("ERROR", f"Failed to run model {model_name}: {str(e)}")
                 import traceback
                 self.observer.log("ERROR", traceback.format_exc())
-                continue
 
     def generate_intervention_dataset(self, cnn_config) -> None:
-        """Generate intervention datasets using an ICD model.
+        """Inject X_icd latent context into the intervention dataset.
 
         Args:
-            cnn_config (Any): CNN configuration for output settings.
+            cnn_config (Any): Intervention configuration for dataset prefixes.
         """
-        self.observer.log("INFO", "ICDService: Starting intervention dataset generation.")
+        self.observer.log("INFO", "ICDService: Starting feature injection.")
         
         models_to_run = self.cfg.models_to_run if self.cfg.models_to_run else ["MedBERT"]
         if not models_to_run:
-            self.observer.log("ERROR", "No models configured, cannot generate dataset.")
             return
-        
         model_name = models_to_run[0]
-        self.observer.log("INFO", f"ICDService: Selected model for generation model={model_name}")
         
         cache_dir = Path(self.cfg.data.data_cache_dir)
-        stats_path = cache_dir / "stats.json"
-        
-        with open(stats_path, "r") as f: 
+        with open(cache_dir / "stats.json", "r") as f:
             stats = json.load(f)
         num_classes = len(stats["icd_classes"])
         
@@ -213,121 +142,76 @@ class ICDService(BaseDomainService):
         cnn_prefix = cnn_config.data.input_h5_prefix
         
         sample_file = cache_dir / f"{icd_prefix}_train.h5"
-        if not sample_file.exists():
-            self.observer.log("ERROR", f"Source file {sample_file} not found.")
-            return
-            
         with h5py.File(sample_file, "r") as f:
-            shape = f["X_num"].shape
-            num_feats, seq_len = shape[1], shape[2]
+            num_feats = f["X_val"].shape[1] * 3
+            seq_len = f["X_val"].shape[2]
 
         try:
             NetworkClass = get_network_class(model_name)
-            network = NetworkClass(
-                num_classes=num_classes, 
-                input_dim=num_feats, 
-                seq_len=seq_len, 
-                dropout=self.cfg.dropout
-            )
-
-            # [FIX] Re-attach adaptive head if used, so state_dict can be loaded matching the checkpoint structure
-            if self.cfg.loss_type == "adaptive_softmax":
-                if hasattr(network, "embedding_dim"):
-                    in_features = network.embedding_dim
-                elif hasattr(network, "fc"):
-                    in_features = network.fc.in_features
-                else:
-                    raise AttributeError("Model must have 'embedding_dim' for adaptive_softmax.")
-                
-                if num_classes > 100000:
-                    cutoffs = [10000, 50000, num_classes - 10000]
-                elif num_classes > 10000:
-                    cutoffs = [2000, 8000]
-                else:
-                    cutoffs = [num_classes // 4, num_classes // 2]
-                
-                adaptive_head = nn.AdaptiveLogSoftmaxWithLoss(
-                    in_features=in_features,
-                    n_classes=num_classes,
-                    cutoffs=cutoffs,
-                    div_value=4.0
-                )
-                # Register as module to match the saved checkpoint keys (adaptive_head.head.weight etc.)
-                network.add_module("adaptive_head", adaptive_head)
-                self.observer.log("INFO", "ICDService: Re-attached adaptive_head for weight loading.")
+            network = NetworkClass(num_classes=num_classes, input_dim=num_feats, seq_len=seq_len, dropout=self.cfg.dropout)
+            
+            if hasattr(network, "embedding_dim"):
+                in_features = network.embedding_dim
+            elif hasattr(network, "fc"):
+                in_features = network.fc.in_features
+            else:
+                in_features = 128
+            
+            if num_classes > 10000:
+                cutoffs = [2000, 8000]
+            else:
+                cutoffs = [num_classes // 4, num_classes // 2]
+            
+            adaptive_head = nn.AdaptiveLogSoftmaxWithLoss(in_features, num_classes, cutoffs=cutoffs, div_value=4.0)
+            network.add_module("adaptive_head", adaptive_head)
             
             entity_name = f"{self.cfg.artifacts.model_name}_{model_name}"
             best_state = self.registry.load_model(entity_name, tag="best", device=str(self.device))
-            
             if best_state:
-                state = best_state["model"] if "model" in best_state else best_state
-                network.load_state_dict(state)
+                network.load_state_dict(best_state)
             
             network.to(self.device)
             network.eval()
             
         except Exception as e:
-            self.observer.log("ERROR", f"Failed to initialize model for generation: {e}")
+            self.observer.log("ERROR", f"Model init failed: {e}")
             return
 
         splits = ["train", "val", "test"]
-        
         for split in splits:
             src_path = cache_dir / f"{icd_prefix}_{split}.h5"
             tgt_path = cache_dir / f"{cnn_prefix}_{split}.h5"
             
-            if not src_path.exists(): continue
-                
-            self.observer.log("INFO", f"Generating {tgt_path} from {src_path}...")
-            source = HDF5StreamingSource(src_path, label_key="y")
+            if not src_path.exists() or not tgt_path.exists():
+                continue
+            
+            self.observer.log("INFO", f"Injecting context into {tgt_path}...")
+            source = HDF5StreamingSource(src_path, label_key="candidates")
             dl = DataLoader(source, batch_size=self.cfg.batch_size, collate_fn=collate_tensor_batch, num_workers=4)
             
-            all_preds = []
+            all_embeds = []
             
             try:
                 with torch.no_grad():
                     for batch in dl:
-                        x_num = batch.x_num.to(self.device)
+                        x_val = batch.x_val.to(self.device)
+                        x_msk = batch.x_msk.to(self.device)
+                        x_delta = batch.x_delta.to(self.device)
+                        x_num = torch.cat([x_val, x_msk, x_delta], dim=1)
                         
-                        # [FIX] Inference logic adaptation for Adaptive Softmax
-                        if self.cfg.loss_type == "adaptive_softmax" and hasattr(network, "adaptive_head"):
-                            embeddings = network(x_num, return_embeddings=True)
-                            log_probs = network.adaptive_head.log_prob(embeddings)
-                            # Convert Log Prob to Probability
-                            probs = torch.exp(log_probs)
-                        else:
-                            logits = network(x_num)
-                            probs = torch.sigmoid(logits)
-                            
-                        all_preds.append(probs.cpu().numpy())
+                        embeddings = network(x_num=x_num, return_embeddings=True)
+                        all_embeds.append(embeddings.cpu().numpy())
                 
-                if not all_preds: continue
-                full_preds = np.concatenate(all_preds, axis=0)
+                if not all_embeds:
+                    continue
+                full_embeds = np.concatenate(all_embeds, axis=0)
                 
-                with h5py.File(src_path, "r") as f_src, h5py.File(tgt_path, "w") as f_tgt:
-                    for key in f_src.keys():
-                        # [CRITICAL] Skip 'y' because it contains ICD labels
-                        if key == "y": continue 
-                        f_src.copy(key, f_tgt)
+                with h5py.File(tgt_path, "a") as f_tgt:
+                    if "X_icd" in f_tgt:
+                        del f_tgt["X_icd"]
+                    f_tgt.create_dataset("X_icd", data=full_embeds)
                     
-                    if "X_icd" in f_tgt: del f_tgt["X_icd"]
-                    f_tgt.create_dataset("X_icd", data=full_preds)
-                    
-                    # [CRITICAL] Create 'y' from 'y_vent' (Last Step)
-                    # We need 1D labels for the CNN, derived from the last time step of ventilation
-                    if "y_vent" in f_src:
-                        y_vent = f_src["y_vent"][:]
-                        # Extract the label at the last time step for each sample
-                        y_new = y_vent[:, -1].astype(np.int64)
-                        f_tgt.create_dataset("y", data=y_new)
-                        self.observer.log("INFO", f"Overwrote 'y' with last-step values from 'y_vent'. Shape: {y_new.shape}")
-                    else:
-                        self.observer.log("WARNING", "y_vent not found in source. 'y' might be missing in target.")
-                    
-                self.observer.log("INFO", f"Successfully created {tgt_path} with shape {full_preds.shape}")
+                self.observer.log("INFO", f"Injected X_icd (Latent) shape: {full_embeds.shape}")
                 
             except Exception as e:
-                self.observer.log("ERROR", f"Error processing split {split}: {e}")
-                continue
-
-        self.observer.log("INFO", "ICDService: Intervention dataset generation complete.")
+                self.observer.log("ERROR", f"Injection failed for {split}: {e}")

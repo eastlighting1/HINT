@@ -8,7 +8,7 @@ from ..domain.entities import InterventionModelEntity, ICDModelEntity
 from ..infrastructure.registry import FileSystemRegistry
 from ..infrastructure.telemetry import RichTelemetryObserver
 from ..infrastructure.datasource import HDF5StreamingSource, ParquetSource
-from ..infrastructure.networks import GFINet_CNN
+from ..infrastructure.networks import TCNClassifier
 
 from ..services.etl.service import ETLService
 from ..services.etl.components.static import StaticExtractor
@@ -72,7 +72,7 @@ class AppFactory:
         registry = self.create_registry()
         observer = self.create_telemetry()
 
-        observer.log("INFO", "AppFactory: Building ETL pipeline components")
+        observer.log("INFO", "AppFactory: ETL stage 1/3 starting component initialization.")
         static_extractor = StaticExtractor(etl_cfg, registry, observer)
         ts_aggregator = TimeSeriesAggregator(etl_cfg, registry, observer)
         outcomes_builder = OutcomesBuilder(etl_cfg, registry, observer)
@@ -95,7 +95,7 @@ class AppFactory:
             observer=observer
         )
 
-        observer.log("INFO", "AppFactory: Ordering ETL pipeline stages")
+        observer.log("INFO", "AppFactory: ETL stage 2/3 assembling pipeline order.")
         components: List[PipelineComponent] = [
             static_extractor,
             ts_aggregator,
@@ -106,7 +106,7 @@ class AppFactory:
             tensor_converter
         ]
 
-        observer.log("INFO", "AppFactory: ETL service ready")
+        observer.log("INFO", "AppFactory: ETL stage 3/3 service construction complete.")
         return ETLService(registry, observer, components)
 
     def create_icd_service(self) -> ICDService:
@@ -119,7 +119,7 @@ class AppFactory:
         registry = self.create_registry()
         observer = self.create_telemetry()
 
-        observer.log("INFO", "AppFactory: Preparing ICD training data sources")
+        observer.log("INFO", "AppFactory: ICD stage 1/3 resolving training data sources.")
         cache_dir = Path(cfg.data.data_cache_dir)
         prefix = cfg.data.input_h5_prefix
         
@@ -137,7 +137,7 @@ class AppFactory:
             val_source = None
             test_source = None
 
-        observer.log("INFO", "AppFactory: ICD service ready")
+        observer.log("INFO", "AppFactory: ICD stage 2/3 service dependencies ready.")
         return ICDService(
             config=cfg,
             registry=registry,
@@ -157,20 +157,18 @@ class AppFactory:
         registry = self.create_registry()
         observer = self.create_telemetry()
 
-        observer.log("INFO", "AppFactory: Preparing intervention training data sources")
+        observer.log("INFO", "AppFactory: Intervention stage 1/3 resolving training data sources.")
         cache_dir = Path(cfg.data.data_cache_dir)
         prefix = cfg.data.input_h5_prefix 
         train_path = cache_dir / f"{prefix}_train.h5"
         val_path = cache_dir / f"{prefix}_val.h5"
         test_path = cache_dir / f"{prefix}_test.h5"
         
-        # [FIX] Default to "y" because ICDService.generate_intervention_dataset creates "y" derived from "y_vent"
         target_key = cfg.keys.TARGET_VENT_STATE if hasattr(cfg.keys, "TARGET_VENT_STATE") else "y"
 
         try:
             train_source = HDF5StreamingSource(train_path, seq_len=cfg.seq_len, label_key=target_key)
             val_source = HDF5StreamingSource(val_path, seq_len=cfg.seq_len, label_key=target_key)
-            # [FIX] Initialize test source
             test_source = HDF5StreamingSource(test_path, seq_len=cfg.seq_len, label_key=target_key) if test_path.exists() else None
             
             vocab_sizes = train_source.get_real_vocab_sizes()
@@ -191,7 +189,7 @@ class AppFactory:
             num_channels = 1
             icd_dim = 0
 
-        observer.log("INFO", "AppFactory: Building intervention model network")
+        observer.log("INFO", "AppFactory: Intervention stage 2/3 building model network.")
         
         network = GFINet_CNN(
             in_chs=[num_channels],
@@ -208,7 +206,7 @@ class AppFactory:
 
         entity = InterventionModelEntity(network)
 
-        observer.log("INFO", "AppFactory: Intervention service ready")
+        observer.log("INFO", "AppFactory: Intervention stage 3/3 service construction complete.")
         return InterventionService(
             config=cfg,
             registry=registry,

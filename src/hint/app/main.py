@@ -6,6 +6,9 @@ def main() -> None:
 
     This function builds the application factory and executes ETL,
     ICD training, and intervention training stages as requested.
+
+    Returns:
+        None: This function does not return a value.
     """
     factory = AppFactory()
     mode = factory.ctx.mode

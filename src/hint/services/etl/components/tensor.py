@@ -9,9 +9,22 @@ from ....foundation.interfaces import PipelineComponent, Registry, TelemetryObse
 from ....domain.vo import ETLConfig, ICDConfig, CNNConfig
 
 class TensorConverter(PipelineComponent):
-    """Convert parquet features into HDF5 tensor datasets with Pre-padding."""
+    """Convert features into HDF5 tensors for training.
+
+    This component builds 3-channel tensors and candidate label sets
+    for both ICD and intervention datasets.
+    """
 
     def __init__(self, etl_config: ETLConfig, cnn_config: CNNConfig, icd_config: ICDConfig, registry: Registry, observer: TelemetryObserver):
+        """Initialize the tensor converter.
+
+        Args:
+            etl_config (ETLConfig): ETL configuration.
+            cnn_config (CNNConfig): Intervention configuration.
+            icd_config (ICDConfig): ICD configuration.
+            registry (Registry): Artifact registry.
+            observer (TelemetryObserver): Telemetry observer.
+        """
         self.etl_cfg = etl_config
         self.cnn_cfg = cnn_config
         self.icd_cfg = icd_config
@@ -19,6 +32,7 @@ class TensorConverter(PipelineComponent):
         self.observer = observer
 
     def execute(self) -> None:
+        """Convert assembled features into HDF5 tensors."""
         proc_dir = Path(self.etl_cfg.proc_dir)
         cache_dir = Path(self.icd_cfg.data.data_cache_dir)
         cache_dir.mkdir(parents=True, exist_ok=True)
@@ -28,232 +42,149 @@ class TensorConverter(PipelineComponent):
         vent_targets_path = proc_dir / self.etl_cfg.artifacts.vent_targets_file
         icd_meta_path = proc_dir / self.etl_cfg.artifacts.icd_meta_file
 
-        if not features_path.exists():
-            raise FileNotFoundError(f"Missing features artifact: {features_path}")
-        
-        self.observer.log("INFO", f"TensorConverter: Stage 1/4 Loading features from {features_path}")
+        self.observer.log("INFO", f"TensorConverter: Loading features from {features_path}")
         df = pl.read_parquet(features_path)
         
         cols = df.columns
-        numeric_cols = [c for c in cols if c.startswith("V__")]
-        categorical_cols = [c for c in cols if c.startswith("S__")]
+        val_cols = sorted([c for c in cols if c.startswith("V__")])
+        msk_cols = sorted([c for c in cols if c.startswith("M__")])
+        delta_cols = sorted([c for c in cols if c.startswith("D__")])
         
-        self.observer.log("INFO", f"TensorConverter: Found {len(numeric_cols)} dynamic features and {len(categorical_cols)} static features.")
-        self.observer.log("INFO", "TensorConverter: Stage 2/4 Joining Targets")
+        assert len(val_cols) == len(msk_cols) == len(delta_cols), "Channel mismatch!"
         
-        if icd_targets_path.exists():
-            self.observer.log("INFO", f"TensorConverter: Loading ICD targets from {icd_targets_path.name}")
-            icd_df = pl.read_parquet(icd_targets_path)
-            if "target_icd" in icd_df.columns:
-                icd_df = icd_df.rename({"target_icd": "y"})
-            df = df.join(icd_df, on="ICUSTAY_ID", how="left")
-        else:
-            self.observer.log("WARNING", f"TensorConverter: ICD targets not found at {icd_targets_path}. 'y' will be missing.")
+        self.observer.log("INFO", f"TensorConverter: Found {len(val_cols)} features with 3 channels (V, M, D).")
 
+        if icd_targets_path.exists():
+            icd_df = pl.read_parquet(icd_targets_path)
+            df = df.join(icd_df, on="ICUSTAY_ID", how="left")
+        
         if vent_targets_path.exists():
-            self.observer.log("INFO", f"TensorConverter: Loading Vent targets from {vent_targets_path.name}")
             vent_df = pl.read_parquet(vent_targets_path)
-            if "target_vent" in vent_df.columns:
-                vent_df = vent_df.rename({"target_vent": "y_vent"})
-            
-            join_keys = ["ICUSTAY_ID", "HOUR_IN"]
-            vent_df = vent_df.select(join_keys + ["y_vent"])
-            df = df.join(vent_df, on=join_keys, how="left")
+            df = df.join(vent_df, on=["ICUSTAY_ID", "HOUR_IN"], how="left")
 
         if icd_meta_path.exists():
-            dest_stats = cache_dir / "stats.json"
-            self.observer.log("INFO", f"TensorConverter: Copying ICD metadata to {dest_stats}")
-            shutil.copy(icd_meta_path, dest_stats)
-        else:
-            self.observer.log("WARNING", f"TensorConverter: ICD metadata not found at {icd_meta_path}. Training may fail.")
+            shutil.copy(icd_meta_path, cache_dir / "stats.json")
 
-        self.observer.log("INFO", "TensorConverter: Stage 3/4 Splitting dataset (Stratified)")
+        subjects = df.select("SUBJECT_ID").unique()["SUBJECT_ID"].to_numpy()
+        train_ids, test_ids = train_test_split(subjects, test_size=0.2, random_state=42)
+        train_ids, val_ids = train_test_split(train_ids, test_size=0.2, random_state=42)
         
-        if "y_vent" in df.columns:
-            subj_labels = (
-                df.select(["SUBJECT_ID", "y_vent"])
-                .fill_null(3) 
-                .group_by("SUBJECT_ID")
-                .agg(pl.col("y_vent").min().alias("stratify_label")) 
-            )
-            subjects = subj_labels["SUBJECT_ID"].to_numpy()
-            labels = subj_labels["stratify_label"].to_numpy()
-        else:
-            subjects = df.select("SUBJECT_ID").unique()["SUBJECT_ID"].to_numpy()
-            labels = np.zeros(len(subjects))
+        self.observer.log("INFO", f"Split: Train={len(train_ids)}, Val={len(val_ids)}, Test={len(test_ids)}")
 
-        try:
-            train_ids, temp_ids, _, temp_labels = train_test_split(
-                subjects, labels, test_size=0.3, stratify=labels, random_state=42
-            )
-            val_ids, test_ids = train_test_split(
-                temp_ids, test_size=0.6666, stratify=temp_labels, random_state=42
-            )
-        except ValueError as e:
-            self.observer.log("WARNING", f"Stratified split failed. Falling back to random split. {e}")
-            train_ids, temp_ids = train_test_split(subjects, test_size=0.3, random_state=42)
-            val_ids, test_ids = train_test_split(temp_ids, test_size=0.6666, random_state=42)
-        
-        self.observer.log("INFO", f"Split sizes: Train={len(train_ids)}, Val={len(val_ids)}, Test={len(test_ids)}")
-        
-        prefix = self.icd_cfg.data.input_h5_prefix 
-        max_cands_len = 50 
-
-        self.observer.log("INFO", "TensorConverter: Calculating Global Mean/Std from Training Set...")
-        
         train_mask = pl.col("SUBJECT_ID").is_in(list(train_ids))
-        train_df_stats = df.filter(train_mask).select(numeric_cols)
+        stats = df.filter(train_mask).select(val_cols).mean().to_dict(as_series=False)
+        std_stats = df.filter(train_mask).select(val_cols).std().to_dict(as_series=False)
         
-        global_stats = {}
-        for col in numeric_cols:
-            mean_val = train_df_stats[col].mean()
-            std_val = train_df_stats[col].std()
-            
-            if std_val is None or std_val == 0:
-                std_val = 1.0
-            if mean_val is None:
-                mean_val = 0.0
-                
-            global_stats[col] = (mean_val, std_val)
-            
-        self.observer.log("INFO", f"TensorConverter: Global stats computed for {len(global_stats)} features.")
-
-        self.observer.log("INFO", f"TensorConverter: Stage 4/4 Writing HDF5 splits with prefix '{prefix}' (Pre-padding)")
+        global_stats = {c: (stats[c][0], std_stats[c][0]) for c in val_cols}
         
-        self._process_split(df.filter(pl.col("SUBJECT_ID").is_in(list(train_ids))), "train", numeric_cols, categorical_cols, cache_dir, prefix, max_cands_len, global_stats)
-        self._process_split(df.filter(pl.col("SUBJECT_ID").is_in(list(val_ids))), "val", numeric_cols, categorical_cols, cache_dir, prefix, max_cands_len, global_stats)
-        self._process_split(df.filter(pl.col("SUBJECT_ID").is_in(list(test_ids))), "test", numeric_cols, categorical_cols, cache_dir, prefix, max_cands_len, global_stats)
+        prefixes = (self.icd_cfg.data.input_h5_prefix, self.cnn_cfg.data.input_h5_prefix)
+        
+        for name, ids in [("train", train_ids), ("val", val_ids), ("test", test_ids)]:
+            sub_df = df.filter(pl.col("SUBJECT_ID").is_in(list(ids)))
+            self._process_split(sub_df, name, val_cols, msk_cols, delta_cols, cache_dir, prefixes, global_stats)
 
-    def _process_split(self, split_df: pl.DataFrame, split_name: str, num_cols: List[str], cat_cols: List[str], cache_dir: Path, prefix: str, max_cands: int, global_stats: Dict[str, Tuple[float, float]]):
-        if split_df.height == 0:
-            self.observer.log("WARNING", f"TensorConverter: Split {split_name} is empty. Skipping.")
+    def _process_split(self, df, name, v_cols, m_cols, d_cols, out_dir, prefixes, stats):
+        """Process a single dataset split into HDF5 tensors.
+
+        Args:
+            df (pl.DataFrame): Split dataframe.
+            name (str): Split name.
+            v_cols (List[str]): Value channel columns.
+            m_cols (List[str]): Mask channel columns.
+            d_cols (List[str]): Delta channel columns.
+            out_dir (Path): Output directory.
+            prefixes (Tuple[str, str]): ICD and CNN prefix names.
+            stats (Dict[str, Tuple[float, float]]): Normalization statistics.
+        """
+        if df.height == 0:
             return
 
-        if num_cols and global_stats:
-            self.observer.log("INFO", f"TensorConverter: Applying Global Standardization for split {split_name}")
-            norm_exprs = []
-            for col in num_cols:
-                mean_val, std_val = global_stats.get(col, (0.0, 1.0))
-                norm = (pl.col(col) - mean_val) / std_val
-                norm_exprs.append(norm.alias(col))
-            
-            split_df = split_df.with_columns(norm_exprs)
+        norm_exprs = []
+        for c in v_cols:
+            mean, std = stats.get(c, (0, 1))
+            if std == 0 or std is None:
+                std = 1
+            norm_exprs.append(((pl.col(c) - mean) / std).alias(c))
+        df = df.with_columns(norm_exprs)
 
-        n_samples = split_df.select("ICUSTAY_ID").n_unique()
+        n_samples = df.select("ICUSTAY_ID").n_unique()
         seq_len = self.cnn_cfg.seq_len
-        n_features = len(num_cols)
-        out_path = cache_dir / f"{prefix}_{split_name}.h5"
+        n_feats = len(v_cols)
+        cat_cols = [c for c in df.columns if c.startswith("S__")]
+
+        icd_path = out_dir / f"{prefixes[0]}_{name}.h5"
+        cnn_path = out_dir / f"{prefixes[1]}_{name}.h5"
+
+        X_val = np.zeros((n_samples, seq_len, n_feats), dtype=np.float32)
+        X_msk = np.zeros((n_samples, seq_len, n_feats), dtype=np.float32)
+        X_delta = np.zeros((n_samples, seq_len, n_feats), dtype=np.float32)
+        y_vent = np.full((n_samples, seq_len), -100, dtype=np.int64)
         
-        with h5py.File(out_path, "w") as f:
-            f.create_dataset("X_num", (n_samples, n_features, seq_len), dtype='f4')
-            if cat_cols:
-                f.create_dataset("X_cat", (n_samples, len(cat_cols)), dtype='i4')
-            
-        self.observer.log("INFO", f"TensorConverter: Vectorized processing for {n_samples} patients (Pre-padding)...")
-        
-        sorted_df = split_df.sort(["ICUSTAY_ID", "HOUR_IN"])
+        sorted_df = df.sort(["ICUSTAY_ID", "HOUR_IN"])
         unique_stays = sorted_df.select("ICUSTAY_ID").unique(maintain_order=True)
         stay_ids = unique_stays["ICUSTAY_ID"].to_list()
-        
-        agg_exprs = []
-        if "y" in sorted_df.columns:
-            agg_exprs.append(pl.col("y").first())
-        if cat_cols:
-            agg_exprs.extend([pl.col(c).first() for c in cat_cols])
-            
-        grouped = sorted_df.group_by("ICUSTAY_ID", maintain_order=True).agg(agg_exprs)
-        
-        # Initialize tensors with 0.0 for features
-        X_num = np.zeros((n_samples, seq_len, n_features), dtype=np.float32)
-        
-        # [KEY CHANGE 1] Initialize targets with 3 (STAY OFF) for padding areas
-        # Pre-padding fills the beginning with 3s, which is logically consistent (patient not in ICU/Vent yet)
-        y_vent = np.full((n_samples, seq_len), 3, dtype=np.int64)
-        y_vaso = np.zeros((n_samples, seq_len), dtype=np.int64)
-        
-        valid_window = sorted_df.filter((pl.col("HOUR_IN") >= 0) & (pl.col("HOUR_IN") < seq_len))
         id_map = {sid: i for i, sid in enumerate(stay_ids)}
-        
-        # [KEY CHANGE 2] Calculate Pre-padding Offsets
-        # Find the max HOUR_IN for each stay to determine where the data ends.
-        # We want the data to end at (seq_len - 1).
-        # Offset = (seq_len - 1) - max_hour
-        max_hours = valid_window.group_by("ICUSTAY_ID", maintain_order=True).agg(
-            pl.col("HOUR_IN").max().alias("max_h")
-        )
-        
-        offset_map = {}
-        for row in max_hours.iter_rows():
-            sid, mh = row
-            offset = (seq_len - 1) - mh
-            offset_map[sid] = max(0, offset) # Safety clamp
 
-        stay_col = valid_window["ICUSTAY_ID"].to_numpy()
-        hour_col = valid_window["HOUR_IN"].to_numpy()
-        row_indices = np.array([id_map[s] for s in stay_col])
+        max_cands = 50
+        y_icd_cands = np.full((n_samples, max_cands), -1, dtype=np.int64)
         
-        # Apply offsets to column indices
-        row_offsets = np.zeros(n_samples, dtype=np.int64)
-        for sid, off in offset_map.items():
-            if sid in id_map:
-                row_offsets[id_map[sid]] = off
+        cands_df = sorted_df.group_by("ICUSTAY_ID", maintain_order=True).first().select(["ICUSTAY_ID", "candidates"])
+        for row in cands_df.iter_rows():
+            sid, cands = row
+            if cands and sid in id_map:
+                idx = id_map[sid]
+                trunc = cands[:max_cands]
+                y_icd_cands[idx, :len(trunc)] = trunc
+
+        valid_win = sorted_df.filter((pl.col("HOUR_IN") >= 0) & (pl.col("HOUR_IN") < seq_len))
         
-        # Shift hours to the right (Pre-padding)
-        col_indices = hour_col + row_offsets[row_indices]
+        max_hours = valid_win.group_by("ICUSTAY_ID", maintain_order=True).agg(pl.col("HOUR_IN").max().alias("mh"))
+        offset_map = {row[0]: max(0, seq_len - 1 - row[1]) for row in max_hours.iter_rows()}
         
-        # Safety check to ensure indices don't exceed bounds
-        mask = (col_indices >= 0) & (col_indices < seq_len)
-        row_indices = row_indices[mask]
-        col_indices = col_indices[mask]
+        v_data = valid_win.select(["ICUSTAY_ID", "HOUR_IN"] + v_cols).to_numpy()
+        m_data = valid_win.select(m_cols).to_numpy()
+        d_data = valid_win.select(d_cols).to_numpy()
+        vent_data = valid_win.select("target_vent").to_numpy().flatten()
         
-        # Filter data arrays with the same mask
-        # We need to re-extract values based on the filtered rows
-        # Since we can't easily filter valid_window based on numpy mask index, 
-        # we assume logic is correct (offset guarantees last element is at seq_len-1).
-        # If HOUR_IN > seq_len is already filtered, offset shouldn't push out of bounds unless HOUR_IN negative.
+        stay_col_idx = 0
+        hour_col_idx = 1
+        feat_start_idx = 2
         
-        for i, col_name in enumerate(num_cols):
-            vals = valid_window[col_name].to_numpy().astype(np.float32)[mask]
-            X_num[row_indices, col_indices, i] = vals
-            
-        vent_col = "y_vent" if "y_vent" in valid_window.columns else "VENT"
-        if vent_col in valid_window.columns:
-            vals = valid_window[vent_col].fill_null(3).to_numpy().astype(np.int64)[mask]
-            y_vent[row_indices, col_indices] = vals
-            
-        if "VASO" in valid_window.columns:
-            vals = valid_window["VASO"].fill_null(0).to_numpy().astype(np.int64)[mask]
-            y_vaso[row_indices, col_indices] = vals
-            
-        X_num_transposed = np.transpose(X_num, (0, 2, 1))
+        stay_vals = v_data[:, stay_col_idx].astype(int)
+        hour_vals = v_data[:, hour_col_idx].astype(int)
         
-        with h5py.File(out_path, "a") as f:
-            f["X_num"][:] = X_num_transposed
-            
-            if cat_cols:
-                x_cat_data = grouped.select(cat_cols).to_numpy().astype(np.int32)
-                f["X_cat"][:] = x_cat_data
-            
-            if vent_col in valid_window.columns:
-                f.create_dataset("y_vent", data=y_vent)
-            if "VASO" in valid_window.columns:
-                f.create_dataset("y_vaso", data=y_vaso)
+        row_idxs = np.array([id_map[s] for s in stay_vals])
+        offsets = np.array([offset_map[s] for s in stay_vals])
+        col_idxs = hour_vals + offsets
+        
+        valid_mask = (col_idxs >= 0) & (col_idxs < seq_len)
+        
+        final_rows = row_idxs[valid_mask]
+        final_cols = col_idxs[valid_mask]
+        
+        X_val[final_rows, final_cols, :] = v_data[valid_mask, feat_start_idx:].astype(np.float32)
+        X_msk[final_rows, final_cols, :] = m_data[valid_mask, :].astype(np.float32)
+        X_delta[final_rows, final_cols, :] = d_data[valid_mask, :].astype(np.float32)
+        
+        vent_filled = np.nan_to_num(vent_data.astype(float), nan=-100.0).astype(np.int64)
+        y_vent[final_rows, final_cols] = vent_filled[valid_mask]
+
+        X_cat = np.zeros((n_samples, len(cat_cols)), dtype=np.int32)
+        cat_df = sorted_df.group_by("ICUSTAY_ID", maintain_order=True).first().select(cat_cols)
+        X_cat[:] = cat_df.to_numpy().astype(np.int32)
+
+        X_val = X_val.transpose(0, 2, 1)
+        X_msk = X_msk.transpose(0, 2, 1)
+        X_delta = X_delta.transpose(0, 2, 1)
+
+        for p in [icd_path, cnn_path]:
+            with h5py.File(p, "w") as f:
+                f.create_dataset("X_val", data=X_val)
+                f.create_dataset("X_msk", data=X_msk)
+                f.create_dataset("X_delta", data=X_delta)
+                f.create_dataset("X_cat", data=X_cat)
+                f.create_dataset("stay_ids", data=np.array(stay_ids))
                 
-            if "y" in grouped.columns:
-                try:
-                    y_list = grouped["y"].to_list()
-                    icd_targets = np.array(y_list)
-                    if icd_targets.dtype == object:
-                        try:
-                            icd_targets = np.vstack(y_list).astype(np.float32)
-                            f.create_dataset("y", data=icd_targets)
-                        except:
-                            self.observer.log("WARNING", "ICD targets are ragged. Skipping.")
-                    elif np.issubdtype(icd_targets.dtype, np.integer):
-                        f.create_dataset("y", data=icd_targets.astype(np.int64), dtype='i8')
-                    else:
-                        f.create_dataset("y", data=icd_targets.astype(np.float32))
-                except Exception as e:
-                    self.observer.log("WARNING", f"Could not vectorize ICD targets: {e}")
-            
-            f.create_dataset("stay_ids", data=np.array(stay_ids, dtype=np.int64))
+                f.create_dataset("y", data=y_icd_cands)
+                f.create_dataset("candidates", data=y_icd_cands)
+                f.create_dataset("y_vent", data=y_vent)

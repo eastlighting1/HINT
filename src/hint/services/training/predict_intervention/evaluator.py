@@ -1,115 +1,173 @@
 import torch
+import torch.nn as nn
 import numpy as np
-import warnings
-from typing import Dict, List
+from typing import Dict
 from sklearn.metrics import accuracy_score, f1_score, roc_auc_score, average_precision_score
 from sklearn.preprocessing import label_binarize
-from sklearn.exceptions import UndefinedMetricWarning
-
-from ..common.base import BaseTrainer, BaseEvaluator
+from ..common.base import BaseEvaluator
 from ....domain.entities import InterventionModelEntity
 from ....domain.vo import CNNConfig
 
-class InterventionEvaluator(BaseEvaluator):
-    """Evaluator for intervention prediction models.
+class ModelWithTemperature(nn.Module):
+    """Wrap a model with temperature scaling for calibration.
 
     Attributes:
-        cfg (CNNConfig): Evaluation configuration.
-        entity (InterventionModelEntity): Model entity wrapper.
-        class_names (List[str]): Ordered class labels.
+        model (nn.Module): Base model to calibrate.
+        temperature (nn.Parameter): Learnable temperature parameter.
     """
+    def __init__(self, model):
+        """Initialize the temperature wrapper.
+
+        Args:
+            model (nn.Module): Base model to calibrate.
+        """
+        super().__init__()
+        self.model = model
+        self.temperature = nn.Parameter(torch.ones(1) * 1.5)
+
+    def forward(self, input):
+        """Forward pass with temperature scaling.
+
+        Args:
+            input (Any): Input tensor(s) for the wrapped model.
+
+        Returns:
+            torch.Tensor: Scaled logits.
+        """
+        logits = self.model(input)
+        return self.temperature_scale(logits)
+
+    def temperature_scale(self, logits):
+        """Scale logits by the temperature.
+
+        Args:
+            logits (torch.Tensor): Raw logits.
+
+        Returns:
+            torch.Tensor: Scaled logits.
+        """
+        return logits / self.temperature
+
+class InterventionEvaluator(BaseEvaluator):
+    """Evaluator with temperature scaling and thresholded metrics.
+
+    This evaluator computes accuracy, F1, AUROC, and AUPRC with
+    optional temperature calibration.
+    """
+    
     def __init__(self, config: CNNConfig, entity: InterventionModelEntity, registry, observer, device):
-        """Initialize the evaluator with model and configuration.
+        """Initialize the intervention evaluator.
 
         Args:
             config (CNNConfig): Evaluation configuration.
-            entity (InterventionModelEntity): Model entity wrapper.
-            registry (Any): Artifact registry.
-            observer (Any): Logging observer.
-            device (Any): Target device.
+            entity (InterventionModelEntity): Wrapped model entity.
+            registry (Any): Artifact registry instance.
+            observer (Any): Telemetry observer instance.
+            device (str): Execution device.
         """
         super().__init__(registry, observer, device)
         self.cfg = config
         self.entity = entity
-                                                    
-        self.class_names = ["ONSET", "WEAN", "STAY ON", "STAY OFF"]
+        self.temperature = 1.0
 
-    def evaluate(self, loader, **kwargs) -> Dict[str, float]:
-        """Evaluate the model on the provided data loader.
+    def calibrate(self, loader) -> None:
+        """Learn the optimal temperature on the validation set.
 
         Args:
-            loader (Any): Evaluation data loader.
-            **kwargs (Any): Additional options.
+            loader (DataLoader): Validation data loader.
+        """
+        self.entity.network.eval()
+        logits_list = []
+        labels_list = []
+        
+        with torch.no_grad():
+            for batch in loader:
+                x_val = batch.x_val.to(self.device).float()
+                x_msk = batch.x_msk.to(self.device).float()
+                x_delta = batch.x_delta.to(self.device).float()
+                x_num = torch.cat([x_val, x_msk, x_delta], dim=1)
+                
+                x_icd = batch.x_icd.to(self.device).float() if batch.x_icd is not None else None
+                y = batch.y[:, -1].to(self.device)
+                
+                logits = self.entity.network(x_num, x_icd)
+                logits_list.append(logits)
+                labels_list.append(y)
+        
+        logits = torch.cat(logits_list)
+        labels = torch.cat(labels_list)
+        
+        self.observer.log("INFO", "InterventionEvaluator: Temperature calibration start.")
+        temperature = nn.Parameter(torch.ones(1, device=self.device) * 1.5)
+        optimizer = torch.optim.LBFGS([temperature], lr=0.01, max_iter=50)
+        
+        def eval():
+            optimizer.zero_grad()
+            loss = nn.CrossEntropyLoss()(logits / temperature, labels)
+            loss.backward()
+            return loss
+        
+        optimizer.step(eval)
+        self.temperature = temperature.item()
+        self.observer.log("INFO", f"Optimal Temperature found: {self.temperature:.4f}")
+
+    def evaluate(self, loader, **kwargs) -> Dict[str, float]:
+        """Evaluate the model on a data loader.
+
+        Args:
+            loader (DataLoader): Evaluation data loader.
+            **kwargs (Any): Optional keyword arguments.
 
         Returns:
-            Dict[str, float]: Aggregated evaluation metrics.
+            Dict[str, float]: Evaluation metrics.
         """
         self.entity.network.eval()
         
-        all_preds = []
-        all_labels = []
         all_probs = []
+        all_labels = []
+        total_loss = 0.0
+        self.observer.log("INFO", "InterventionEvaluator: Evaluation loop start.")
         
-        with self.entity.ema.average_parameters():
-            with torch.no_grad():
-                for batch in loader:
-                    batch = batch.to(self.device)
-                    logits = self.entity.network(batch.x_num, batch.x_cat, batch.x_icd)
-                    probs = torch.softmax(logits, dim=1)
-                    preds = logits.argmax(dim=1)
-                    
-                    all_preds.extend(preds.cpu().numpy())
-                    all_labels.extend(batch.y.cpu().numpy())
-                    all_probs.extend(probs.cpu().numpy())
+        with torch.no_grad():
+            for batch in loader:
+                x_val = batch.x_val.to(self.device).float()
+                x_msk = batch.x_msk.to(self.device).float()
+                x_delta = batch.x_delta.to(self.device).float()
+                x_num = torch.cat([x_val, x_msk, x_delta], dim=1)
+                x_icd = batch.x_icd.to(self.device).float() if batch.x_icd is not None else None
+                y = batch.y[:, -1].to(self.device)
+                
+                logits = self.entity.network(x_num, x_icd)
+                
+                scaled_logits = logits / self.temperature
+                probs = torch.softmax(scaled_logits, dim=1)
+                
+                all_probs.append(probs.cpu().numpy())
+                all_labels.append(y.cpu().numpy())
+                
+                loss = nn.CrossEntropyLoss()(scaled_logits, y)
+                total_loss += loss.item()
+
+        y_true = np.concatenate(all_labels)
+        y_prob = np.concatenate(all_probs)
+        y_pred = np.argmax(y_prob, axis=1)
         
-        y_true = np.array(all_labels)
-        y_pred = np.array(all_preds)
-        y_score = np.array(all_probs)
+        acc = accuracy_score(y_true, y_pred)
+        f1 = f1_score(y_true, y_pred, average='macro')
         
-                     
-        acc = float(accuracy_score(y_true, y_pred))
-        
-                             
-        f1 = float(f1_score(y_true, y_pred, average='macro'))
-        
-                                              
-                                                            
-        y_true_bin = label_binarize(y_true, classes=[0, 1, 2, 3])
-        
-        # Suppress warnings for undefined metrics when classes are missing in the batch/dataset
-        with warnings.catch_warnings():
-            warnings.filterwarnings("ignore", category=UndefinedMetricWarning)
-            warnings.filterwarnings("ignore", category=UserWarning, message=".*No positive class found.*")
+        try:
+            y_true_bin = label_binarize(y_true, classes=[0,1,2,3])
+            macro_auc = roc_auc_score(y_true_bin, y_prob, average='macro', multi_class='ovr')
+            macro_auprc = average_precision_score(y_true_bin, y_prob, average='macro')
+        except Exception:
+            macro_auc = 0.0
+            macro_auprc = 0.0
             
-            try:
-                aucs = roc_auc_score(y_true_bin, y_score, average=None, multi_class='ovr')
-                macro_auc = float(np.mean(aucs))
-                onset_auc = float(aucs[0])
-                wean_auc = float(aucs[1])
-                stay_on_auc = float(aucs[2])
-                stay_off_auc = float(aucs[3])
-            except ValueError:
-                                                                     
-                macro_auc = 0.0
-                onset_auc = 0.0
-                wean_auc = 0.0
-                stay_on_auc = 0.0
-                stay_off_auc = 0.0
-
-            try:
-                macro_auprc = float(average_precision_score(y_true_bin, y_score, average='macro'))
-            except ValueError:
-                macro_auprc = 0.0
-
         metrics = {
+            "loss": total_loss / len(loader),
             "accuracy": acc,
             "f1_score": f1,
             "macro_auc": macro_auc,
-            "onset_auc": onset_auc,
-            "wean_auc": wean_auc,
-            "stay_on_auc": stay_on_auc,
-            "stay_off_auc": stay_off_auc,
             "macro_auprc": macro_auprc
         }
-        
         return metrics
