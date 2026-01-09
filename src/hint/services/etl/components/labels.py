@@ -2,27 +2,33 @@ import polars as pl
 import json
 import numpy as np
 from pathlib import Path
+from typing import Any, List, Dict
 from collections import Counter
 from ....foundation.interfaces import PipelineComponent, Registry, TelemetryObserver
 from ....domain.vo import ETLConfig, ICDConfig, CNNConfig
 
-class LabelGenerator(PipelineComponent):
-    """Generate ICD candidate sets and ventilation transition targets.
+def _to_python_list(val: Any) -> List[str]:
+    """Normalize a value into a list of strings."""
+    if isinstance(val, np.ndarray):
+        return val.tolist()
+    if isinstance(val, list):
+        return val
+    if isinstance(val, str):
+        try:
+            from ast import literal_eval
+            parsed = literal_eval(val)
+            if isinstance(parsed, (list, tuple)):
+                return list(parsed)
+        except:
+            if val.startswith("[") and val.endswith("]"):
+                return [t.strip(" '\"") for t in val.strip("[]").split(",") if t.strip()]
+            return [val]
+    return []
 
-    This component writes both ventilation transition labels and ICD
-    candidate lists required for downstream modeling.
-    """
+class LabelGenerator(PipelineComponent):
+    """Generate targets: ICD Candidate Sets and Vent State Transitions."""
 
     def __init__(self, etl_config: ETLConfig, icd_config: ICDConfig, cnn_config: CNNConfig, registry: Registry, observer: TelemetryObserver):
-        """Initialize the label generator.
-
-        Args:
-            etl_config (ETLConfig): ETL configuration.
-            icd_config (ICDConfig): ICD configuration.
-            cnn_config (CNNConfig): Intervention configuration.
-            registry (Registry): Artifact registry.
-            observer (TelemetryObserver): Telemetry observer.
-        """
         self.etl_cfg = etl_config
         self.icd_cfg = icd_config
         self.cnn_cfg = cnn_config
@@ -30,11 +36,6 @@ class LabelGenerator(PipelineComponent):
         self.observer = observer
 
     def execute(self) -> None:
-        """Generate both ventilation and ICD targets.
-
-        Raises:
-            FileNotFoundError: If the features dataset is missing.
-        """
         proc_dir = Path(self.etl_cfg.proc_dir)
         proc_dir.mkdir(parents=True, exist_ok=True)
 
@@ -49,15 +50,11 @@ class LabelGenerator(PipelineComponent):
         self._generate_icd_targets(ds, proc_dir)
 
     def _generate_vent_targets(self, ds: pl.DataFrame, proc_dir: Path) -> None:
-        """Generate transition-based ventilation targets.
-
-        Args:
-            ds (pl.DataFrame): Input dataset with ventilation labels.
-            proc_dir (Path): Output directory for artifacts.
-        """
+        """Generate transition-based ventilation targets (ONSET, WEAN, STAY ON, STAY OFF)."""
         self.observer.log("INFO", "LabelGenerator: Stage 1/2 generating ventilation transitions.")
+        
         sorted_ds = ds.select(["ICUSTAY_ID", "HOUR_IN", "VENT"]).sort(["ICUSTAY_ID", "HOUR_IN"])
-
+        
         targets = sorted_ds.with_columns([
             pl.col("VENT").alias("curr_vent"),
             pl.col("VENT").shift(-1).alias("next_vent"),
@@ -79,20 +76,16 @@ class LabelGenerator(PipelineComponent):
         self.observer.log("INFO", f"LabelGenerator: Saved Vent transition targets to {out_path}")
 
     def _generate_icd_targets(self, ds: pl.DataFrame, proc_dir: Path) -> None:
-        """Generate ICD candidate sets for partial label learning.
-
-        Args:
-            ds (pl.DataFrame): Input dataset with ICD code lists.
-            proc_dir (Path): Output directory for artifacts.
-        """
+        """Generate ICD Candidate Sets for Partial Label Learning."""
         self.observer.log("INFO", "LabelGenerator: Stage 2/2 generating ICD candidate sets.")
 
+        # 1. Build Vocabulary
         all_codes = []
+        # Handle potential nulls or different types by normalizing first
         raw_rows = ds.select("ICD9_CODES").to_series().to_list()
         
         for codes in raw_rows:
-            if codes:
-                all_codes.extend(codes)
+            if codes: all_codes.extend(codes)
             
         code_counts = Counter(all_codes)
         top_k = self.icd_cfg.top_k_labels
@@ -103,10 +96,22 @@ class LabelGenerator(PipelineComponent):
             sorted_codes = [c for c, _ in code_counts.most_common()]
             
         code_to_idx = {c: i for i, c in enumerate(sorted_codes)}
-
+        
+        # 2. Map codes
         def map_codes(codes_list):
-            if not codes_list:
+            # [FIX] Safer check for None, empty list, or Series
+            if codes_list is None: 
                 return []
+            
+            # Check if it behaves like a Series (Polars Series has 'len' and 'to_list')
+            if hasattr(codes_list, "to_list"):
+                # Convert Series to Python list
+                codes_list = codes_list.to_list()
+            
+            # Check for empty list/series/array
+            if len(codes_list) == 0:
+                return []
+                
             return [code_to_idx[c] for c in codes_list if c in code_to_idx]
 
         unique_stays = ds.select(["ICUSTAY_ID", "ICD9_CODES"]).unique(subset=["ICUSTAY_ID"])
