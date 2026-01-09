@@ -1,3 +1,5 @@
+# src/hint/services/training/predict_intervention/service.py
+
 import torch
 import h5py
 import numpy as np
@@ -89,8 +91,9 @@ class InterventionService(BaseDomainService):
         self.observer.log("INFO", "InterventionService: Stage 2/4 initializing HINT model and input dimensions.")
 
         with h5py.File(self.train_ds.h5_path, 'r') as f:
-            num_base_feats = f["X_val"].shape[1]
-            num_feats = num_base_feats * 3 
+            # FIX: Read from 'X_num' directly. 
+            # The structure is (N, Channels, Seq), so shape[1] is the number of features.
+            num_feats = f["X_num"].shape[1]
             
             icd_dim = 0
             if "X_icd" in f:
@@ -99,13 +102,40 @@ class InterventionService(BaseDomainService):
             else:
                 self.observer.log("WARNING", "X_icd not found in dataset. Gating disabled.")
 
-        NetworkClass = get_network_class("HINT")
+        # FIX: Use "TCN" instead of "HINT" to match the keys in networks.py
+        NetworkClass = get_network_class("TCN")
         network = NetworkClass(
-            num_feats=num_feats,
-            num_classes=4,
+            in_chs=num_feats, # TCNClassifier.__init__ expects 'in_chs' or 'num_feats' depending on implementation. Assuming it matches TCNClassifier signature.
+            # If TCNClassifier signature uses different arg names, adjust here. 
+            # Based on previous file content: TCNClassifier(in_chs, n_cls, vocab_sizes, ...)
+            # We need to adapt arguments to match TCNClassifier.__init__ signature found in networks.py
+            n_cls=4,
+            vocab_sizes=self.train_ds.get_real_vocab_sizes() if hasattr(self.train_ds, "get_real_vocab_sizes") else [],
             icd_dim=icd_dim,
-            hidden_dim=128,
-            dropout=self.cfg.dropout
+            embed_dim=128, # or self.cfg.embed_dim
+            head_drop=self.cfg.dropout,
+            # Add other necessary args from config if needed
+        )
+        
+        # Note: The previous code was instantiating with (num_feats, num_classes, ...).
+        # TCNClassifier defined earlier takes (in_chs, n_cls, vocab_sizes, ...).
+        # Let's ensure strict compatibility with the defined TCNClassifier in networks.py.
+        
+        vocab_sizes = []
+        if hasattr(self.train_ds, "get_real_vocab_sizes"):
+             vocab_sizes = self.train_ds.get_real_vocab_sizes()
+
+        network = NetworkClass(
+            in_chs=num_feats,
+            n_cls=4,
+            vocab_sizes=vocab_sizes,
+            icd_dim=icd_dim,
+            embed_dim=self.cfg.embed_dim if hasattr(self.cfg, "embed_dim") else 128,
+            cat_embed_dim=self.cfg.cat_embed_dim if hasattr(self.cfg, "cat_embed_dim") else 32,
+            head_drop=self.cfg.dropout,
+            tcn_drop=self.cfg.tcn_dropout if hasattr(self.cfg, "tcn_dropout") else 0.2,
+            kernel=self.cfg.tcn_kernel_size if hasattr(self.cfg, "tcn_kernel_size") else 5,
+            layers=self.cfg.tcn_layers if hasattr(self.cfg, "tcn_layers") else 5
         )
         
         entity_name = self.cfg.artifacts.model_name

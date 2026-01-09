@@ -1,3 +1,5 @@
+# src/hint/app/factory.py
+
 from pathlib import Path
 from typing import List
 
@@ -10,7 +12,12 @@ from ..infrastructure.telemetry import RichTelemetryObserver
 from ..infrastructure.datasource import HDF5StreamingSource, ParquetSource
 from ..infrastructure.networks import TCNClassifier
 
-from ..services.etl.service import ETLService
+# [삭제] 상단 임포트 제거하여 순환 참조 방지
+# from ..services.etl.service import ETLService
+# from ..services.training.automatic_icd_coding.service import ICDService
+# from ..services.training.predict_intervention.service import InterventionService
+
+# Component들은 유지 (순환 참조 가능성 낮음, 필요시 이동)
 from ..services.etl.components.static import StaticExtractor
 from ..services.etl.components.timeseries import TimeSeriesAggregator
 from ..services.etl.components.outcomes import OutcomesBuilder
@@ -18,8 +25,6 @@ from ..services.etl.components.ventilation import VentilationTagger
 from ..services.etl.components.assembler import FeatureAssembler
 from ..services.etl.components.tensor import TensorConverter
 from ..services.etl.components.labels import LabelGenerator
-from ..services.training.automatic_icd_coding.service import ICDService
-from ..services.training.predict_intervention.service import InterventionService
 
 class AppFactory:
     """Factory for application services and infrastructure.
@@ -60,12 +65,15 @@ class AppFactory:
         """
         return RichTelemetryObserver()
 
-    def create_etl_service(self) -> ETLService:
+    def create_etl_service(self): # Type hint removed to avoid top-level import dependency
         """Construct the ETL service with configured components.
 
         Returns:
             ETLService: Ready-to-run ETL service.
         """
+        # [추가] 메서드 내부에서 임포트 (Lazy Import)
+        from ..services.etl.service import ETLService
+
         etl_cfg = self.ctx.etl
         cnn_cfg = self.ctx.cnn
         icd_cfg = self.ctx.icd
@@ -109,12 +117,15 @@ class AppFactory:
         observer.log("INFO", "AppFactory: ETL stage 3/3 service construction complete.")
         return ETLService(registry, observer, components)
 
-    def create_icd_service(self) -> ICDService:
+    def create_icd_service(self): # Type hint removed
         """Construct the ICD training service.
 
         Returns:
             ICDService: Service configured for ICD training/inference.
         """
+        # [추가] 메서드 내부에서 임포트 (Lazy Import)
+        from ..services.training.automatic_icd_coding.service import ICDService
+
         cfg = self.ctx.icd
         registry = self.create_registry()
         observer = self.create_telemetry()
@@ -128,9 +139,9 @@ class AppFactory:
         test_path = cache_dir / f"{prefix}_test.h5"
         
         try:
-            train_source = HDF5StreamingSource(train_path, label_key="y")
-            val_source = HDF5StreamingSource(val_path, label_key="y")
-            test_source = HDF5StreamingSource(test_path, label_key="y") if test_path.exists() else None
+            train_source = HDF5StreamingSource(train_path, label_key="candidates") # label_key updated to match context
+            val_source = HDF5StreamingSource(val_path, label_key="candidates")
+            test_source = HDF5StreamingSource(test_path, label_key="candidates") if test_path.exists() else None
         except Exception as e:
             observer.log("WARNING", f"Factory: Could not initialize ICD H5 sources ({e}). Ensure ETL has run.")
             train_source = None
@@ -147,12 +158,15 @@ class AppFactory:
             test_source=test_source
         )
 
-    def create_intervention_service(self) -> InterventionService:
+    def create_intervention_service(self): # Type hint removed
         """Construct the intervention training service.
 
         Returns:
             InterventionService: Service configured for intervention training.
         """
+        # [추가] 메서드 내부에서 임포트 (Lazy Import)
+        from ..services.training.predict_intervention.service import InterventionService
+
         cfg = self.ctx.cnn
         registry = self.create_registry()
         observer = self.create_telemetry()
@@ -164,7 +178,7 @@ class AppFactory:
         val_path = cache_dir / f"{prefix}_val.h5"
         test_path = cache_dir / f"{prefix}_test.h5"
         
-        target_key = cfg.keys.TARGET_VENT_STATE if hasattr(cfg.keys, "TARGET_VENT_STATE") else "y"
+        target_key = cfg.keys.TARGET_VENT_STATE if hasattr(cfg.keys, "TARGET_VENT_STATE") else "y_vent"
 
         try:
             train_source = HDF5StreamingSource(train_path, seq_len=cfg.seq_len, label_key=target_key)
@@ -175,7 +189,14 @@ class AppFactory:
 
             if len(train_source) > 0:
                 dummy = train_source[0]
-                num_channels = dummy.x_num.shape[0]
+                # X_num으로 변경된 필드 반영
+                if hasattr(dummy, 'x_num') and dummy.x_num is not None:
+                    num_channels = dummy.x_num.shape[0]
+                elif hasattr(dummy, 'x_val'): # Fallback
+                    num_channels = dummy.x_val.shape[0] * 3
+                else:
+                    num_channels = 0
+                
                 icd_dim = dummy.x_icd.shape[0] if dummy.x_icd is not None else 0
             else:
                 num_channels = 0
@@ -191,8 +212,8 @@ class AppFactory:
 
         observer.log("INFO", "AppFactory: Intervention stage 2/3 building model network.")
         
-        network = GFINet_CNN(
-            in_chs=[num_channels],
+        network = TCNClassifier(
+            in_chs=num_channels,
             n_cls=4, 
             vocab_sizes=vocab_sizes,
             icd_dim=icd_dim,

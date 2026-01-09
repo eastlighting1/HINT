@@ -24,17 +24,7 @@ class ICDTrainer(BaseTrainer):
     """
     
     def __init__(self, config: ICDConfig, entity: ICDModelEntity, registry, observer, device, class_freq: np.ndarray = None, ignored_indices: Optional[List[int]] = None):
-        """Initialize the ICD trainer.
-
-        Args:
-            config (ICDConfig): Training configuration.
-            entity (ICDModelEntity): Wrapped model entity.
-            registry (Any): Artifact registry instance.
-            observer (Any): Telemetry observer.
-            device (str): Training device.
-            class_freq (Optional[np.ndarray]): Optional class frequency vector.
-            ignored_indices (Optional[List[int]]): Unused indices reserved for filtering.
-        """
+        """Initialize the ICD trainer."""
         super().__init__(registry, observer, device)
         self.cfg = config
         self.entity = entity
@@ -47,18 +37,19 @@ class ICDTrainer(BaseTrainer):
         """Prepare 3-channel inputs from a TensorBatch.
 
         Args:
-            batch (TensorBatch): Batch containing x_val, x_msk, and x_delta.
+            batch (TensorBatch): Batch containing x_num (and optionally x_cat).
 
         Returns:
             Dict[str, torch.Tensor]: Dictionary with model inputs.
         """
         inputs = {}
         
-        x_val = batch.x_val.to(self.device).float()
-        x_msk = batch.x_msk.to(self.device).float()
-        x_delta = batch.x_delta.to(self.device).float()
+        # FIX: Use x_num directly as it is now pre-concatenated by TensorConverter/Loader
+        inputs["x_num"] = batch.x_num.to(self.device).float()
         
-        inputs["x_num"] = torch.cat([x_val, x_msk, x_delta], dim=1)
+        # Optionally support categorical features if the model needs them
+        if batch.x_cat is not None:
+            inputs["x_cat"] = batch.x_cat.to(self.device).long()
         
         return inputs
 

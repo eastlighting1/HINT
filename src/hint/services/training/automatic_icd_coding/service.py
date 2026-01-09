@@ -1,217 +1,149 @@
+# src/hint/services/training/automatic_icd_coding/trainer.py
+
 import torch
 import torch.nn as nn
-import h5py
-import json
 import numpy as np
-from pathlib import Path
-from typing import Optional, List
+import random
+from typing import List, Optional, Dict
 from torch.utils.data import DataLoader
-from ..common.base import BaseDomainService
-from .trainer import ICDTrainer
-from .evaluator import ICDEvaluator
+from ..common.base import BaseTrainer, BaseEvaluator
 from ....domain.entities import ICDModelEntity
 from ....domain.vo import ICDConfig
-from ....foundation.interfaces import TelemetryObserver, Registry, StreamingSource
-from ....infrastructure.datasource import HDF5StreamingSource, collate_tensor_batch
-from ....infrastructure.networks import get_network_class
+from ....foundation.dtos import TensorBatch
 
-class ICDService(BaseDomainService):
-    """Service that trains and evaluates ICD models with partial label learning.
+class ICDTrainer(BaseTrainer):
+    """Trainer for ICD classification with partial label learning.
 
-    This service loads statistics, prepares datasets, and trains one or
-    more ICD models using adaptive softmax and candidate sampling.
+    This trainer uses adaptive softmax with candidate sampling for
+    partial label learning and tracks validation accuracy.
+
+    Attributes:
+        cfg (ICDConfig): Training configuration.
+        entity (ICDModelEntity): Wrapped model entity.
+        class_freq (Optional[np.ndarray]): Optional class frequency vector.
+        scaler (Optional[torch.amp.GradScaler]): AMP gradient scaler.
+        adaptive_loss_fn (Any): Adaptive softmax loss function.
     """
-    def __init__(self, config: ICDConfig, registry: Registry, observer: TelemetryObserver, **kwargs):
-        """Initialize the ICD service.
+    
+    def __init__(self, config: ICDConfig, entity: ICDModelEntity, registry, observer, device, class_freq: np.ndarray = None, ignored_indices: Optional[List[int]] = None):
+        """Initialize the ICD trainer.
 
         Args:
-            config (ICDConfig): ICD configuration.
-            registry (Registry): Artifact registry for checkpoints.
-            observer (TelemetryObserver): Telemetry observer for logging.
-            **kwargs (Any): Reserved keyword arguments.
+            config (ICDConfig): Training configuration.
+            entity (ICDModelEntity): Wrapped model entity.
+            registry (Any): Artifact registry instance.
+            observer (Any): Telemetry observer.
+            device (str): Training device.
+            class_freq (Optional[np.ndarray]): Optional class frequency vector.
+            ignored_indices (Optional[List[int]]): Unused indices reserved for filtering.
         """
-        super().__init__(observer)
+        super().__init__(registry, observer, device)
         self.cfg = config
-        self.registry = registry
-        self.device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
-        self.ignored_indices = []
-
-    def execute(self) -> None:
-        """Run the ICD training and evaluation workflow."""
-        cache_dir = Path(self.cfg.data.data_cache_dir)
-        stats_path = cache_dir / "stats.json"
+        self.entity = entity
+        self.class_freq = class_freq
+        self.scaler = torch.amp.GradScaler('cuda') if torch.cuda.is_available() else None
         
-        if not stats_path.exists():
-            self.observer.log("ERROR", f"Stats file not found at {stats_path}")
-            return
+        self.adaptive_loss_fn = self.entity.model.adaptive_head
 
-        self.observer.log("INFO", "ICDService: Stage 1/4 loading class statistics.")
-        with open(stats_path, "r") as f: 
-            stats = json.load(f)
-        
-        num_classes = len(stats["icd_classes"])
-        self.ignored_indices = [i for i, label in enumerate(stats["icd_classes"]) if label in ["__MISSING__", "__OTHER__"]]
-        
-        prefix = self.cfg.data.input_h5_prefix
-        
-        self.observer.log("INFO", "ICDService: Stage 2/4 initializing HDF5 sources.")
-        try:
-            train_source = HDF5StreamingSource(cache_dir / f"{prefix}_train.h5", label_key="candidates")
-            val_source = HDF5StreamingSource(cache_dir / f"{prefix}_val.h5", label_key="candidates")
-            test_source = HDF5StreamingSource(cache_dir / f"{prefix}_test.h5", label_key="candidates")
-        except Exception as e:
-            self.observer.log("ERROR", f"Failed to initialize HDF5 sources: {e}")
-            return
-        
-        self.observer.log("INFO", "ICDService: Stage 3/4 preparing training loaders.")
-        target_counts = np.ones(num_classes)
-
-        dl_tr = DataLoader(train_source, batch_size=self.cfg.batch_size, collate_fn=collate_tensor_batch, shuffle=True, num_workers=4, pin_memory=True, drop_last=True)
-        dl_val = DataLoader(val_source, batch_size=self.cfg.batch_size, collate_fn=collate_tensor_batch, num_workers=4, pin_memory=True)
-        dl_test = DataLoader(test_source, batch_size=self.cfg.batch_size, collate_fn=collate_tensor_batch, num_workers=4, pin_memory=True)
-
-        models_to_run = self.cfg.models_to_run if self.cfg.models_to_run else ["MedBERT"]
-
-        for model_name in models_to_run:
-            self.observer.log("INFO", f"ICDService: Stage 4/4 starting workflow for model={model_name}.")
-            try:
-                NetworkClass = get_network_class(model_name)
-                with h5py.File(train_source.h5_path, 'r') as f:
-                    input_dim = f['X_val'].shape[1] * 3
-                    seq_len = f['X_val'].shape[2]
-
-                network = NetworkClass(num_classes=num_classes, input_dim=input_dim, seq_len=seq_len, dropout=self.cfg.dropout)
-                
-                if hasattr(network, "embedding_dim"):
-                    in_features = network.embedding_dim
-                elif hasattr(network, "fc"):
-                    in_features = network.fc.in_features
-                else:
-                    in_features = 128
-                
-                if num_classes > 10000:
-                    cutoffs = [2000, 8000]
-                else:
-                    cutoffs = [num_classes // 4, num_classes // 2]
-                
-                adaptive_head = nn.AdaptiveLogSoftmaxWithLoss(
-                    in_features=in_features, n_classes=num_classes, cutoffs=cutoffs, div_value=4.0
-                )
-                network.add_module("adaptive_head", adaptive_head)
-
-                entity_name = f"{self.cfg.artifacts.model_name}_{model_name}"
-                model_entity = ICDModelEntity(network)
-                model_entity.name = entity_name
-
-                trainer = ICDTrainer(self.cfg, model_entity, self.registry, self.observer, self.device, class_freq=target_counts)
-                evaluator = ICDEvaluator(self.cfg, model_entity, self.registry, self.observer, self.device)
-                
-                trainer.train(dl_tr, dl_val, evaluator)
-                
-                best_state = self.registry.load_model(entity_name, tag="best", device=str(self.device))
-                if best_state:
-                    model_entity.model.load_state_dict(best_state)
-                
-                test_metrics = evaluator.evaluate(dl_test)
-                self.observer.log("INFO", f"Final Test Metrics: {json.dumps(test_metrics, indent=2)}")
-
-            except Exception as e:
-                self.observer.log("ERROR", f"Failed to run model {model_name}: {str(e)}")
-                import traceback
-                self.observer.log("ERROR", traceback.format_exc())
-
-    def generate_intervention_dataset(self, cnn_config) -> None:
-        """Inject X_icd latent context into the intervention dataset.
+    def _prepare_inputs(self, batch: TensorBatch) -> Dict[str, torch.Tensor]:
+        """Prepare inputs from a TensorBatch.
 
         Args:
-            cnn_config (Any): Intervention configuration for dataset prefixes.
+            batch (TensorBatch): Batch containing x_num (and optionally x_cat).
+
+        Returns:
+            Dict[str, torch.Tensor]: Dictionary with model inputs.
         """
-        self.observer.log("INFO", "ICDService: Starting feature injection.")
+        inputs = {}
         
-        models_to_run = self.cfg.models_to_run if self.cfg.models_to_run else ["MedBERT"]
-        if not models_to_run:
-            return
-        model_name = models_to_run[0]
+        # FIX: Use x_num directly as it is now pre-concatenated by the loader
+        if hasattr(batch, 'x_num') and batch.x_num is not None:
+            inputs["x_num"] = batch.x_num.to(self.device).float()
+        else:
+            # Fallback logic only if x_num is missing (should not happen with correct loader)
+            x_val = batch.x_val.to(self.device).float()
+            x_msk = batch.x_msk.to(self.device).float()
+            x_delta = batch.x_delta.to(self.device).float()
+            inputs["x_num"] = torch.cat([x_val, x_msk, x_delta], dim=1)
         
-        cache_dir = Path(self.cfg.data.data_cache_dir)
-        with open(cache_dir / "stats.json", "r") as f:
-            stats = json.load(f)
-        num_classes = len(stats["icd_classes"])
+        # Support categorical features if present
+        if batch.x_cat is not None:
+            inputs["x_cat"] = batch.x_cat.to(self.device).long()
         
-        icd_prefix = self.cfg.data.input_h5_prefix
-        cnn_prefix = cnn_config.data.input_h5_prefix
-        
-        sample_file = cache_dir / f"{icd_prefix}_train.h5"
-        with h5py.File(sample_file, "r") as f:
-            num_feats = f["X_val"].shape[1] * 3
-            seq_len = f["X_val"].shape[2]
+        return inputs
 
-        try:
-            NetworkClass = get_network_class(model_name)
-            network = NetworkClass(num_classes=num_classes, input_dim=num_feats, seq_len=seq_len, dropout=self.cfg.dropout)
-            
-            if hasattr(network, "embedding_dim"):
-                in_features = network.embedding_dim
-            elif hasattr(network, "fc"):
-                in_features = network.fc.in_features
-            else:
-                in_features = 128
-            
-            if num_classes > 10000:
-                cutoffs = [2000, 8000]
-            else:
-                cutoffs = [num_classes // 4, num_classes // 2]
-            
-            adaptive_head = nn.AdaptiveLogSoftmaxWithLoss(in_features, num_classes, cutoffs=cutoffs, div_value=4.0)
-            network.add_module("adaptive_head", adaptive_head)
-            
-            entity_name = f"{self.cfg.artifacts.model_name}_{model_name}"
-            best_state = self.registry.load_model(entity_name, tag="best", device=str(self.device))
-            if best_state:
-                network.load_state_dict(best_state)
-            
-            network.to(self.device)
-            network.eval()
-            
-        except Exception as e:
-            self.observer.log("ERROR", f"Model init failed: {e}")
-            return
+    def _sample_target_from_candidates(self, candidates: torch.Tensor) -> torch.Tensor:
+        """Sample one valid label from each candidate set.
 
-        splits = ["train", "val", "test"]
-        for split in splits:
-            src_path = cache_dir / f"{icd_prefix}_{split}.h5"
-            tgt_path = cache_dir / f"{cnn_prefix}_{split}.h5"
+        Args:
+            candidates (torch.Tensor): Candidate label indices.
+
+        Returns:
+            torch.Tensor: Sampled target labels.
+        """
+        targets = []
+        candidates_np = candidates.cpu().numpy()
+        for row in candidates_np:
+            valid_cands = row[row >= 0]
+            if len(valid_cands) > 0:
+                targets.append(np.random.choice(valid_cands))
+            else:
+                targets.append(0)
+        return torch.tensor(targets, device=self.device, dtype=torch.long)
+
+    def train(self, train_loader: DataLoader, val_loader: DataLoader, evaluator: BaseEvaluator) -> None:
+        """Run the training loop with validation.
+
+        Args:
+            train_loader (DataLoader): Training data loader.
+            val_loader (DataLoader): Validation data loader.
+            evaluator (BaseEvaluator): Evaluator instance.
+        """
+        self.entity.to(self.device)
+        self.entity.model.train()
+        params = list(self.entity.model.parameters())
+        optimizer = torch.optim.Adam(params, lr=self.cfg.lr)
+        
+        self.observer.log("INFO", "ICDTrainer: Starting training loop.")
+        for epoch in range(1, self.cfg.epochs + 1):
+            self.entity.epoch = epoch
+            epoch_loss = 0.0
+            steps = 0
             
-            if not src_path.exists() or not tgt_path.exists():
-                continue
-            
-            self.observer.log("INFO", f"Injecting context into {tgt_path}...")
-            source = HDF5StreamingSource(src_path, label_key="candidates")
-            dl = DataLoader(source, batch_size=self.cfg.batch_size, collate_fn=collate_tensor_batch, num_workers=4)
-            
-            all_embeds = []
-            
-            try:
-                with torch.no_grad():
-                    for batch in dl:
-                        x_val = batch.x_val.to(self.device)
-                        x_msk = batch.x_msk.to(self.device)
-                        x_delta = batch.x_delta.to(self.device)
-                        x_num = torch.cat([x_val, x_msk, x_delta], dim=1)
-                        
-                        embeddings = network(x_num=x_num, return_embeddings=True)
-                        all_embeds.append(embeddings.cpu().numpy())
+            with self.observer.create_progress(f"Epoch {epoch} ICD Train", total=len(train_loader)) as progress:
+                task = progress.add_task("Training", total=len(train_loader))
                 
-                if not all_embeds:
-                    continue
-                full_embeds = np.concatenate(all_embeds, axis=0)
-                
-                with h5py.File(tgt_path, "a") as f_tgt:
-                    if "X_icd" in f_tgt:
-                        del f_tgt["X_icd"]
-                    f_tgt.create_dataset("X_icd", data=full_embeds)
+                for batch in train_loader:
+                    optimizer.zero_grad()
+                    inputs = self._prepare_inputs(batch)
                     
-                self.observer.log("INFO", f"Injected X_icd (Latent) shape: {full_embeds.shape}")
-                
-            except Exception as e:
-                self.observer.log("ERROR", f"Injection failed for {split}: {e}")
+                    candidates = batch.candidates
+                    target = self._sample_target_from_candidates(candidates)
+                    
+                    with torch.amp.autocast('cuda', enabled=self.scaler is not None):
+                        embeddings = self.entity.model(**inputs, return_embeddings=True)
+                        _, loss = self.adaptive_loss_fn(embeddings, target)
+                    
+                    if self.scaler:
+                        self.scaler.scale(loss).backward()
+                        self.scaler.step(optimizer)
+                        self.scaler.update()
+                    else:
+                        loss.backward()
+                        optimizer.step()
+                        
+                    epoch_loss += loss.item()
+                    steps += 1
+                    progress.advance(task)
+            
+            avg_loss = epoch_loss / max(1, steps)
+            self.observer.track_metric("icd_train_loss", avg_loss, step=epoch)
+            
+            self.observer.log("INFO", f"ICDTrainer: Epoch {epoch} validation start.")
+            metrics = evaluator.evaluate(val_loader)
+            val_acc = metrics.get("accuracy", 0.0)
+            self.observer.log("INFO", f"Epoch {epoch} | Loss={avg_loss:.4f} | Val Acc={val_acc:.4f}")
+            
+            if val_acc > self.entity.best_metric:
+                self.entity.best_metric = val_acc
+                self.registry.save_model(self.entity.model.state_dict(), self.entity.name, "best")

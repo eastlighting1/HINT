@@ -1,3 +1,5 @@
+# src/hint/services/etl/components/assembler.py
+
 import polars as pl
 import re
 from pathlib import Path
@@ -205,7 +207,8 @@ class FeatureAssembler(PipelineComponent):
 
         # One-hot encoding for static features
         def one_hot_fixed(d, col, levels, prefix):
-            d = d.select([pl.col(col)]).to_dummies(columns=[col])
+            # Select HADM_ID along with the target column to preserve the join key
+            d = d.select(["HADM_ID", pl.col(col)]).to_dummies(columns=[col])
             for lv in levels:
                 if f"{col}_{lv}" not in d.columns: d = d.with_columns(pl.lit(0).alias(f"{col}_{lv}"))
             rename_map = {c: f"{prefix}__{c.split(col + '_', 1)[1]}" for c in d.columns if col + "_" in c}
@@ -218,6 +221,9 @@ class FeatureAssembler(PipelineComponent):
             df_channels
             .join(icd9, on="HADM_ID", how="left")
             .join(s_age.with_columns(pl.col("HADM_ID").cast(pl.Int64)), on="HADM_ID", how="left")
+            # --- FIX: Join with pat to restore INTIME column for HOD calculation ---
+            .join(pat.select(["ICUSTAY_ID", "INTIME"]), on="ICUSTAY_ID", how="left")
+            # -----------------------------------------------------------------------
             .with_columns([
                 pl.col("VENT").fill_null(0).cast(pl.Int8),
                 (pl.col("INTIME") + pl.duration(hours=pl.col("HOUR_IN"))).dt.hour().alias("HOD").cast(pl.Int8),

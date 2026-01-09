@@ -16,15 +16,6 @@ class TensorConverter(PipelineComponent):
     """
 
     def __init__(self, etl_config: ETLConfig, cnn_config: CNNConfig, icd_config: ICDConfig, registry: Registry, observer: TelemetryObserver):
-        """Initialize the tensor converter.
-
-        Args:
-            etl_config (ETLConfig): ETL configuration.
-            cnn_config (CNNConfig): Intervention configuration.
-            icd_config (ICDConfig): ICD configuration.
-            registry (Registry): Artifact registry.
-            observer (TelemetryObserver): Telemetry observer.
-        """
         self.etl_cfg = etl_config
         self.cnn_cfg = cnn_config
         self.icd_cfg = icd_config
@@ -84,18 +75,6 @@ class TensorConverter(PipelineComponent):
             self._process_split(sub_df, name, val_cols, msk_cols, delta_cols, cache_dir, prefixes, global_stats)
 
     def _process_split(self, df, name, v_cols, m_cols, d_cols, out_dir, prefixes, stats):
-        """Process a single dataset split into HDF5 tensors.
-
-        Args:
-            df (pl.DataFrame): Split dataframe.
-            name (str): Split name.
-            v_cols (List[str]): Value channel columns.
-            m_cols (List[str]): Mask channel columns.
-            d_cols (List[str]): Delta channel columns.
-            out_dir (Path): Output directory.
-            prefixes (Tuple[str, str]): ICD and CNN prefix names.
-            stats (Dict[str, Tuple[float, float]]): Normalization statistics.
-        """
         if df.height == 0:
             return
 
@@ -171,17 +150,24 @@ class TensorConverter(PipelineComponent):
 
         X_cat = np.zeros((n_samples, len(cat_cols)), dtype=np.int32)
         cat_df = sorted_df.group_by("ICUSTAY_ID", maintain_order=True).first().select(cat_cols)
-        X_cat[:] = cat_df.to_numpy().astype(np.int32)
+        
+        # [FIX 1] Fill NaN with 0 before casting to int32
+        cat_vals = cat_df.fill_null(0).to_numpy()
+        X_cat[:] = cat_vals.astype(np.int32)
 
-        X_val = X_val.transpose(0, 2, 1)
+        # [FIX 2] Concatenate separate channels into a single X_num (N, 3*C, L)
+        # Transpose: (N, L, C) -> (N, C, L)
+        X_val = X_val.transpose(0, 2, 1) 
         X_msk = X_msk.transpose(0, 2, 1)
         X_delta = X_delta.transpose(0, 2, 1)
+        
+        # Combine: (N, C, L) + (N, C, L) + (N, C, L) -> (N, 3*C, L)
+        X_num = np.concatenate([X_val, X_msk, X_delta], axis=1)
 
         for p in [icd_path, cnn_path]:
             with h5py.File(p, "w") as f:
-                f.create_dataset("X_val", data=X_val)
-                f.create_dataset("X_msk", data=X_msk)
-                f.create_dataset("X_delta", data=X_delta)
+                # [FIX 3] Save X_num instead of separate datasets
+                f.create_dataset("X_num", data=X_num)
                 f.create_dataset("X_cat", data=X_cat)
                 f.create_dataset("stay_ids", data=np.array(stay_ids))
                 

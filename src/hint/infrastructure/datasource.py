@@ -1,3 +1,5 @@
+# src/hint/infrastructure/datasource.py
+
 import h5py
 import torch
 import numpy as np
@@ -265,26 +267,6 @@ class HDF5StreamingSource(Dataset):
         """
         return self._len
 
-    def _compute_delta(self, mask: torch.Tensor) -> torch.Tensor:
-        """Compute time-since-last-observation delta tensor.
-
-        Args:
-            mask (torch.Tensor): Observation mask shaped (channels, time).
-
-        Returns:
-            torch.Tensor: Delta tensor shaped (channels, time).
-        """
-        channels, seq_len = mask.shape
-        m_np = mask.numpy()
-        d_np = np.zeros_like(m_np, dtype=np.float32)
-        for c in range(channels):
-            last_valid = 0.0
-            for t in range(seq_len):
-                if m_np[c, t] == 1: last_valid = 0.0
-                else: last_valid += 1.0
-                d_np[c, t] = last_valid + 1.0                      
-        return torch.from_numpy(d_np)
-
     def __getitem__(self, idx: int) -> TensorBatch:
         """Load a sample from the HDF5 file.
 
@@ -299,11 +281,7 @@ class HDF5StreamingSource(Dataset):
 
         x_num_np = self.h5_file["X_num"][idx]
         x_num = torch.from_numpy(x_num_np).float()
-        is_nan = torch.isnan(x_num)
-        mask = (~is_nan).float()
-        x_num = torch.nan_to_num(x_num, nan=0.0)
-        delta = self._compute_delta(mask)
-
+        
         x_cat = None
         if "X_cat" in self.h5_file:
             x_cat = torch.from_numpy(self.h5_file["X_cat"][idx]).long()
@@ -333,13 +311,12 @@ class HDF5StreamingSource(Dataset):
             x_cat=x_cat,
             y=y,
             ids=sid_tensor,
-            mask=mask,
+            mask=None,
             x_icd=x_icd,
             input_ids=input_ids,
             attention_mask=attention_mask,
             candidates=candidates
         )
-        setattr(tb, "delta", delta)
         return tb
     
     def get_real_vocab_sizes(self) -> List[int]:

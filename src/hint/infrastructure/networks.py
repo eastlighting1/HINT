@@ -1,3 +1,5 @@
+# src/hint/infrastructure/networks.py
+
 import torch
 import torch.nn as nn
 from typing import Optional, Union, Sequence, List
@@ -196,7 +198,7 @@ def get_network_class(model_name: str) -> type:
         "iTransformer": iTransformerClassifier,
         "TabNet": TabNetICD,
         "DCNv2": DCNv2ICD,
-        "TCNClassifier": TCNClassifier
+        "TCN": TCNClassifier
     }
     
     if model_name not in mapping:

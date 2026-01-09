@@ -1,3 +1,5 @@
+# src/hint/services/training/predict_intervention/trainer.py
+
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
@@ -66,16 +68,12 @@ class InterventionTrainer(BaseTrainer):
         """Prepare model inputs from a TensorBatch.
 
         Args:
-            batch (Any): Batch with x_val, x_msk, x_delta, and optional x_icd.
+            batch (Any): Batch with x_num and optional x_icd.
 
         Returns:
             dict: Model input dictionary.
         """
-        x_val = batch.x_val.to(self.device).float()
-        x_msk = batch.x_msk.to(self.device).float()
-        x_delta = batch.x_delta.to(self.device).float()
-        
-        x_num = torch.cat([x_val, x_msk, x_delta], dim=1)
+        x_num = batch.x_num.to(self.device).float()
         
         inputs = {"x_num": x_num}
         
