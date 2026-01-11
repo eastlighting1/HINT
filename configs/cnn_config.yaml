@@ -8,7 +8,7 @@ artifacts:
 
 seq_len: 120
 batch_size: 512
-epochs: 5
+epochs: 100
 lr: 0.001
 patience: 5
   

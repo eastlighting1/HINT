@@ -7,24 +7,6 @@ from collections import Counter
 from ....foundation.interfaces import PipelineComponent, Registry, TelemetryObserver
 from ....domain.vo import ETLConfig, ICDConfig, CNNConfig
 
-def _to_python_list(val: Any) -> List[str]:
-    """Normalize a value into a list of strings."""
-    if isinstance(val, np.ndarray):
-        return val.tolist()
-    if isinstance(val, list):
-        return val
-    if isinstance(val, str):
-        try:
-            from ast import literal_eval
-            parsed = literal_eval(val)
-            if isinstance(parsed, (list, tuple)):
-                return list(parsed)
-        except:
-            if val.startswith("[") and val.endswith("]"):
-                return [t.strip(" '\"") for t in val.strip("[]").split(",") if t.strip()]
-            return [val]
-    return []
-
 class LabelGenerator(PipelineComponent):
     """Generate targets: ICD Candidate Sets and Vent State Transitions."""
 
@@ -50,7 +32,14 @@ class LabelGenerator(PipelineComponent):
         self._generate_icd_targets(ds, proc_dir)
 
     def _generate_vent_targets(self, ds: pl.DataFrame, proc_dir: Path) -> None:
-        """Generate transition-based ventilation targets (ONSET, WEAN, STAY ON, STAY OFF)."""
+        """Generate transition-based ventilation targets.
+        
+        Mapping:
+          0: ONSET    (Off -> On)
+          1: WEAN     (On -> Off)
+          2: STAY ON  (On -> On)
+          3: STAY OFF (Off -> Off)
+        """
         self.observer.log("INFO", "LabelGenerator: Stage 1/2 generating ventilation transitions.")
         
         sorted_ds = ds.select(["ICUSTAY_ID", "HOUR_IN", "VENT"]).sort(["ICUSTAY_ID", "HOUR_IN"])
@@ -62,10 +51,10 @@ class LabelGenerator(PipelineComponent):
         ]).filter(
             pl.col("ICUSTAY_ID") == pl.col("next_stay_id")
         ).with_columns(
-            pl.when((pl.col("curr_vent") == 0) & (pl.col("next_vent") == 1)).then(pl.lit(0))
-            .when((pl.col("curr_vent") == 1) & (pl.col("next_vent") == 0)).then(pl.lit(1))
-            .when((pl.col("curr_vent") == 1) & (pl.col("next_vent") == 1)).then(pl.lit(2))
-            .when((pl.col("curr_vent") == 0) & (pl.col("next_vent") == 0)).then(pl.lit(3))
+            pl.when((pl.col("curr_vent") == 0) & (pl.col("next_vent") == 1)).then(pl.lit(0))  # ONSET
+            .when((pl.col("curr_vent") == 1) & (pl.col("next_vent") == 0)).then(pl.lit(1))    # WEAN
+            .when((pl.col("curr_vent") == 1) & (pl.col("next_vent") == 1)).then(pl.lit(2))    # STAY ON
+            .when((pl.col("curr_vent") == 0) & (pl.col("next_vent") == 0)).then(pl.lit(3))    # STAY OFF
             .otherwise(pl.lit(None))
             .cast(pl.Int64)
             .alias("target_vent")
@@ -79,9 +68,7 @@ class LabelGenerator(PipelineComponent):
         """Generate ICD Candidate Sets for Partial Label Learning."""
         self.observer.log("INFO", "LabelGenerator: Stage 2/2 generating ICD candidate sets.")
 
-        # 1. Build Vocabulary
         all_codes = []
-        # Handle potential nulls or different types by normalizing first
         raw_rows = ds.select("ICD9_CODES").to_series().to_list()
         
         for codes in raw_rows:
@@ -97,21 +84,13 @@ class LabelGenerator(PipelineComponent):
             
         code_to_idx = {c: i for i, c in enumerate(sorted_codes)}
         
-        # 2. Map codes
         def map_codes(codes_list):
-            # [FIX] Safer check for None, empty list, or Series
             if codes_list is None: 
                 return []
-            
-            # Check if it behaves like a Series (Polars Series has 'len' and 'to_list')
             if hasattr(codes_list, "to_list"):
-                # Convert Series to Python list
                 codes_list = codes_list.to_list()
-            
-            # Check for empty list/series/array
             if len(codes_list) == 0:
                 return []
-                
             return [code_to_idx[c] for c in codes_list if c in code_to_idx]
 
         unique_stays = ds.select(["ICUSTAY_ID", "ICD9_CODES"]).unique(subset=["ICUSTAY_ID"])

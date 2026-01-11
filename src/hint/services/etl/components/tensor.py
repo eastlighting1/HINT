@@ -41,8 +41,6 @@ class TensorConverter(PipelineComponent):
         msk_cols = sorted([c for c in cols if c.startswith("M__")])
         delta_cols = sorted([c for c in cols if c.startswith("D__")])
         
-        assert len(val_cols) == len(msk_cols) == len(delta_cols), "Channel mismatch!"
-        
         self.observer.log("INFO", f"TensorConverter: Found {len(val_cols)} features with 3 channels (V, M, D).")
 
         if icd_targets_path.exists():
@@ -56,9 +54,34 @@ class TensorConverter(PipelineComponent):
         if icd_meta_path.exists():
             shutil.copy(icd_meta_path, cache_dir / "stats.json")
 
-        subjects = df.select("SUBJECT_ID").unique()["SUBJECT_ID"].to_numpy()
-        train_ids, test_ids = train_test_split(subjects, test_size=0.2, random_state=42)
-        train_ids, val_ids = train_test_split(train_ids, test_size=0.2, random_state=42)
+        # --- Stratified Split Implementation ---
+        self.observer.log("INFO", "TensorConverter: Preparing stratified split by patient labels.")
+        
+        # 1. Aggregate targets by SUBJECT_ID to determine stratification group
+        pat_labels = df.select(["SUBJECT_ID", "target_vent"]).group_by("SUBJECT_ID").agg(
+            pl.col("target_vent").drop_nulls().unique().alias("unique_labels")
+        )
+        
+        subjects = pat_labels["SUBJECT_ID"].to_numpy()
+        label_sets = pat_labels["unique_labels"].to_list()
+        
+        stratify_labels = []
+        for l_set in label_sets:
+            s = set(l_set)
+            if 0 in s or 1 in s:
+                stratify_labels.append(2) # High Priority (Rare Events)
+            elif 2 in s:
+                stratify_labels.append(1) # Medium Priority
+            else:
+                stratify_labels.append(0) # Low Priority (Common)
+
+        # 2. Perform Stratified Split
+        train_ids, temp_ids, _, temp_strat = train_test_split(
+            subjects, stratify_labels, test_size=0.4, stratify=stratify_labels, random_state=42
+        )
+        val_ids, test_ids = train_test_split(
+            temp_ids, test_size=0.5, stratify=temp_strat, random_state=42
+        )
         
         self.observer.log("INFO", f"Split: Train={len(train_ids)}, Val={len(val_ids)}, Test={len(test_ids)}")
 
@@ -151,26 +174,32 @@ class TensorConverter(PipelineComponent):
         X_cat = np.zeros((n_samples, len(cat_cols)), dtype=np.int32)
         cat_df = sorted_df.group_by("ICUSTAY_ID", maintain_order=True).first().select(cat_cols)
         
-        # [FIX 1] Fill NaN with 0 before casting to int32
         cat_vals = cat_df.fill_null(0).to_numpy()
         X_cat[:] = cat_vals.astype(np.int32)
 
-        # [FIX 2] Concatenate separate channels into a single X_num (N, 3*C, L)
-        # Transpose: (N, L, C) -> (N, C, L)
         X_val = X_val.transpose(0, 2, 1) 
         X_msk = X_msk.transpose(0, 2, 1)
         X_delta = X_delta.transpose(0, 2, 1)
         
-        # Combine: (N, C, L) + (N, C, L) + (N, C, L) -> (N, 3*C, L)
         X_num = np.concatenate([X_val, X_msk, X_delta], axis=1)
 
-        for p in [icd_path, cnn_path]:
-            with h5py.File(p, "w") as f:
-                # [FIX 3] Save X_num instead of separate datasets
-                f.create_dataset("X_num", data=X_num)
-                f.create_dataset("X_cat", data=X_cat)
-                f.create_dataset("stay_ids", data=np.array(stay_ids))
-                
-                f.create_dataset("y", data=y_icd_cands)
-                f.create_dataset("candidates", data=y_icd_cands)
-                f.create_dataset("y_vent", data=y_vent)
+        # [수정됨] 파일별로 저장할 y를 다르게 설정
+        # 1. Train Coding (ICD Task)
+        #    - y: candidates
+        #    - candidates: candidates
+        with h5py.File(icd_path, "w") as f:
+            f.create_dataset("X_num", data=X_num)
+            f.create_dataset("X_cat", data=X_cat)
+            f.create_dataset("stay_ids", data=np.array(stay_ids))
+            f.create_dataset("y", data=y_icd_cands)          # Main Target (ICD)
+            f.create_dataset("candidates", data=y_icd_cands) # Alias
+
+        # 2. Train Intervention (Vent Task)
+        #    - y: y_vent (Onset/Wean/StayOn/StayOff)
+        #    - y_vent: y_vent (Alias)
+        with h5py.File(cnn_path, "w") as f:
+            f.create_dataset("X_num", data=X_num)
+            f.create_dataset("X_cat", data=X_cat)
+            f.create_dataset("stay_ids", data=np.array(stay_ids))
+            f.create_dataset("y", data=y_vent)         # Main Target (Vent) [0,1,2,3]
+            f.create_dataset("y_vent", data=y_vent)    # Alias

@@ -1,7 +1,6 @@
 import torch
 import numpy as np
 from typing import List, Dict, Optional, Union
-from sklearn.metrics import accuracy_score, precision_recall_fscore_support
 from torch.utils.data import DataLoader
 
 from ..common.base import BaseEvaluator
@@ -11,9 +10,6 @@ from ....foundation.dtos import TensorBatch
 
 class ICDEvaluator(BaseEvaluator):
     """Evaluator for ICD model validation and testing.
-
-    This evaluator runs inference on data loaders and reports accuracy
-    and related metrics, with optional label masking.
 
     Attributes:
         cfg (ICDConfig): ICD configuration.
@@ -29,30 +25,12 @@ class ICDEvaluator(BaseEvaluator):
         device,
         ignored_indices: Optional[List[int]] = None
     ):
-        """Initialize the evaluator with config and model entity.
-
-        Args:
-            config (ICDConfig): ICD configuration.
-            entity (ICDModelEntity): Model entity wrapper.
-            registry (Any): Artifact registry.
-            observer (Any): Logging observer.
-            device (Any): Target device.
-            ignored_indices (Optional[List[int]]): Labels to ignore.
-        """
         super().__init__(registry, observer, device)
         self.cfg = config
         self.entity = entity
         self.ignored_indices = ignored_indices if ignored_indices else []
 
     def _prepare_inputs(self, batch: TensorBatch) -> Dict[str, torch.Tensor]:
-        """Prepare model inputs from a TensorBatch.
-
-        Args:
-            batch (TensorBatch): Batch of features and labels.
-
-        Returns:
-            Dict[str, torch.Tensor]: Input tensors for the model.
-        """
         inputs = {}
         inputs["x_num"] = batch.x_num.to(self.device).float()
         
@@ -77,21 +55,12 @@ class ICDEvaluator(BaseEvaluator):
         return inputs
 
     def evaluate(self, dataloader: DataLoader) -> Dict[str, float]:
-        """Run evaluation on a dataloader and return metrics.
-
-        Args:
-            dataloader (DataLoader): Data loader with evaluation data.
-
-        Returns:
-            Dict[str, float]: Aggregated evaluation metrics.
-        """
+        """Run evaluation on a dataloader and return metrics."""
         self.entity.model.eval()
         self.observer.log("INFO", "ICDEvaluator: Starting validation/test pass.")
         
-        all_preds = []
-        all_targets = []
+        all_candidate_hits = []
         total_loss = 0.0
-
         criterion = torch.nn.CrossEntropyLoss()
 
         with torch.no_grad():
@@ -124,31 +93,20 @@ class ICDEvaluator(BaseEvaluator):
                 if isinstance(logits, tuple):
                     logits = logits[0]
 
+                # --- Candidate Set Accuracy Logic ---
                 if getattr(batch, "candidates", None) is not None:
                     cands = batch.candidates.to(self.device).long()
                     
                     if target is not None and self.ignored_indices and valid_mask is not None:
                         cands = cands[valid_mask]
 
-                    inf_mask = torch.full_like(logits, float('-inf'))
+                    # Raw Prediction check (Before masking)
+                    raw_preds = torch.argmax(logits, dim=1) # [Batch]
                     
-                    valid_cands_idx = (cands >= 0) & (cands < logits.size(1))
-                    rows = torch.arange(cands.size(0), device=self.device).unsqueeze(1).expand_as(cands)
+                    # Check if raw_preds is in cands. cands is [Batch, K]
+                    hits = (cands == raw_preds.unsqueeze(1)).any(dim=1)
+                    all_candidate_hits.extend(hits.cpu().numpy())
 
-                    inf_mask[rows[valid_cands_idx], cands[valid_cands_idx]] = 0.0
-                    if target is not None:
-                        if target.dim() > 1:
-                            target_idx = target.argmax(dim=1)
-                        else:
-                            target_idx = target
-                        
-                        rows_t = torch.arange(target_idx.size(0), device=self.device)
-                        inf_mask[rows_t, target_idx] = 0.0
-
-                    preds = torch.argmax(logits + inf_mask, dim=1)
-                else:
-                    preds = torch.argmax(logits, dim=1)
-                
                 if self.ignored_indices:
                     logits[:, self.ignored_indices] = -1e9
 
@@ -160,21 +118,11 @@ class ICDEvaluator(BaseEvaluator):
 
                     loss = criterion(logits, target_indices)
                     total_loss += loss.item()
-                    all_targets.extend(target_indices.cpu().numpy())
-                
-                all_preds.extend(preds.cpu().numpy())
 
-        if not all_targets:
-            self.observer.log("WARNING", "No targets found in validation set. Metrics will be 0.")
-            return {"accuracy": 0.0, "precision": 0.0, "recall": 0.0, "f1_macro": 0.0, "loss": 0.0}
-
-        acc = accuracy_score(all_targets, all_preds)
-        p, r, f1, _ = precision_recall_fscore_support(all_targets, all_preds, average='macro', zero_division=0)
+        cand_acc = np.mean(all_candidate_hits) if all_candidate_hits else 0.0
         
+        # [수정] 오직 loss와 candidate_accuracy만 반환
         return {
-            "accuracy": acc,
-            "precision": p,
-            "recall": r,
-            "f1_macro": f1,
+            "candidate_accuracy": cand_acc,
             "loss": total_loss / len(dataloader) if len(dataloader) > 0 else 0.0
         }

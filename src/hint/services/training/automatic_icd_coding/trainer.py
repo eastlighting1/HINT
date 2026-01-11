@@ -23,11 +23,9 @@ class ICDTrainer(BaseTrainer):
     def _prepare_inputs(self, batch: TensorBatch) -> Dict[str, torch.Tensor]:
         """Prepare inputs from a TensorBatch."""
         inputs = {}
-        # [수정] x_val, x_msk, x_delta 병합 로직 제거 -> x_num 직접 사용
         if hasattr(batch, 'x_num') and batch.x_num is not None:
             inputs["x_num"] = batch.x_num.to(self.device).float()
         else:
-            # Fallback
             x_val = batch.x_val.to(self.device).float()
             x_msk = batch.x_msk.to(self.device).float()
             x_delta = batch.x_delta.to(self.device).float()
@@ -56,6 +54,9 @@ class ICDTrainer(BaseTrainer):
         self.entity.model.train()
         params = list(self.entity.model.parameters())
         optimizer = torch.optim.Adam(params, lr=self.cfg.lr)
+        
+        # [수정] Early Stopping을 위한 카운터 초기화
+        no_improve = 0
         
         self.observer.log("INFO", "ICDTrainer: Starting training loop.")
         for epoch in range(1, self.cfg.epochs + 1):
@@ -94,9 +95,17 @@ class ICDTrainer(BaseTrainer):
             
             self.observer.log("INFO", f"ICDTrainer: Epoch {epoch} validation start.")
             metrics = evaluator.evaluate(val_loader)
-            val_acc = metrics.get("accuracy", 0.0)
-            self.observer.log("INFO", f"Epoch {epoch} | Loss={avg_loss:.4f} | Val Acc={val_acc:.4f}")
             
-            if val_acc > self.entity.best_metric:
-                self.entity.best_metric = val_acc
+            cand_acc = metrics.get("candidate_accuracy", 0.0)
+            self.observer.log("INFO", f"Epoch {epoch} | Loss={avg_loss:.4f} | Cand Acc={cand_acc:.4f}")
+            
+            # [수정] Early Stopping 로직 적용
+            if cand_acc > self.entity.best_metric:
+                self.entity.best_metric = cand_acc
                 self.registry.save_model(self.entity.model.state_dict(), self.entity.name, "best")
+                no_improve = 0
+            else:
+                no_improve += 1
+                if no_improve >= self.cfg.patience:
+                    self.observer.log("WARNING", f"Early stopping triggered after {epoch} epochs.")
+                    break
