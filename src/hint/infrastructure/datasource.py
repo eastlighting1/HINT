@@ -288,10 +288,13 @@ class HDF5StreamingSource(Dataset):
         
         y_val = self.h5_file[self.label_key][idx]
         
-        if y_val.ndim > 0:
-            y_val = y_val[-1]
-            
-        y = torch.tensor(int(y_val), dtype=torch.long)
+        # [수정] 차원 축소 로직 제거 및 시퀀스/스칼라 모두 지원
+        # 기존 로직(y_val = y_val[-1])은 시퀀스의 마지막만 가져와 InterventionTrainer의
+        # 슬라이싱(y[:, -1])을 방해하므로, 차원을 유지하도록 수정함.
+        if y_val.ndim == 0:
+            y = torch.tensor(y_val.item(), dtype=torch.long)
+        else:
+            y = torch.from_numpy(y_val).long()
         
         sid = -1
         if "sid" in self.h5_file:

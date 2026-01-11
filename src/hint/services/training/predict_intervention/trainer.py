@@ -77,6 +77,10 @@ class InterventionTrainer(BaseTrainer):
         
         inputs = {"x_num": x_num}
         
+        # [수정] x_cat이 존재하면 inputs 딕셔너리에 추가
+        if batch.x_cat is not None:
+            inputs["x_cat"] = batch.x_cat.to(self.device).long()
+        
         if batch.x_icd is not None:
             inputs["x_icd"] = batch.x_icd.to(self.device).float()
         else:
@@ -141,6 +145,8 @@ class InterventionTrainer(BaseTrainer):
                 
                 inputs = self._prepare_inputs(batch)
                 y = batch.y.to(self.device)
+                
+                # [수정] datasource.py 수정으로 차원이 유지되므로, 이제 안전하게 인덱싱 가능
                 target = y[:, -1] 
                 
                 logits = self.entity.network(**inputs)

@@ -2,6 +2,7 @@ import pyarrow.parquet as pq
 import pandas as pd
 import os
 import glob
+import random
 
 def save_parquet_schemas_and_samples_to_txt(output_txt_path, *file_paths):
     """
@@ -14,7 +15,7 @@ def save_parquet_schemas_and_samples_to_txt(output_txt_path, *file_paths):
         file_paths = file_paths[0]
 
     with open(output_txt_path, 'w', encoding='utf-8') as f:
-        f.write(f"Created At: {os.getcwd()}\n") # 경로 정보 수정
+        f.write(f"Created At: {os.getcwd()}\n") 
         f.write("=" * 50 + "\n\n")
 
         for file_path in file_paths:
@@ -25,62 +26,76 @@ def save_parquet_schemas_and_samples_to_txt(output_txt_path, *file_paths):
                     f.write("-" * 50 + "\n\n")
                     continue
 
-                # 2. 스키마 및 데이터 읽기
-                # 메타데이터(스키마) 읽기
-                schema = pq.read_schema(file_path)
-                
-                # 데이터 읽기 (샘플링을 위해 Pandas DataFrame으로 변환)
-                # 주의: 파일이 매우 클 경우 메모리 이슈가 발생할 수 있으므로, 
-                # 실무에서는 필요한 컬럼만 읽거나 배치로 읽는 것이 좋습니다.
-                table = pq.read_table(file_path)
-                df = table.to_pandas()
+                # 2. 메타데이터 및 테이블 읽기
+                # 먼저 스키마와 테이블 정보를 읽습니다.
+                try:
+                    schema = pq.read_schema(file_path)
+                    table = pq.read_table(file_path)
+                except Exception as read_e:
+                    f.write(f"[ERROR] Failed to read Parquet file structure: {read_e}\n")
+                    f.write("-" * 50 + "\n\n")
+                    continue
 
-                # 3. 텍스트 파일에 기본 정보 기록
+                # 3. 기본 정보 및 스키마 기록
                 f.write(f"### File: {os.path.basename(file_path)}\n")
                 f.write(f"Path: {file_path}\n")
-                f.write(f"Rows: {len(df):,}, Columns: {len(schema.names)}\n") # 행 개수 추가
+                f.write(f"Rows: {table.num_rows:,}, Columns: {len(schema.names)}\n") 
                 
-                # 4. 스키마 정보 기록
                 f.write("-" * 20 + " Schema Info " + "-" * 20 + "\n")
                 f.write(str(schema)) 
                 f.write("\n")
 
-                # 5. 랜덤 샘플 데이터 기록 (컬럼별 3개)
+                # 4. 데이터 샘플링 및 기록 (호환성 개선 버전)
                 f.write("-" * 20 + " Random Samples (3 values) " + "-" * 20 + "\n")
                 
-                if not df.empty:
-                    # 데이터가 3개 미만이면 전체, 이상이면 3개 랜덤 샘플링
-                    sample_size = min(3, len(df))
-                    sampled_df = df.sample(n=sample_size)
-                    
-                    for col in df.columns:
-                        # 해당 컬럼의 값들을 리스트로 변환
-                        values = sampled_df[col].tolist()
-                        # 보기 좋게 포맷팅 (None/Null 처리 포함)
-                        values_str = [str(v) for v in values]
-                        f.write(f"* {col}: {values_str}\n")
-                else:
-                    f.write("[Empty Data] 데이터가 없는 파일입니다.\n")
+                try:
+                    n_rows = table.num_rows
+                    if n_rows > 0:
+                        # 1) 랜덤 인덱스 3개 선정
+                        sample_size = min(3, n_rows)
+                        indices = sorted(random.sample(range(n_rows), sample_size))
+                        
+                        sample_data = {}
+                        
+                        # 2) 컬럼별로 순회하며 값을 하나씩 추출 (Column-wise Extraction)
+                        # 'take' 함수 대신 인덱싱([])과 as_py()를 사용하여 string_view 등 최신 타입 에러 회피
+                        for col_name in table.column_names:
+                            col_array = table[col_name]
+                            col_values = []
+                            for idx in indices:
+                                try:
+                                    # PyArrow 스칼라 값을 Python 기본 타입으로 안전하게 변환
+                                    val = col_array[idx].as_py()
+                                    col_values.append(val)
+                                except Exception:
+                                    col_values.append("<Conversion Error>")
+                            sample_data[col_name] = col_values
+                        
+                        # 3) DataFrame 생성 및 출력
+                        df_sample = pd.DataFrame(sample_data)
+                        
+                        for col in df_sample.columns:
+                            values = df_sample[col].tolist()
+                            values_str = [str(v) for v in values]
+                            f.write(f"* {col}: {values_str}\n")
+                    else:
+                        f.write("[Empty Data] 데이터가 없는 파일입니다.\n")
+
+                except Exception as data_error:
+                    f.write(f"[WARNING] Failed to extract data samples: {str(data_error)}\n")
+                    f.write("(Error detail: This usually happens with complex nested types or unsupported codecs.)\n")
 
                 f.write("\n" + "=" * 50 + "\n\n")
-                
                 print(f"Processed: {file_path}")
 
             except Exception as e:
-                f.write(f"[ERROR] Failed to read {file_path}: {str(e)}\n")
+                f.write(f"[ERROR] Unexpected error processing {file_path}: {str(e)}\n")
                 f.write("-" * 50 + "\n\n")
                 print(f"Error processing {file_path}: {e}")
 
     print(f"\n[완료] 스키마와 샘플 데이터가 '{output_txt_path}'에 저장되었습니다.")
 
 # --- 사용 예시 ---
-
-# 테스트용 더미 데이터 생성 (실행 시 주석 해제하여 테스트 가능)
-# df_test = pd.DataFrame({'id': range(10), 'name': ['A', 'B', 'C', 'D', 'E', 'F', 'G', 'H', 'I', 'J'], 'value': [x*10 for x in range(10)]})
-# df_test.to_parquet('test_data.parquet')
-# save_parquet_schemas_and_samples_to_txt("schemas_output.txt", "test_data.parquet")
-
-# glob을 사용하여 특정 폴더의 모든 parquet 파일 처리
 target_files = glob.glob("./data/processed/*.parquet") 
 if target_files:
     save_parquet_schemas_and_samples_to_txt("all_schemas.txt", target_files)

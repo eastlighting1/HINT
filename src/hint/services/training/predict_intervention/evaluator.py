@@ -1,3 +1,5 @@
+# src/hint/services/training/predict_intervention/evaluator.py
+
 import torch
 import torch.nn as nn
 import numpy as np
@@ -82,15 +84,18 @@ class InterventionEvaluator(BaseEvaluator):
         
         with torch.no_grad():
             for batch in loader:
-                x_val = batch.x_val.to(self.device).float()
-                x_msk = batch.x_msk.to(self.device).float()
-                x_delta = batch.x_delta.to(self.device).float()
-                x_num = torch.cat([x_val, x_msk, x_delta], dim=1)
+                # [수정] 개별 텐서 병합 로직 제거 -> x_num 직접 사용
+                x_num = batch.x_num.to(self.device).float()
+                
+                # [수정] x_cat 추가
+                x_cat = batch.x_cat.to(self.device).long() if batch.x_cat is not None else None
                 
                 x_icd = batch.x_icd.to(self.device).float() if batch.x_icd is not None else None
                 y = batch.y[:, -1].to(self.device)
                 
-                logits = self.entity.network(x_num, x_icd)
+                # [수정] 모델 입력에 x_cat 전달 (kwargs 활용)
+                logits = self.entity.network(x_num=x_num, x_cat=x_cat, x_icd=x_icd)
+                
                 logits_list.append(logits)
                 labels_list.append(y)
         
@@ -130,14 +135,17 @@ class InterventionEvaluator(BaseEvaluator):
         
         with torch.no_grad():
             for batch in loader:
-                x_val = batch.x_val.to(self.device).float()
-                x_msk = batch.x_msk.to(self.device).float()
-                x_delta = batch.x_delta.to(self.device).float()
-                x_num = torch.cat([x_val, x_msk, x_delta], dim=1)
+                # [수정] 개별 텐서 병합 로직 제거 -> x_num 직접 사용
+                x_num = batch.x_num.to(self.device).float()
+                
+                # [수정] x_cat 추가
+                x_cat = batch.x_cat.to(self.device).long() if batch.x_cat is not None else None
+
                 x_icd = batch.x_icd.to(self.device).float() if batch.x_icd is not None else None
                 y = batch.y[:, -1].to(self.device)
                 
-                logits = self.entity.network(x_num, x_icd)
+                # [수정] 모델 입력에 x_cat 전달
+                logits = self.entity.network(x_num=x_num, x_cat=x_cat, x_icd=x_icd)
                 
                 scaled_logits = logits / self.temperature
                 probs = torch.softmax(scaled_logits, dim=1)
