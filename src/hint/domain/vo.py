@@ -200,6 +200,8 @@ class ICDConfig(HyperparamVO):
         logit_adjust_tau (float): Logit adjustment temperature.
         entropy_reg_lambda (float): Entropy regularization weight.
         freeze_bert_epochs (int): Epochs to freeze the backbone.
+        use_amp (bool): Whether to use mixed precision training.
+        grad_clip_norm (float): Global norm for gradient clipping.
         pca_components (float): PCA component threshold.
         xgb_params (dict): XGBoost parameter overrides.
         xai_bg_size (int): Background size for explainers.
@@ -235,6 +237,8 @@ class ICDConfig(HyperparamVO):
     logit_adjust_tau: float = 1.0
     entropy_reg_lambda: float = 1e-3
     freeze_bert_epochs: int = 1
+    use_amp: bool = True
+    grad_clip_norm: float = 1.0
     pca_components: float = 0.95
     xgb_params: dict = Field(default_factory=dict)
     xai_bg_size: int = 128
@@ -277,6 +281,7 @@ class CNNConfig(HyperparamVO):
         T_0 (int): Cosine scheduler initial period.
         lr_patience (int): Plateau scheduler patience.
         focal_gamma (float): Focal loss gamma.
+        early_stop_metric (str): Metric key to early stop on.
     """
     data: CNNDataConfig = Field(default_factory=CNNDataConfig)
     artifacts: CNNArtifactsConfig = Field(default_factory=CNNArtifactsConfig)
@@ -291,6 +296,7 @@ class CNNConfig(HyperparamVO):
     T_0: int = 10
     lr_patience: int = 5
     focal_gamma: float = 2.0
+    early_stop_metric: str = "f1"
     label_smoothing: float = 0.1
     ema_decay: float = 0.999
     embed_dim: int = 128

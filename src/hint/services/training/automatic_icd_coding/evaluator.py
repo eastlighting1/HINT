@@ -62,6 +62,10 @@ class ICDEvaluator(BaseEvaluator):
         all_candidate_hits = []
         total_loss = 0.0
         criterion = torch.nn.CrossEntropyLoss()
+        pred_counts = None
+        total_preds = 0
+        total_cand_sizes = 0
+        total_cand_rows = 0
 
         with torch.no_grad():
             for batch in dataloader:
@@ -102,6 +106,14 @@ class ICDEvaluator(BaseEvaluator):
 
                     # Raw Prediction check (Before masking)
                     raw_preds = torch.argmax(logits, dim=1) # [Batch]
+                    if pred_counts is None:
+                        pred_counts = torch.zeros(logits.shape[1], dtype=torch.long)
+                    pred_counts += torch.bincount(raw_preds.detach().cpu(), minlength=pred_counts.numel())
+                    total_preds += raw_preds.numel()
+
+                    cand_sizes = (cands >= 0).sum(dim=1)
+                    total_cand_sizes += cand_sizes.sum().item()
+                    total_cand_rows += cand_sizes.numel()
                     
                     # Check if raw_preds is in cands. cands is [Batch, K]
                     hits = (cands == raw_preds.unsqueeze(1)).any(dim=1)
@@ -120,6 +132,15 @@ class ICDEvaluator(BaseEvaluator):
                     total_loss += loss.item()
 
         cand_acc = np.mean(all_candidate_hits) if all_candidate_hits else 0.0
+        if pred_counts is not None and total_preds > 0:
+            unique_preds = int((pred_counts > 0).sum().item())
+            top_idx = int(torch.argmax(pred_counts).item())
+            top_ratio = float(pred_counts[top_idx].item() / total_preds)
+            avg_cand = float(total_cand_sizes / total_cand_rows) if total_cand_rows > 0 else 0.0
+            self.observer.log(
+                "INFO",
+                f"ICDEvaluator: pred_unique={unique_preds} top_pred={top_idx} top_ratio={top_ratio:.4f} avg_cand={avg_cand:.2f}",
+            )
         
         # [수정] 오직 loss와 candidate_accuracy만 반환
         return {

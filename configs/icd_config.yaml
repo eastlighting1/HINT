@@ -62,9 +62,10 @@ model_configs:
     momentum: 0.02
 
   DCNv2:
-    cross_layers: 4
-    deep_layers: [512, 512, 512]
+    cross_layers: 2
+    deep_layers: [256, 256, 256]
     dropout: 0.2
+    lr: 5.0e-5
 
   FTTransformer:
     d_token: 192
@@ -77,6 +78,8 @@ batch_size: 128  # Reduced for stability with complex models
 lr: 1.0e-4
 epochs: 100
 patience: 5
+use_amp: true
+grad_clip_norm: 1.0
 
 # Resources
 num_workers: 8

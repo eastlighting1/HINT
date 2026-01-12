@@ -16,7 +16,7 @@ class InterventionTrainer(BaseTrainer):
         self.cfg = config
         self.entity = entity
         self.class_weights = class_weights
-        self.gamma = 2.0
+        self.gamma = self.cfg.focal_gamma
 
     def focal_loss(self, logits: torch.Tensor, targets: torch.Tensor) -> torch.Tensor:
         ce_loss = F.cross_entropy(logits, targets, reduction='none', ignore_index=-100)
@@ -49,6 +49,18 @@ class InterventionTrainer(BaseTrainer):
             inputs["x_icd"] = None
             
         return inputs
+    
+    def _select_last_valid(self, y: torch.Tensor) -> torch.Tensor:
+        if y.dim() == 1:
+            return y
+        valid = y != -100
+        has_valid = valid.any(dim=1)
+        flipped = torch.flip(valid, dims=[1])
+        last_from_end = flipped.int().argmax(dim=1)
+        last_idx = y.size(1) - 1 - last_from_end
+        rows = torch.arange(y.size(0), device=y.device)
+        target = y[rows, last_idx]
+        return torch.where(has_valid, target, torch.full_like(target, -100))
 
     def train(self, train_loader: DataLoader, val_loader: DataLoader, evaluator: BaseEvaluator) -> None:
         self.entity.to(self.device)
@@ -71,12 +83,22 @@ class InterventionTrainer(BaseTrainer):
             macro_auc = metrics.get("macro_auc", 0.0)
             onset_auc = metrics.get("onset_auc", 0.0)
             wean_auc = metrics.get("wean_auc", 0.0)
+            macro_auprc = metrics.get("macro_auprc", 0.0)
             
             # [수정] Onset AUC 로깅 추가
             self.observer.log("INFO", f"Epoch {epoch} | Loss={val_loss:.4f} | F1={val_f1:.4f} | AUC={macro_auc:.4f} | OnsetAUC={onset_auc:.4f} | WeanAUC={wean_auc:.4f}")
-            
-            if val_f1 > self.entity.best_metric:
-                self.entity.best_metric = val_f1
+
+            metric_name = getattr(self.cfg, "early_stop_metric", "f1")
+            metric_map = {
+                "f1": val_f1,
+                "macro_auc": macro_auc,
+                "macro_auprc": macro_auprc,
+            }
+            val_metric = metric_map.get(metric_name, val_f1)
+            self.observer.log("INFO", f"InterventionTrainer: early_stop_metric={metric_name} value={val_metric:.4f}")
+
+            if val_metric > self.entity.best_metric:
+                self.entity.best_metric = val_metric
                 self.entity.update_ema()
                 self.registry.save_model(self.entity.state_dict(), self.cfg.artifacts.model_name, "best")
                 no_improve = 0
@@ -98,7 +120,7 @@ class InterventionTrainer(BaseTrainer):
                 
                 inputs = self._prepare_inputs(batch)
                 y = batch.y.to(self.device)
-                target = y[:, -1] 
+                target = self._select_last_valid(y)
                 
                 logits = self.entity.network(**inputs)
                 

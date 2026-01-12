@@ -63,6 +63,18 @@ class InterventionEvaluator(BaseEvaluator):
         self.temperature = temperature.item()
         self.observer.log("INFO", f"Optimal Temperature found: {self.temperature:.4f}")
 
+    def _select_last_valid(self, y: torch.Tensor) -> torch.Tensor:
+        if y.dim() == 1:
+            return y
+        valid = y != -100
+        has_valid = valid.any(dim=1)
+        flipped = torch.flip(valid, dims=[1])
+        last_from_end = flipped.int().argmax(dim=1)
+        last_idx = y.size(1) - 1 - last_from_end
+        rows = torch.arange(y.size(0), device=y.device)
+        target = y[rows, last_idx]
+        return torch.where(has_valid, target, torch.full_like(target, -100))
+
     def evaluate(self, loader, **kwargs) -> Dict[str, float]:
         self.entity.network.eval()
         
@@ -75,25 +87,36 @@ class InterventionEvaluator(BaseEvaluator):
                 x_num = batch.x_num.to(self.device).float()
                 x_cat = batch.x_cat.to(self.device).long() if batch.x_cat is not None else None
                 x_icd = batch.x_icd.to(self.device).float() if batch.x_icd is not None else None
-                y = batch.y[:, -1].to(self.device)
+                y = batch.y.to(self.device)
+                target = self._select_last_valid(y)
                 
                 logits = self.entity.network(x_num=x_num, x_cat=x_cat, x_icd=x_icd)
                 
                 scaled_logits = logits / self.temperature
                 probs = torch.softmax(scaled_logits, dim=1)
+
+                valid_mask = target != -100
+                if not valid_mask.any():
+                    continue
+                all_probs.append(probs[valid_mask].cpu().numpy())
+                all_labels.append(target[valid_mask].cpu().numpy())
                 
-                all_probs.append(probs.cpu().numpy())
-                all_labels.append(y.cpu().numpy())
-                
-                loss = nn.CrossEntropyLoss()(scaled_logits, y)
+                loss = nn.CrossEntropyLoss()(scaled_logits[valid_mask], target[valid_mask])
                 total_loss += loss.item()
 
-        y_true = np.concatenate(all_labels)
-        y_prob = np.concatenate(all_probs)
+        y_true = np.concatenate(all_labels) if all_labels else np.array([], dtype=np.int64)
+        y_prob = np.concatenate(all_probs) if all_probs else np.zeros((0, 4), dtype=np.float32)
         y_pred = np.argmax(y_prob, axis=1)
         
-        acc = accuracy_score(y_true, y_pred)
-        f1 = f1_score(y_true, y_pred, average='macro')
+        if y_true.size:
+            class_counts = np.bincount(y_true, minlength=4)
+            self.observer.log(
+                "INFO",
+                f"InterventionEvaluator: class_counts={class_counts.tolist()}",
+            )
+
+        acc = accuracy_score(y_true, y_pred) if y_true.size else 0.0
+        f1 = f1_score(y_true, y_pred, average='macro') if y_true.size else 0.0
         
         # [수정] 클래스별 AUC 안전 계산
         classes = [0, 1, 2, 3] # Onset, Wean, Stay On, Stay Off
@@ -118,15 +141,29 @@ class InterventionEvaluator(BaseEvaluator):
         wean_auc = auc_per_class[1]
         stay_on_auc = auc_per_class[2]
         stay_off_auc = auc_per_class[3]
+
+        self.observer.log(
+            "INFO",
+            "InterventionEvaluator: auc_raw="
+            f"{[None if np.isnan(x) else float(x) for x in auc_per_class]}",
+        )
         
         # NaN을 제외한 평균으로 Macro AUC 계산
         valid_aucs = [s for s in auc_per_class if not np.isnan(s)]
         macro_auc = np.mean(valid_aucs) if valid_aucs else 0.0
         
-        try:
-            macro_auprc = average_precision_score(y_true_bin, y_prob, average='macro')
-        except:
-            macro_auprc = 0.0
+        auprc_per_class = []
+        for i in range(len(classes)):
+            if np.sum(y_true_bin[:, i]) > 0:
+                try:
+                    score = average_precision_score(y_true_bin[:, i], y_prob[:, i])
+                except Exception:
+                    score = float('nan')
+            else:
+                score = float('nan')
+            auprc_per_class.append(score)
+        valid_auprc = [s for s in auprc_per_class if not np.isnan(s)]
+        macro_auprc = np.mean(valid_auprc) if valid_auprc else 0.0
 
         return {
             "loss": total_loss / len(loader),

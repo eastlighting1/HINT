@@ -66,10 +66,13 @@ class ICDService(BaseDomainService):
         dl_test = DataLoader(test_source, batch_size=self.cfg.batch_size, collate_fn=collate_tensor_batch, num_workers=4, pin_memory=True)
 
         models_to_run = self.cfg.models_to_run if self.cfg.models_to_run else ["MedBERT"]
+        best_model_name = None
+        best_score = float("-inf")
 
         for model_name in models_to_run:
             self.observer.log("INFO", f"ICDService: Stage 4/4 starting workflow for model={model_name}.")
             try:
+                model_cfg = self.cfg.model_configs.get(model_name, {})
                 NetworkClass = get_network_class(model_name)
                 with h5py.File(train_source.h5_path, 'r') as f:
                     # [수정] X_val 대신 X_num 사용 (ETL 변경 사항 반영)
@@ -99,7 +102,20 @@ class ICDService(BaseDomainService):
                 model_entity = ICDModelEntity(network)
                 model_entity.name = entity_name
 
-                trainer = ICDTrainer(self.cfg, model_entity, self.registry, self.observer, self.device, class_freq=target_counts)
+                use_amp = False if model_name == "DCNv2" else self.cfg.use_amp
+                lr_override = model_cfg.get("lr")
+                if lr_override is None and model_name == "DCNv2":
+                    lr_override = self.cfg.lr * 0.1
+                trainer = ICDTrainer(
+                    self.cfg,
+                    model_entity,
+                    self.registry,
+                    self.observer,
+                    self.device,
+                    class_freq=target_counts,
+                    use_amp=use_amp,
+                    lr_override=lr_override,
+                )
                 evaluator = ICDEvaluator(self.cfg, model_entity, self.registry, self.observer, self.device)
                 
                 trainer.train(dl_tr, dl_val, evaluator)
@@ -110,11 +126,17 @@ class ICDService(BaseDomainService):
                 
                 test_metrics = evaluator.evaluate(dl_test)
                 self.observer.log("INFO", f"Final Test Metrics: {json.dumps(test_metrics, indent=2)}")
+                cand_acc = test_metrics.get("candidate_accuracy")
+                if cand_acc is not None and cand_acc > best_score:
+                    best_score = cand_acc
+                    best_model_name = model_name
 
             except Exception as e:
                 self.observer.log("ERROR", f"Failed to run model {model_name}: {str(e)}")
                 import traceback
                 self.observer.log("ERROR", traceback.format_exc())
+
+        self.best_model_name = best_model_name or (models_to_run[0] if models_to_run else None)
 
     def generate_intervention_dataset(self, cnn_config) -> None:
         """Inject X_icd latent context into the intervention dataset."""
@@ -123,7 +145,7 @@ class ICDService(BaseDomainService):
         models_to_run = self.cfg.models_to_run if self.cfg.models_to_run else ["MedBERT"]
         if not models_to_run:
             return
-        model_name = models_to_run[0]
+        model_name = getattr(self, "best_model_name", None) or models_to_run[0]
         
         cache_dir = Path(self.cfg.data.data_cache_dir)
         with open(cache_dir / "stats.json", "r") as f:

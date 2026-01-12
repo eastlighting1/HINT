@@ -12,12 +12,25 @@ from ....foundation.dtos import TensorBatch
 class ICDTrainer(BaseTrainer):
     """Trainer for ICD classification."""
     
-    def __init__(self, config: ICDConfig, entity: ICDModelEntity, registry, observer, device, class_freq: np.ndarray = None, ignored_indices: Optional[List[int]] = None):
+    def __init__(
+        self,
+        config: ICDConfig,
+        entity: ICDModelEntity,
+        registry,
+        observer,
+        device,
+        class_freq: np.ndarray = None,
+        ignored_indices: Optional[List[int]] = None,
+        use_amp: Optional[bool] = None,
+        lr_override: Optional[float] = None,
+    ):
         super().__init__(registry, observer, device)
         self.cfg = config
         self.entity = entity
         self.class_freq = class_freq
-        self.scaler = torch.amp.GradScaler('cuda') if torch.cuda.is_available() else None
+        self.use_amp = self.cfg.use_amp if use_amp is None else use_amp
+        self.lr_override = lr_override
+        self.scaler = torch.amp.GradScaler('cuda') if torch.cuda.is_available() and self.use_amp else None
         self.adaptive_loss_fn = self.entity.model.adaptive_head
 
     def _prepare_inputs(self, batch: TensorBatch) -> Dict[str, torch.Tensor]:
@@ -38,22 +51,23 @@ class ICDTrainer(BaseTrainer):
 
     def _sample_target_from_candidates(self, candidates: torch.Tensor) -> torch.Tensor:
         """Sample one valid label from each candidate set."""
-        targets = []
-        candidates_np = candidates.cpu().numpy()
-        for row in candidates_np:
-            valid_cands = row[row >= 0]
-            if len(valid_cands) > 0:
-                targets.append(np.random.choice(valid_cands))
-            else:
-                targets.append(0)
-        return torch.tensor(targets, device=self.device, dtype=torch.long)
+        valid_mask = candidates >= 0
+        has_valid = valid_mask.any(dim=1)
+        weights = valid_mask.float()
+        if (~has_valid).any():
+            weights[~has_valid, 0] = 1.0
+        idx = torch.multinomial(weights, 1).squeeze(1)
+        targets = candidates.gather(1, idx.unsqueeze(1)).squeeze(1)
+        targets = torch.where(has_valid, targets, torch.zeros_like(targets))
+        return targets.to(self.device).long()
 
     def train(self, train_loader: DataLoader, val_loader: DataLoader, evaluator: BaseEvaluator) -> None:
         """Run the training loop with validation."""
         self.entity.to(self.device)
         self.entity.model.train()
         params = list(self.entity.model.parameters())
-        optimizer = torch.optim.Adam(params, lr=self.cfg.lr)
+        lr = self.cfg.lr if self.lr_override is None else self.lr_override
+        optimizer = torch.optim.Adam(params, lr=lr)
         
         # [수정] Early Stopping을 위한 카운터 초기화
         no_improve = 0
@@ -77,13 +91,22 @@ class ICDTrainer(BaseTrainer):
                     with torch.amp.autocast('cuda', enabled=self.scaler is not None):
                         embeddings = self.entity.model(**inputs, return_embeddings=True)
                         _, loss = self.adaptive_loss_fn(embeddings, target)
-                    
+
+                    if not torch.isfinite(loss):
+                        self.observer.log("WARNING", "ICDTrainer: Non-finite loss detected; skipping step.")
+                        continue
+
                     if self.scaler:
                         self.scaler.scale(loss).backward()
+                        if self.cfg.grad_clip_norm > 0:
+                            self.scaler.unscale_(optimizer)
+                            torch.nn.utils.clip_grad_norm_(params, self.cfg.grad_clip_norm)
                         self.scaler.step(optimizer)
                         self.scaler.update()
                     else:
                         loss.backward()
+                        if self.cfg.grad_clip_norm > 0:
+                            torch.nn.utils.clip_grad_norm_(params, self.cfg.grad_clip_norm)
                         optimizer.step()
                         
                     epoch_loss += loss.item()
