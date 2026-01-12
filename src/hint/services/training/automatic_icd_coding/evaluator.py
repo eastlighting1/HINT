@@ -4,6 +4,7 @@ from typing import List, Dict, Optional, Union
 from torch.utils.data import DataLoader
 
 from ..common.base import BaseEvaluator
+from .trainer import CLPLLoss, AdaptiveCLPLLoss
 from ....domain.entities import ICDModelEntity
 from ....domain.vo import ICDConfig
 from ....foundation.dtos import TensorBatch
@@ -29,6 +30,10 @@ class ICDEvaluator(BaseEvaluator):
         self.cfg = config
         self.entity = entity
         self.ignored_indices = ignored_indices if ignored_indices else []
+        if self.cfg.loss_type in ("adaptive_softmax", "adaptive_clpl"):
+            self.loss_fn = AdaptiveCLPLLoss(loss_type="logistic")
+        else:
+            self.loss_fn = CLPLLoss(loss_type=self.cfg.loss_type)
 
     def _prepare_inputs(self, batch: TensorBatch) -> Dict[str, torch.Tensor]:
         inputs = {}
@@ -61,7 +66,6 @@ class ICDEvaluator(BaseEvaluator):
         
         all_candidate_hits = []
         total_loss = 0.0
-        criterion = torch.nn.CrossEntropyLoss()
         pred_counts = None
         total_preds = 0
         total_cand_sizes = 0
@@ -69,24 +73,8 @@ class ICDEvaluator(BaseEvaluator):
 
         with torch.no_grad():
             for batch in dataloader:
-                target = getattr(batch, "y", None)
-                if target is not None:
-                    target = target.to(self.device)
-
-                valid_mask = None
-                if target is not None and self.ignored_indices:
-                    valid_mask = torch.ones(target.shape[0], dtype=torch.bool, device=self.device)
-                    for idx in self.ignored_indices:
-                        valid_mask &= (target != idx)
-                    
-                    if not valid_mask.any():
-                        continue
-                        
-                    target = target[valid_mask]
-                    batch_inputs = self._prepare_inputs(batch)
-                    filtered_inputs = {k: v[valid_mask] for k, v in batch_inputs.items()}
-                else:
-                    filtered_inputs = self._prepare_inputs(batch)
+                batch_inputs = self._prepare_inputs(batch)
+                filtered_inputs = batch_inputs
 
                 if hasattr(self.entity.model, "adaptive_head"):
                     embeddings = self.entity.model(**filtered_inputs, return_embeddings=True)
@@ -98,11 +86,12 @@ class ICDEvaluator(BaseEvaluator):
                     logits = logits[0]
 
                 # --- Candidate Set Accuracy Logic ---
-                if getattr(batch, "candidates", None) is not None:
-                    cands = batch.candidates.to(self.device).long()
-                    
-                    if target is not None and self.ignored_indices and valid_mask is not None:
-                        cands = cands[valid_mask]
+                candidates = getattr(batch, "candidates", None)
+                if candidates is not None:
+                    cands = candidates.to(self.device).long()
+                    if self.ignored_indices:
+                        ignored = torch.tensor(self.ignored_indices, device=self.device)
+                        cands = torch.where(torch.isin(cands, ignored), torch.tensor(-1, device=self.device), cands)
 
                     # Raw Prediction check (Before masking)
                     raw_preds = torch.argmax(logits, dim=1) # [Batch]
@@ -119,17 +108,20 @@ class ICDEvaluator(BaseEvaluator):
                     hits = (cands == raw_preds.unsqueeze(1)).any(dim=1)
                     all_candidate_hits.extend(hits.cpu().numpy())
 
-                if self.ignored_indices:
-                    logits[:, self.ignored_indices] = -1e9
-
-                if target is not None:
-                    if target.dim() > 1 and target.shape[1] > 1:
-                        target_indices = target.argmax(dim=1)
-                    else:
-                        target_indices = target
-
-                    loss = criterion(logits, target_indices)
+                    loss = self.loss_fn(logits, cands)
                     total_loss += loss.item()
+                else:
+                    target = getattr(batch, "y", None)
+                    if target is not None:
+                        target = target.to(self.device)
+                        if self.ignored_indices:
+                            logits[:, self.ignored_indices] = -1e9
+                        if target.dim() > 1 and target.shape[1] > 1:
+                            target_indices = target.argmax(dim=1)
+                        else:
+                            target_indices = target
+                        loss = torch.nn.CrossEntropyLoss()(logits, target_indices)
+                        total_loss += loss.item()
 
         cand_acc = np.mean(all_candidate_hits) if all_candidate_hits else 0.0
         if pred_counts is not None and total_preds > 0:

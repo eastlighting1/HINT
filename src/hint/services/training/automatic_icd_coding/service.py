@@ -79,7 +79,9 @@ class ICDService(BaseDomainService):
                     input_dim = f['X_num'].shape[1]
                     seq_len = f['X_num'].shape[2]
 
-                network = NetworkClass(num_classes=num_classes, input_dim=input_dim, seq_len=seq_len, dropout=self.cfg.dropout)
+                net_kwargs = dict(model_cfg)
+                net_kwargs.setdefault("dropout", self.cfg.dropout)
+                network = NetworkClass(num_classes=num_classes, input_dim=input_dim, seq_len=seq_len, **net_kwargs)
                 
                 if hasattr(network, "embedding_dim"):
                     in_features = network.embedding_dim
@@ -163,7 +165,10 @@ class ICDService(BaseDomainService):
 
         try:
             NetworkClass = get_network_class(model_name)
-            network = NetworkClass(num_classes=num_classes, input_dim=num_feats, seq_len=seq_len, dropout=self.cfg.dropout)
+            model_cfg = self.cfg.model_configs.get(model_name, {})
+            net_kwargs = dict(model_cfg)
+            net_kwargs.setdefault("dropout", self.cfg.dropout)
+            network = NetworkClass(num_classes=num_classes, input_dim=num_feats, seq_len=seq_len, **net_kwargs)
             
             if hasattr(network, "embedding_dim"):
                 in_features = network.embedding_dim

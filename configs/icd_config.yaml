@@ -21,8 +21,8 @@ dropout: 0.3
 max_length: 32  # Seq len for Time Series / Max len for Text
 
 # Loss Configuration
-# Options: "standard", "clpl", "adaptive_softmax"
-loss_type: "adaptive_softmax"  # Recommended for XMC
+# Options: "standard", "clpl", "adaptive_clpl"
+loss_type: "adaptive_clpl"  # Recommended for XMC
 
 # Model Specific Configurations
 model_configs:
@@ -66,6 +66,7 @@ model_configs:
     deep_layers: [256, 256, 256]
     dropout: 0.2
     lr: 5.0e-5
+    cross_scale: 0.1
 
   FTTransformer:
     d_token: 192

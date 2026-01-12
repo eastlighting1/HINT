@@ -69,10 +69,11 @@ class LabelGenerator(PipelineComponent):
         self.observer.log("INFO", "LabelGenerator: Stage 2/2 generating ICD candidate sets.")
 
         all_codes = []
-        raw_rows = ds.select("ICD9_CODES").to_series().to_list()
-        
+        unique_stays = ds.select(["ICUSTAY_ID", "ICD9_CODES"]).unique(subset=["ICUSTAY_ID"])
+        raw_rows = unique_stays.select("ICD9_CODES").to_series().to_list()
         for codes in raw_rows:
-            if codes: all_codes.extend(codes)
+            if codes:
+                all_codes.extend(codes)
             
         code_counts = Counter(all_codes)
         top_k = self.icd_cfg.top_k_labels
@@ -93,8 +94,6 @@ class LabelGenerator(PipelineComponent):
                 return []
             return [code_to_idx[c] for c in codes_list if c in code_to_idx]
 
-        unique_stays = ds.select(["ICUSTAY_ID", "ICD9_CODES"]).unique(subset=["ICUSTAY_ID"])
-        
         targets = unique_stays.with_columns(
             pl.col("ICD9_CODES").map_elements(map_codes, return_dtype=pl.List(pl.Int64)).alias("candidates")
         ).select(["ICUSTAY_ID", "candidates"])

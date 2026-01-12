@@ -70,6 +70,7 @@ class DCNv2ICD(BaseICDClassifier):
         dropout: float = 0.2,
         cross_layers=3,
         deep_layers=[256, 256],
+        cross_scale: float = 1.0,
         **kwargs
     ):
         """Initialize the DCNv2 classifier.
@@ -88,6 +89,7 @@ class DCNv2ICD(BaseICDClassifier):
                                  
         self.flat_dim = input_dim * seq_len
         self.input_bn = nn.BatchNorm1d(self.flat_dim)
+        self.cross_scale = cross_scale
         
                           
         self.cross_net = CrossNetV2(self.flat_dim, num_layers=cross_layers)
@@ -125,6 +127,8 @@ class DCNv2ICD(BaseICDClassifier):
         
                             
         x_cross = self.cross_net(x)
+        if self.cross_scale != 1.0:
+            x_cross = x_cross * self.cross_scale
         x_deep = self.deep_net(x)
         
                         
