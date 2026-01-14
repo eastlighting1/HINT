@@ -1,7 +1,6 @@
 data:
   input_h5_prefix: "train_intervention"
   data_cache_dir: "data/cache"
-  exclude_cols: ["ICD9_CODES"]
 
 artifacts:
   model_name: "intervention_model"
@@ -13,14 +12,9 @@ lr: 0.001
 patience: 5
   
 # Scheduler
-use_cosine_scheduler: false
-T_0: 10
-lr_patience: 5
 
 # Loss
 focal_gamma: 4.0
-label_smoothing: 0.1
-ema_decay: 0.999
 
 # Architecture
 embed_dim: 128

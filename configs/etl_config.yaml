@@ -20,5 +20,3 @@ artifacts:
   vitals_mean_file: "vitals_labs_mean.parquet"
   interventions_file: "interventions.parquet"
   features_file: "dataset_123.parquet"
-  labels_file: "labels.parquet"
-  output_h5_prefix: "train_coding"

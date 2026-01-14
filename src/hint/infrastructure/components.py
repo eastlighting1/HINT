@@ -1,264 +1,539 @@
+"""Summary of the components module.
+
+Longer description of the module purpose and usage.
+"""
+
 import torch
+
 import torch.nn as nn
+
 import torch.nn.functional as F
+
 import numpy as np
+
 import xgboost as xgb
+
 from typing import List, Optional, Dict, Any
+
 from sklearn.decomposition import PCA
 
+
+
 class FocalLoss(nn.Module):
-    """Focal loss for multi-class classification.
 
+    """Summary of FocalLoss purpose.
+    
+    Longer description of the class behavior and usage.
+    
     Attributes:
-        alpha (Optional[torch.Tensor]): Per-class weighting factors.
-        gamma (float): Focusing parameter.
-        label_smoothing (float): Label smoothing factor.
-        num_classes (int): Number of classes.
+    alpha (Any): Description of alpha.
+    gamma (Any): Description of gamma.
+    label_smoothing (Any): Description of label_smoothing.
+    num_classes (Any): Description of num_classes.
     """
-    def __init__(self, alpha: Optional[torch.Tensor] = None, gamma: float = 2.0, label_smoothing: float = 0.0, num_classes: int = 4):
-        """Initialize focal loss parameters.
 
+    def __init__(self, alpha: Optional[torch.Tensor] = None, gamma: float = 2.0, label_smoothing: float = 0.0, num_classes: int = 4):
+
+        """Summary of __init__.
+        
+        Longer description of the __init__ behavior and usage.
+        
         Args:
-            alpha (Optional[torch.Tensor]): Optional class weights.
-            gamma (float): Focusing parameter.
-            label_smoothing (float): Label smoothing factor.
-            num_classes (int): Number of classes.
+        alpha (Any): Description of alpha.
+        gamma (Any): Description of gamma.
+        label_smoothing (Any): Description of label_smoothing.
+        num_classes (Any): Description of num_classes.
+        
+        Returns:
+        None: Description of the return value.
+        
+        Raises:
+        Exception: Description of why this exception might be raised.
         """
+
         super().__init__()
+
         self.alpha = alpha
+
         self.gamma = gamma
+
         self.label_smoothing = label_smoothing
+
         self.num_classes = num_classes
 
+
+
     def forward(self, logits: torch.Tensor, targets: torch.Tensor) -> torch.Tensor:
-        """Compute focal loss for the given logits and targets.
 
+        """Summary of forward.
+        
+        Longer description of the forward behavior and usage.
+        
         Args:
-            logits (torch.Tensor): Model logits.
-            targets (torch.Tensor): Target class indices.
-
+        logits (Any): Description of logits.
+        targets (Any): Description of targets.
+        
         Returns:
-            torch.Tensor: Scalar loss value.
+        torch.Tensor: Description of the return value.
+        
+        Raises:
+        Exception: Description of why this exception might be raised.
         """
+
         log_probs = F.log_softmax(logits, dim=1)
+
         probs = F.softmax(logits, dim=1)
+
         targets_ohe = F.one_hot(targets, self.num_classes).float()
 
+
+
         if self.label_smoothing > 0:
+
             targets_ohe = targets_ohe * (1.0 - self.label_smoothing) + self.label_smoothing / self.num_classes
 
+
+
         pt = (probs * targets_ohe).sum(dim=1)
+
         focal_weight = (1.0 - pt).pow(self.gamma)
 
+
+
         if self.alpha is not None:
+
             alpha_tensor = self.alpha.to(targets_ohe.device)
+
             alpha_weight = (alpha_tensor * targets_ohe).sum(dim=1)
+
             focal_weight = focal_weight * alpha_weight
 
+
+
         ce_loss = -(targets_ohe * log_probs).sum(dim=1)
+
         loss = focal_weight * ce_loss
+
         return loss.mean()
+
+
 
 class CBFocalLoss(nn.Module):
-    """Class-balanced focal loss.
 
+    """Summary of CBFocalLoss purpose.
+    
+    Longer description of the class behavior and usage.
+    
     Attributes:
-        class_weights (torch.Tensor): Computed class weights.
-        gamma (float): Focusing parameter.
+    class_weights (Any): Description of class_weights.
+    gamma (Any): Description of gamma.
     """
-    def __init__(self, class_counts: np.ndarray, beta: float = 0.999, gamma: float = 1.5, device: str = 'cpu'):
-        """Initialize class-balanced focal loss.
 
+    def __init__(self, class_counts: np.ndarray, beta: float = 0.999, gamma: float = 1.5, device: str = 'cpu'):
+
+        """Summary of __init__.
+        
+        Longer description of the __init__ behavior and usage.
+        
         Args:
-            class_counts (np.ndarray): Class sample counts.
-            beta (float): Class-balanced beta parameter.
-            gamma (float): Focusing parameter.
-            device (str): Target device for weights.
+        class_counts (Any): Description of class_counts.
+        beta (Any): Description of beta.
+        gamma (Any): Description of gamma.
+        device (Any): Description of device.
+        
+        Returns:
+        None: Description of the return value.
+        
+        Raises:
+        Exception: Description of why this exception might be raised.
         """
+
         super().__init__()
-                                                         
+
+
+
         class_counts = np.array(class_counts)
-        class_counts[class_counts == 0] = 1                                      
-        
+
+        class_counts[class_counts == 0] = 1
+
+
+
         effective_num = 1.0 - np.power(beta, class_counts)
-                                                    
+
+
+
         weights = (1.0 - beta) / (np.array(effective_num) + 1e-6)
-        
-                                                                              
+
+
+
+
+
         weights = weights / np.sum(weights) * len(class_counts)
-        
+
+
+
         self.class_weights = torch.tensor(weights, dtype=torch.float32, device=device)
+
         self.gamma = gamma
 
+
+
     def forward(self, logits, targets):
-        """Compute class-balanced focal loss.
 
+        """Summary of forward.
+        
+        Longer description of the forward behavior and usage.
+        
         Args:
-            logits (torch.Tensor): Model logits.
-            targets (torch.Tensor): Target class indices.
-
+        logits (Any): Description of logits.
+        targets (Any): Description of targets.
+        
         Returns:
-            torch.Tensor: Scalar loss value.
+        Any: Description of the return value.
+        
+        Raises:
+        Exception: Description of why this exception might be raised.
         """
+
         if self.class_weights.device != logits.device:
+
             self.class_weights = self.class_weights.to(logits.device)
-            
+
+
+
         ce = F.cross_entropy(logits, targets, weight=self.class_weights, reduction="none")
+
         pt = torch.exp(-ce)
+
         focal_loss = ((1 - pt) ** self.gamma) * ce
+
         return focal_loss.mean()
 
+
+
 class CLPLLoss(nn.Module):
-    """Candidate label partial loss."""
+
+    """Summary of CLPLLoss purpose.
+    
+    Longer description of the class behavior and usage.
+    
+    Attributes:
+    None (None): No documented attributes.
+    """
+
     def __init__(self):
-        """Initialize the CLPL loss."""
+
+        """Summary of __init__.
+        
+        Longer description of the __init__ behavior and usage.
+        
+        Args:
+        None (None): This function does not accept arguments.
+        
+        Returns:
+        None: Description of the return value.
+        
+        Raises:
+        Exception: Description of why this exception might be raised.
+        """
+
         super().__init__()
+
+
 
     def forward(self, logits: torch.Tensor, candidate_mask: torch.Tensor) -> torch.Tensor:
-        """Compute CLPL loss for candidate masks.
 
+        """Summary of forward.
+        
+        Longer description of the forward behavior and usage.
+        
         Args:
-            logits (torch.Tensor): Model logits.
-            candidate_mask (torch.Tensor): Mask of candidate labels.
-
+        logits (Any): Description of logits.
+        candidate_mask (Any): Description of candidate_mask.
+        
         Returns:
-            torch.Tensor: Scalar loss value.
+        torch.Tensor: Description of the return value.
+        
+        Raises:
+        Exception: Description of why this exception might be raised.
         """
-                                     
-                                                                       
+
+
+
+
+
         cand_sum = (logits * candidate_mask).sum(dim=1, keepdim=True)
+
         cand_count = candidate_mask.sum(dim=1, keepdim=True).clamp(min=1.0)
+
         cand_avg = cand_sum / cand_count
-        
-                                         
-                                                  
+
+
+
+
+
+
+
         non_candidate_mask = 1.0 - candidate_mask
-        
-                                                                            
-                                                                             
+
+
+
+
+
+
+
         term1 = F.softplus(-cand_avg)
-        
-                                                                           
-                                           
+
+
+
+
+
+
+
         term2 = (F.softplus(logits) * non_candidate_mask).sum(dim=1, keepdim=True)
-        
+
+
+
         loss = term1 + term2
+
         return loss.mean()
 
-class TemperatureScaler(nn.Module):
-    """Learnable temperature scaling for calibration.
 
+
+class TemperatureScaler(nn.Module):
+
+    """Summary of TemperatureScaler purpose.
+    
+    Longer description of the class behavior and usage.
+    
     Attributes:
-        temperature (nn.Parameter): Temperature parameter.
+    temperature (Any): Description of temperature.
     """
+
     def __init__(self):
-        """Initialize the temperature parameter."""
+
+        """Summary of __init__.
+        
+        Longer description of the __init__ behavior and usage.
+        
+        Args:
+        None (None): This function does not accept arguments.
+        
+        Returns:
+        None: Description of the return value.
+        
+        Raises:
+        Exception: Description of why this exception might be raised.
+        """
+
         super().__init__()
+
         self.temperature = nn.Parameter(torch.ones(1) * 1.5)
 
+
+
     def forward(self, logits: torch.Tensor) -> torch.Tensor:
-        """Scale logits by the learned temperature.
 
+        """Summary of forward.
+        
+        Longer description of the forward behavior and usage.
+        
         Args:
-            logits (torch.Tensor): Model logits.
-
+        logits (Any): Description of logits.
+        
         Returns:
-            torch.Tensor: Scaled logits.
+        torch.Tensor: Description of the return value.
+        
+        Raises:
+        Exception: Description of why this exception might be raised.
         """
+
         return logits / self.temperature
 
+
+
     def fit(self, logits_list: List[torch.Tensor], labels_list: List[torch.Tensor], device: str) -> float:
-        """Fit the temperature parameter using validation logits.
 
-        Args:
-            logits_list (List[torch.Tensor]): List of logits tensors.
-            labels_list (List[torch.Tensor]): List of label tensors.
-            device (str): Target device for optimization.
-
-        Returns:
-            float: Learned temperature value.
-        """
-        self.to(device)
-        optimizer = torch.optim.LBFGS([self.temperature], lr=0.01, max_iter=50)
-        criterion = nn.CrossEntropyLoss().to(device)
+        """Summary of fit.
         
+        Longer description of the fit behavior and usage.
+        
+        Args:
+        logits_list (Any): Description of logits_list.
+        labels_list (Any): Description of labels_list.
+        device (Any): Description of device.
+        
+        Returns:
+        float: Description of the return value.
+        
+        Raises:
+        Exception: Description of why this exception might be raised.
+        """
+
+        self.to(device)
+
+        optimizer = torch.optim.LBFGS([self.temperature], lr=0.01, max_iter=50)
+
+        criterion = nn.CrossEntropyLoss().to(device)
+
+
+
         logits_all = torch.cat(logits_list).detach()
+
         labels_all = torch.cat(labels_list).detach()
 
-        def _closure():
-            """LBFGS closure for temperature optimization.
 
+
+        def _closure():
+
+            """Summary of _closure.
+            
+            Longer description of the _closure behavior and usage.
+            
+            Args:
+            None (None): This function does not accept arguments.
+            
             Returns:
-                torch.Tensor: Loss value for the current temperature.
+            Any: Description of the return value.
+            
+            Raises:
+            Exception: Description of why this exception might be raised.
             """
+
             optimizer.zero_grad()
+
             loss = criterion(logits_all / self.temperature, labels_all)
+
             loss.backward()
+
             return loss
 
+
+
         optimizer.step(_closure)
+
         return float(self.temperature.item())
 
+
+
 class XGBoostStacker:
-    """XGBoost stacking model with optional PCA preprocessing.
 
+    """Summary of XGBoostStacker purpose.
+    
+    Longer description of the class behavior and usage.
+    
     Attributes:
-        params (Dict): XGBoost parameters.
-        model (xgb.XGBClassifier): Underlying classifier.
-        pca (Optional[PCA]): Optional PCA transformer.
+    model (Any): Description of model.
+    params (Any): Description of params.
+    pca (Any): Description of pca.
     """
-    def __init__(self, params: Dict):
-        """Initialize the stacker with XGBoost parameters.
 
+    def __init__(self, params: Dict):
+
+        """Summary of __init__.
+        
+        Longer description of the __init__ behavior and usage.
+        
         Args:
-            params (Dict): XGBoost parameter dictionary.
+        params (Any): Description of params.
+        
+        Returns:
+        None: Description of the return value.
+        
+        Raises:
+        Exception: Description of why this exception might be raised.
         """
+
         self.params = params
+
         self.params["n_jobs"] = -1
+
         self.model = xgb.XGBClassifier(**self.params)
+
         self.pca: Optional[PCA] = None
 
+
+
     def fit_pca(self, X, n_components=0.95):
-        """Fit PCA on features and return transformed data.
 
-        Args:
-            X (Any): Input features.
-            n_components (float): Variance ratio or component count.
-
-        Returns:
-            Any: Transformed feature matrix.
-        """
-        self.pca = PCA(n_components=n_components)
-        return self.pca.fit_transform(X)
+        """Summary of fit_pca.
         
-    def transform_pca(self, X):
-        """Transform features with PCA if fitted.
-
+        Longer description of the fit_pca behavior and usage.
+        
         Args:
-            X (Any): Input features.
-
+        X (Any): Description of X.
+        n_components (Any): Description of n_components.
+        
         Returns:
-            Any: Transformed feature matrix.
+        Any: Description of the return value.
+        
+        Raises:
+        Exception: Description of why this exception might be raised.
         """
+
+        self.pca = PCA(n_components=n_components)
+
+        return self.pca.fit_transform(X)
+
+
+
+    def transform_pca(self, X):
+
+        """Summary of transform_pca.
+        
+        Longer description of the transform_pca behavior and usage.
+        
+        Args:
+        X (Any): Description of X.
+        
+        Returns:
+        Any: Description of the return value.
+        
+        Raises:
+        Exception: Description of why this exception might be raised.
+        """
+
         if self.pca is None: return X
+
         return self.pca.transform(X)
 
-    def fit(self, X, y):
-        """Fit the XGBoost classifier.
 
+
+    def fit(self, X, y):
+
+        """Summary of fit.
+        
+        Longer description of the fit behavior and usage.
+        
         Args:
-            X (Any): Training features.
-            y (Any): Target labels.
+        X (Any): Description of X.
+        y (Any): Description of y.
+        
+        Returns:
+        Any: Description of the return value.
+        
+        Raises:
+        Exception: Description of why this exception might be raised.
         """
+
         self.model.fit(X, y)
 
+
+
     def predict(self, X):
-        """Predict labels using the trained classifier.
 
+        """Summary of predict.
+        
+        Longer description of the predict behavior and usage.
+        
         Args:
-            X (Any): Input features.
-
+        X (Any): Description of X.
+        
         Returns:
-            Any: Predicted labels.
+        Any: Description of the return value.
+        
+        Raises:
+        Exception: Description of why this exception might be raised.
         """
+
         return self.model.predict(X)

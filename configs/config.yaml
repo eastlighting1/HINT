@@ -10,5 +10,4 @@ seed: 42
 
 # 로깅 설정 (Hydra에 의해 보간됨)
 logging:
-  core_logs_dir: "outputs/${now:%Y-%m-%d}/${now:%H-%M-%S}"
   artifacts_dir: "artifacts"

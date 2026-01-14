@@ -1,15 +1,9 @@
 data:
   input_h5_prefix: "train_coding"
-  output_h5_prefix: "train_intervention"
-  inferred_col_name: "icd_inferred_code"
   data_cache_dir: "data/cache"
-
-execution:
-  subset_ratio: 1
 
 artifacts:
   model_name: "icd_model"
-  stacker_name: "icd_stacker"
 
 # Execution Strategy
 models_to_run:
@@ -18,7 +12,6 @@ models_to_run:
 
 # Common Hyperparameters
 dropout: 0.3
-max_length: 32  # Seq len for Time Series / Max len for Text
 
 # Loss Configuration
 # Options: "standard", "clpl", "adaptive_clpl"
@@ -86,28 +79,12 @@ grad_clip_norm: 1.0
 num_workers: 8
 pin_memory: true
 
-# Validation & XAI
-test_split_size: 0.2
-val_split_size: 0.125
+# Validation
 top_k_labels: 500
-topk_eval: 5
 
-xai_bg_size: 128
-xai_sample_size: 5
-xai_nsamples: 200
-
-# Loss / Imbalance
-sampler_alpha: 0.5
-cb_beta: 0.999
-focal_gamma: 1.5
-logit_adjust_tau: 1.0
-entropy_reg_lambda: 1.0e-3
-freeze_bert_epochs: 1
-
-pca_components: 0.95
-xgb_params:
-  n_estimators: 100
-  max_depth: 6
-  learning_rate: 0.1
-  tree_method: "hist"
-  objective: "multi:softprob"
+# Temperature Scaling
+temp_scaling_enabled: true
+temp_scaling_min: 0.5
+temp_scaling_max: 5.0
+temp_scaling_steps: 10
+temp_scaling_lambda: 0.1

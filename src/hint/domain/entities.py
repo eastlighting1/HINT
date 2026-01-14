@@ -1,177 +1,379 @@
+"""Summary of the entities module.
+
+Longer description of the module purpose and usage.
+"""
+
+from abc import ABC, abstractmethod
+from typing import Any, Dict, Optional
+
 import torch
 import torch.nn as nn
-from typing import Dict, Any, Optional
 from torch_ema import ExponentialMovingAverage
-from abc import ABC, abstractmethod
+
+
 
 class TrainableEntity(ABC):
-    """Base class for trainable entities in the pipeline.
 
-    This class tracks training metadata and exposes serialization hooks
-    for checkpoints.
-
+    """Summary of TrainableEntity purpose.
+    
+    Longer description of the class behavior and usage.
+    
     Attributes:
-        name (str): Entity identifier used in artifacts.
-        epoch (int): Current training epoch.
-        global_step (int): Global step counter.
-        best_metric (float): Best metric observed so far.
-        network (Optional[nn.Module]): Underlying model reference.
+    best_metric (Any): Description of best_metric.
+    epoch (Any): Description of epoch.
+    global_step (Any): Description of global_step.
+    name (Any): Description of name.
+    network (Any): Description of network.
     """
+
     def __init__(self, name: str):
-        """Initialize the entity with a name and training counters.
 
+        """Summary of __init__.
+        
+        Longer description of the __init__ behavior and usage.
+        
         Args:
-            name (str): Human-readable entity name.
-        """
-        self.name = name
-        self.epoch: int = 0
-        self.global_step: int = 0
-        self.best_metric: float = -float('inf')
-        self.network: Optional[nn.Module] = None
-    
-    @abstractmethod
-    def state_dict(self) -> Dict[str, Any]:
-        """Serialize the entity state for checkpointing.
-
+        name (Any): Description of name.
+        
         Returns:
-            Dict[str, Any]: Serialized state.
+        None: Description of the return value.
+        
+        Raises:
+        Exception: Description of why this exception might be raised.
         """
-        raise NotImplementedError
-    
-    @abstractmethod
-    def load_state_dict(self, state: Dict[str, Any]) -> None:
-        """Restore the entity state from a checkpoint.
 
+        self.name = name
+
+        self.epoch: int = 0
+
+        self.global_step: int = 0
+
+        self.best_metric: float = -float('inf')
+
+        self.network: Optional[nn.Module] = None
+
+
+
+    @abstractmethod
+
+    def state_dict(self) -> Dict[str, Any]:
+
+        """Summary of state_dict.
+        
+        Longer description of the state_dict behavior and usage.
+        
         Args:
-            state (Dict[str, Any]): Serialized state to load.
+        None (None): This function does not accept arguments.
+        
+        Returns:
+        Dict[str, Any]: Description of the return value.
+        
+        Raises:
+        Exception: Description of why this exception might be raised.
         """
+
         raise NotImplementedError
+
+
+
+    @abstractmethod
+
+    def load_state_dict(self, state: Dict[str, Any]) -> None:
+
+        """Summary of load_state_dict.
+        
+        Longer description of the load_state_dict behavior and usage.
+        
+        Args:
+        state (Any): Description of state.
+        
+        Returns:
+        None: Description of the return value.
+        
+        Raises:
+        Exception: Description of why this exception might be raised.
+        """
+
+        raise NotImplementedError
+
+
 
 class ICDModelEntity(TrainableEntity):
-    """Wrapper for ICD prediction models.
 
-    This entity stores the model and exposes serialization helpers
-    compatible with the training workflow.
-
-    Attributes:
-        model (nn.Module): ICD model implementation.
-        network (nn.Module): Alias for the underlying model.
-    """
-    def __init__(self, model: nn.Module):
-        """Create an ICD entity around a model instance.
-
-        Args:
-            model (nn.Module): ICD model to wrap.
-        """
-        super().__init__("icd_entity")
-        self.model = model
-        self.network = model
-        
-    def state_dict(self) -> Dict[str, Any]:
-        """Serialize model parameters and training metadata.
-
-        Returns:
-            Dict[str, Any]: State dictionary including metrics.
-        """
-        return {
-            "model": self.model.state_dict(),
-            "best_metric": self.best_metric,
-            "epoch": self.epoch
-        }
+    """Summary of ICDModelEntity purpose.
     
-    def load_state_dict(self, state: Dict[str, Any]) -> None:
-        """Restore model parameters and metadata.
+    Longer description of the class behavior and usage.
+    
+    Attributes:
+    best_metric (Any): Description of best_metric.
+    epoch (Any): Description of epoch.
+    model (Any): Description of model.
+    network (Any): Description of network.
+    """
 
+    def __init__(self, model: nn.Module):
+
+        """Summary of __init__.
+        
+        Longer description of the __init__ behavior and usage.
+        
         Args:
-            state (Dict[str, Any]): Serialized checkpoint state.
+        model (Any): Description of model.
+        
+        Returns:
+        None: Description of the return value.
+        
+        Raises:
+        Exception: Description of why this exception might be raised.
         """
+
+        super().__init__("icd_entity")
+
+        self.model = model
+
+        self.network = model
+
+
+
+    def state_dict(self) -> Dict[str, Any]:
+
+        """Summary of state_dict.
+        
+        Longer description of the state_dict behavior and usage.
+        
+        Args:
+        None (None): This function does not accept arguments.
+        
+        Returns:
+        Dict[str, Any]: Description of the return value.
+        
+        Raises:
+        Exception: Description of why this exception might be raised.
+        """
+
+        return {
+
+            "model": self.model.state_dict(),
+
+            "best_metric": self.best_metric,
+
+            "epoch": self.epoch
+
+        }
+
+
+
+    def load_state_dict(self, state: Dict[str, Any]) -> None:
+
+        """Summary of load_state_dict.
+        
+        Longer description of the load_state_dict behavior and usage.
+        
+        Args:
+        state (Any): Description of state.
+        
+        Returns:
+        None: Description of the return value.
+        
+        Raises:
+        Exception: Description of why this exception might be raised.
+        """
+
         self.model.load_state_dict(state["model"])
+
         self.best_metric = state.get("best_metric", 0.0)
+
         self.epoch = state.get("epoch", 0)
 
-    def to(self, device: str) -> None:
-        """Move the model to the specified device.
 
+
+    def to(self, device: str) -> None:
+
+        """Summary of to.
+        
+        Longer description of the to behavior and usage.
+        
         Args:
-            device (str): Target device identifier.
+        device (Any): Description of device.
+        
+        Returns:
+        None: Description of the return value.
+        
+        Raises:
+        Exception: Description of why this exception might be raised.
         """
+
         self.model.to(device)
 
+
+
     def forward(self, *args, **kwargs):
-        """Delegate the forward pass to the wrapped model.
 
+        """Summary of forward.
+        
+        Longer description of the forward behavior and usage.
+        
         Args:
-            *args (Any): Positional arguments for the model.
-            **kwargs (Any): Keyword arguments for the model.
-
+        args (Any): Description of args.
+        kwargs (Any): Description of kwargs.
+        
         Returns:
-            Any: Model outputs.
+        Any: Description of the return value.
+        
+        Raises:
+        Exception: Description of why this exception might be raised.
         """
+
         return self.model(*args, **kwargs)
 
+
+
 class InterventionModelEntity(TrainableEntity):
-    """Wrapper for intervention prediction models with EMA support.
 
-    This entity maintains an exponential moving average of model weights
-    and additional calibration metadata.
-
+    """Summary of InterventionModelEntity purpose.
+    
+    Longer description of the class behavior and usage.
+    
     Attributes:
-        network (nn.Module): Intervention model implementation.
-        ema (ExponentialMovingAverage): EMA helper for parameters.
-        temperature (float): Calibration temperature value.
-        thresholds (Optional[Any]): Optional decision thresholds.
+    best_metric (Any): Description of best_metric.
+    ema (Any): Description of ema.
+    epoch (Any): Description of epoch.
+    network (Any): Description of network.
+    temperature (Any): Description of temperature.
+    thresholds (Any): Description of thresholds.
     """
-    def __init__(self, network: nn.Module, ema_decay: float = 0.999):
-        """Create an intervention entity and EMA tracker.
 
+    def __init__(self, network: nn.Module, ema_decay: float = 0.999):
+
+        """Summary of __init__.
+        
+        Longer description of the __init__ behavior and usage.
+        
         Args:
-            network (nn.Module): Intervention model to wrap.
-            ema_decay (float): EMA decay factor.
+        network (Any): Description of network.
+        ema_decay (Any): Description of ema_decay.
+        
+        Returns:
+        None: Description of the return value.
+        
+        Raises:
+        Exception: Description of why this exception might be raised.
         """
+
         super().__init__("intervention_cnn")
+
         self.network = network
+
         self.ema = ExponentialMovingAverage(network.parameters(), decay=ema_decay)
+
         self.temperature: float = 1.0
+
         self.thresholds: Optional[Any] = None
 
+
+
     def update_ema(self) -> None:
-        """Update the exponential moving average of parameters."""
+
+        """Summary of update_ema.
+        
+        Longer description of the update_ema behavior and usage.
+        
+        Args:
+        None (None): This function does not accept arguments.
+        
+        Returns:
+        None: Description of the return value.
+        
+        Raises:
+        Exception: Description of why this exception might be raised.
+        """
+
         self.ema.update(self.network.parameters())
 
-    def state_dict(self) -> Dict[str, Any]:
-        """Serialize EMA parameters and calibration metadata.
 
+
+    def state_dict(self) -> Dict[str, Any]:
+
+        """Summary of state_dict.
+        
+        Longer description of the state_dict behavior and usage.
+        
+        Args:
+        None (None): This function does not accept arguments.
+        
         Returns:
-            Dict[str, Any]: State dictionary for checkpointing.
+        Dict[str, Any]: Description of the return value.
+        
+        Raises:
+        Exception: Description of why this exception might be raised.
         """
+
         with self.ema.average_parameters():
+
             net_state = self.network.state_dict()
+
         return {
+
             "network": net_state,
+
             "temperature": self.temperature,
+
             "thresholds": self.thresholds,
+
             "best_metric": self.best_metric,
+
             "epoch": self.epoch
+
         }
 
-    def load_state_dict(self, state: Dict[str, Any]) -> None:
-        """Restore the entity from a serialized checkpoint.
 
+
+    def load_state_dict(self, state: Dict[str, Any]) -> None:
+
+        """Summary of load_state_dict.
+        
+        Longer description of the load_state_dict behavior and usage.
+        
         Args:
-            state (Dict[str, Any]): Serialized checkpoint state.
+        state (Any): Description of state.
+        
+        Returns:
+        None: Description of the return value.
+        
+        Raises:
+        Exception: Description of why this exception might be raised.
         """
+
         self.network.load_state_dict(state["network"])
+
         self.temperature = state.get("temperature", 1.0)
+
         self.thresholds = state.get("thresholds", None)
+
         self.best_metric = state.get("best_metric", 0.0)
+
         self.epoch = state.get("epoch", 0)
-        self.ema = ExponentialMovingAverage(self.network.parameters(), decay=0.999) 
+
+        self.ema = ExponentialMovingAverage(self.network.parameters(), decay=0.999)
+
+
 
     def to(self, device: str) -> None:
-        """Move the model and EMA buffers to the target device.
 
+        """Summary of to.
+        
+        Longer description of the to behavior and usage.
+        
         Args:
-            device (str): Target device identifier.
+        device (Any): Description of device.
+        
+        Returns:
+        None: Description of the return value.
+        
+        Raises:
+        Exception: Description of why this exception might be raised.
         """
+
         self.network.to(device)
+
         self.ema.to(device)

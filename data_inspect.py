@@ -93,7 +93,7 @@ def analyze_label_distribution(f, meta):
     print("📊 LABEL DISTRIBUTION ANALYSIS")
     print("="*80)
 
-    y_key = find_key_insensitive(f.keys(), ['y', 'candidates'])
+    y_key = find_key_insensitive(f.keys(), ['y'])
     if not y_key:
         print("❌ Label Key not found.")
         return
@@ -271,7 +271,7 @@ def main():
     # Intervention 파일 우선 검색
     h5_path = data_dir / f"train_intervention_{split_name}.h5"
     
-    output_txt_path = data_dir / f"inspection_report_{split_name}.txt"
+    output_txt_path = data_dir / f"train_intervention_{split_name}_report.txt"
 
     if not h5_path.exists():
         import glob

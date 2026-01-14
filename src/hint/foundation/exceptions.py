@@ -1,38 +1,73 @@
-class HINTError(Exception):
-    """Base exception for the HINT application.
+"""Summary of the exceptions module.
 
-    Use this type as the root for domain-specific errors across the
-    pipeline to enable consistent exception handling.
+Longer description of the module purpose and usage.
+"""
+
+
+class HINTError(Exception):
+
+    """Summary of HINTError purpose.
+    
+    Longer description of the class behavior and usage.
+    
+    Attributes:
+    None (None): No documented attributes.
     """
+
     pass
+
+
 
 class ConfigurationError(HINTError):
-    """Raised when configuration loading or validation fails.
 
-    This error signals missing files, invalid settings, or unsupported
-    configuration values.
+    """Summary of ConfigurationError purpose.
+    
+    Longer description of the class behavior and usage.
+    
+    Attributes:
+    None (None): No documented attributes.
     """
+
     pass
+
+
 
 class PipelineError(HINTError):
-    """Raised when a pipeline stage fails to execute.
 
-    This error captures failures during ETL or training workflows.
+    """Summary of PipelineError purpose.
+    
+    Longer description of the class behavior and usage.
+    
+    Attributes:
+    None (None): No documented attributes.
     """
+
     pass
+
+
 
 class DataError(HINTError):
-    """Raised when data loading or processing fails.
 
-    This error is used for missing data, schema mismatches, and invalid
-    input values.
+    """Summary of DataError purpose.
+    
+    Longer description of the class behavior and usage.
+    
+    Attributes:
+    None (None): No documented attributes.
     """
+
     pass
 
-class ModelError(HINTError):
-    """Raised when model initialization or inference fails.
 
-    This error signals invalid model configuration or runtime issues
-    during forward passes.
+
+class ModelError(HINTError):
+
+    """Summary of ModelError purpose.
+    
+    Longer description of the class behavior and usage.
+    
+    Attributes:
+    None (None): No documented attributes.
     """
+
     pass
