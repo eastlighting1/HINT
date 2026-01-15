@@ -16,6 +16,9 @@ dropout: 0.3
 # Loss Configuration
 # Options: "standard", "clpl", "adaptive_clpl"
 loss_type: "adaptive_clpl"  # Recommended for XMC
+adaptive_clpl_head_size: 200
+adaptive_clpl_tail_sample_size: 200
+adaptive_clpl_logit_clip: 10.0
 
 # Model Specific Configurations
 model_configs:
@@ -47,11 +50,11 @@ model_configs:
   TabNet:
     n_d: 64
     n_a: 64
-    n_steps: 5
-    gamma: 1.5
+    n_steps: 3
+    gamma: 1.3
     n_independent: 2
     n_shared: 2
-    virtual_batch_size: 128
+    virtual_batch_size: 512
     momentum: 0.02
 
   DCNv2:
@@ -69,10 +72,10 @@ model_configs:
 
 # Training
 batch_size: 128  # Reduced for stability with complex models
-lr: 1.0e-4
+lr: 5.0e-5
 epochs: 100
 patience: 5
-use_amp: true
+use_amp: false
 grad_clip_norm: 1.0
 
 # Resources
@@ -82,9 +85,13 @@ pin_memory: true
 # Validation
 top_k_labels: 500
 
-# Temperature Scaling
-temp_scaling_enabled: true
-temp_scaling_min: 0.5
-temp_scaling_max: 5.0
-temp_scaling_steps: 10
-temp_scaling_lambda: 0.1
+# Calibration
+calibration:
+  enabled: true
+  lr: 0.01
+  epochs: 5
+  batch_size: 128
+  tau: 1.0
+  lambda_ndi: 0.1
+  apply_to_train: false
+  train_lambda: 0.0

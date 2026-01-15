@@ -17,7 +17,7 @@ from typing import Optional
 
 from sklearn.utils.class_weight import compute_class_weight
 
-from torch.utils.data import DataLoader, Dataset
+from torch.utils.data import DataLoader, Dataset, WeightedRandomSampler
 
 from ..common.base import BaseDomainService
 
@@ -135,6 +135,7 @@ class InterventionService(BaseDomainService):
 
 
         class_weights = None
+        sample_weights = None
 
         try:
 
@@ -149,10 +150,14 @@ class InterventionService(BaseDomainService):
                         y_train = f[label_key][:]
 
                         if y_train.ndim > 1:
-
-                            y_train = y_train.flatten()
-
-
+                            valid = y_train != -100
+                            has_valid = valid.any(axis=1)
+                            last_from_end = np.argmax(np.flip(valid, axis=1), axis=1)
+                            last_idx = y_train.shape[1] - 1 - last_from_end
+                            rows = np.arange(y_train.shape[0])
+                            y_last = y_train[rows, last_idx]
+                            y_last = np.where(has_valid, y_last, -100)
+                            y_train = y_last
 
                         valid_mask = y_train != -100
 
@@ -172,17 +177,33 @@ class InterventionService(BaseDomainService):
 
                             class_weights = torch.FloatTensor(final_weights).to(self.device)
 
-                            class_weights = torch.clamp(class_weights, max=20.0)
+                            class_weights = torch.clamp(class_weights, max=50.0)
 
                             self.observer.log("INFO", f"Computed Class Weights: {class_weights.tolist()}")
+
+                            if getattr(self.cfg, "use_weighted_sampler", False):
+                                sample_weights = np.zeros_like(y_train, dtype=np.float32)
+                                if valid_mask.any():
+                                    weight_arr = class_weights.detach().cpu().numpy()
+                                    sample_weights[valid_mask] = weight_arr[y_train[valid_mask]]
 
         except Exception as e:
 
             self.observer.log("WARNING", f"Failed to compute class weights: {e}")
 
+        sampler = None
+        if sample_weights is not None:
+            sampler = WeightedRandomSampler(sample_weights.tolist(), num_samples=len(sample_weights), replacement=True)
 
-
-        dl_tr = DataLoader(self.train_ds, batch_size=self.cfg.batch_size, shuffle=True, num_workers=4, pin_memory=True, collate_fn=collate_tensor_batch)
+        dl_tr = DataLoader(
+            self.train_ds,
+            batch_size=self.cfg.batch_size,
+            shuffle=(sampler is None),
+            sampler=sampler,
+            num_workers=4,
+            pin_memory=True,
+            collate_fn=collate_tensor_batch,
+        )
 
         dl_val = DataLoader(self.val_ds, batch_size=self.cfg.batch_size, shuffle=False, num_workers=4, collate_fn=collate_tensor_batch)
 

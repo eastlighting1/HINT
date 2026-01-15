@@ -4,25 +4,77 @@ Longer description of the module purpose and usage.
 """
 
 import torch
-
+import torch.nn as nn
+import torch.nn.functional as F
 import numpy as np
 
 from typing import List, Dict, Optional, Union
 
 from torch.utils.data import DataLoader
 
-
-
 from ..common.base import BaseEvaluator
-
 from .trainer import CLPLLoss, AdaptiveCLPLLoss
-
 from ....domain.entities import ICDModelEntity
-
 from ....domain.vo import ICDConfig
-
 from ....foundation.dtos import TensorBatch
 
+
+class CalibrationLoss(nn.Module):
+    """
+    Loss function for Vector Scaling Calibration.
+    Uses Gumbel-Softmax to approximate differentiable rank/choice metrics.
+    Includes:
+      - Soft-CTR (Candidate Accuracy)
+      - CPM (Candidate Probability Mass)
+      - CMG (Candidate Margin)
+      - NDI (Normalized Dominance Index for diversity)
+    """
+    def __init__(self, tau: float = 1.0, lambda_ndi: float = 0.1):
+        super().__init__()
+        self.tau = tau
+        self.lambda_ndi = lambda_ndi
+
+    def forward(self, logits: torch.Tensor, candidates: torch.Tensor) -> torch.Tensor:
+        """
+        Args:
+            logits: (Batch, K) - Scaled Logits from VectorScaler
+            candidates: (Batch, K) - Multi-hot labels (1 for candidate, 0 otherwise)
+        """
+        # 1. Soft Prediction (Gumbel-Softmax for differentiable argmax approximation)
+        probs = F.softmax(logits, dim=-1)
+        soft_y = F.gumbel_softmax(logits, tau=self.tau, hard=False, dim=-1)
+
+        # 2. CPM (Candidate Probability Mass) maximization -> Loss minimization
+        cpm = (probs * candidates).sum(dim=1).mean()
+        loss_cpm = 1.0 - cpm
+
+        # 3. CMG (Candidate Margin) maximization -> Loss minimization
+        # Mask non-candidates for max_cand, and candidates for max_non_cand
+        cand_probs = probs.clone()
+        cand_probs[candidates == 0] = -1.0
+        max_cand = cand_probs.max(dim=1)[0]
+
+        non_cand_probs = probs.clone()
+        non_cand_probs[candidates == 1] = -1.0
+        max_non_cand = non_cand_probs.max(dim=1)[0]
+
+        margin = max_cand - max_non_cand
+        # We want margin to be positive and large. 
+        # F.relu(-margin) penalizes negative margins. 
+        # To encourage larger positive margins, we can use a hinge-like loss or just -margin.
+        loss_margin = F.relu(-margin + 0.1).mean() 
+
+        # 4. NDI (Normalized Dominance Index) minimization
+        # q_k: average selection probability for class k across the batch
+        q_k = soft_y.mean(dim=0)
+        loss_ndi = q_k.max() 
+
+        # 5. Soft-CTR (Candidate Accuracy) maximization -> Loss minimization
+        soft_ctr = (soft_y * candidates).sum(dim=1).mean()
+        loss_ctr = 1.0 - soft_ctr
+
+        total_loss = loss_ctr + loss_cpm + loss_margin + (self.lambda_ndi * loss_ndi)
+        return total_loss
 
 
 class ICDEvaluator(BaseEvaluator):
@@ -39,21 +91,13 @@ class ICDEvaluator(BaseEvaluator):
     """
 
     def __init__(
-
         self,
-
         config: ICDConfig,
-
         entity: ICDModelEntity,
-
         registry,
-
         observer,
-
         device,
-
         ignored_indices: Optional[List[int]] = None
-
     ):
 
         """Summary of __init__.
@@ -86,14 +130,19 @@ class ICDEvaluator(BaseEvaluator):
         self.temperature = 1.0
 
         if self.cfg.loss_type in ("adaptive_softmax", "adaptive_clpl"):
-
-            self.loss_fn = AdaptiveCLPLLoss(loss_type="logistic")
+            head_size = min(getattr(self.cfg, "adaptive_clpl_head_size", 2000), self.entity.num_classes or 0)
+            if head_size <= 0:
+                head_size = 2000
+            self.loss_fn = AdaptiveCLPLLoss(
+                head_size=head_size,
+                tail_sample_size=getattr(self.cfg, "adaptive_clpl_tail_sample_size", 100),
+                loss_type="logistic",
+                logit_clip=getattr(self.cfg, "adaptive_clpl_logit_clip", 20.0),
+            )
 
         else:
 
             self.loss_fn = CLPLLoss(loss_type=self.cfg.loss_type)
-
-
 
     def _prepare_inputs(self, batch: TensorBatch) -> Dict[str, torch.Tensor]:
 
@@ -115,47 +164,31 @@ class ICDEvaluator(BaseEvaluator):
 
         inputs["x_num"] = batch.x_num.to(self.device).float()
 
-
-
         if batch.mask is not None:
 
             inputs["mask"] = batch.mask.to(self.device).float()
-
-
 
         if hasattr(batch, "delta") and batch.delta is not None:
 
             inputs["delta"] = batch.delta.to(self.device).float()
 
-
-
         if getattr(batch, "input_ids", None) is not None:
 
             inputs["input_ids"] = batch.input_ids.to(self.device).long()
-
-
 
         if getattr(batch, "attention_mask", None) is not None:
 
             inputs["attention_mask"] = batch.attention_mask.to(self.device).long()
 
-
-
         if batch.x_cat is not None:
 
             inputs["x_cat"] = batch.x_cat.to(self.device).long()
-
-
 
         if batch.x_icd is not None:
 
             inputs["x_icd"] = batch.x_icd.to(self.device).float()
 
-
-
         return inputs
-
-
 
     def evaluate(self, dataloader: DataLoader, temperature: Optional[float] = None, log_metrics: bool = True) -> Dict[str, float]:
 
@@ -186,8 +219,6 @@ class ICDEvaluator(BaseEvaluator):
                 f"ICDEvaluator: Stage 1/3 starting evaluation batches={len(dataloader)}.",
             )
 
-
-
         all_candidate_hits = []
 
         total_loss = 0.0
@@ -206,8 +237,6 @@ class ICDEvaluator(BaseEvaluator):
 
         cand_seen = None
 
-
-
         with torch.no_grad():
 
             for batch in dataloader:
@@ -215,8 +244,6 @@ class ICDEvaluator(BaseEvaluator):
                 batch_inputs = self._prepare_inputs(batch)
 
                 filtered_inputs = batch_inputs
-
-
 
                 if hasattr(self.entity.model, "adaptive_head"):
 
@@ -228,14 +255,9 @@ class ICDEvaluator(BaseEvaluator):
 
                     logits = self.entity.model(**filtered_inputs)
 
-
-
                 if isinstance(logits, tuple):
 
                     logits = logits[0]
-
-
-
 
 
                 candidates = getattr(batch, "candidates", None)
@@ -251,9 +273,6 @@ class ICDEvaluator(BaseEvaluator):
                         cands = torch.where(torch.isin(cands, ignored), torch.tensor(-1, device=self.device), cands)
 
 
-
-
-
                     scaled_logits = logits / float(max(temperature, 1e-6))
                     scaled_preds = torch.argmax(scaled_logits, dim=1)
 
@@ -265,8 +284,6 @@ class ICDEvaluator(BaseEvaluator):
 
                     total_preds += scaled_preds.numel()
 
-
-
                     cand_sizes = (cands >= 0).sum(dim=1)
 
                     valid_rows = cand_sizes > 0
@@ -276,9 +293,6 @@ class ICDEvaluator(BaseEvaluator):
                         total_cand_sizes += cand_sizes[valid_rows].sum().item()
 
                         total_cand_rows += int(valid_rows.sum().item())
-
-
-
 
 
                         hits = (cands == scaled_preds.unsqueeze(1)).any(dim=1)
@@ -307,8 +321,6 @@ class ICDEvaluator(BaseEvaluator):
                         cand_flat = cands[cand_valid].detach().cpu()
                         cand_seen[cand_flat] = True
 
-
-
                     loss = self.loss_fn(logits, cands)
 
                     total_loss += loss.item()
@@ -336,8 +348,6 @@ class ICDEvaluator(BaseEvaluator):
                         loss = torch.nn.CrossEntropyLoss()(logits, target_indices)
 
                         total_loss += loss.item()
-
-
 
         cand_acc = np.mean(all_candidate_hits) if all_candidate_hits else 0.0
 
@@ -378,9 +388,6 @@ class ICDEvaluator(BaseEvaluator):
                     "INFO",
                     f"ICDEvaluator: Stage 2/3 pred_unique={unique_preds} top_pred={top_idx} top_ratio={top_ratio:.4f} avg_cand={avg_cand:.2f} CPM={cpm:.4f} CMG={cmg:.4f} NDI={ndi:.4f} EPR={epr:.4f}.",
                 )
-
-
-
 
 
         if log_metrics:

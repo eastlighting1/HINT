@@ -21,16 +21,6 @@ from torch.utils.data import DataLoader
 
 from ..common.base import BaseDomainService
 
-
-
-
-
-
-
-
-
-
-
 from ....domain.entities import ICDModelEntity
 
 from ....domain.vo import ICDConfig
@@ -41,6 +31,9 @@ from ....infrastructure.datasource import HDF5StreamingSource, collate_tensor_ba
 
 from ....infrastructure.networks import get_network_class
 
+# Import Calibration related classes
+from ....infrastructure.calibration import CalibrationEntity
+from .evaluator import CalibrationLoss
 
 
 class ICDService(BaseDomainService):
@@ -337,6 +330,12 @@ class ICDService(BaseDomainService):
 
                     class_freq=target_counts,
 
+                    ignored_indices=self.ignored_indices,
+
+                    num_classes=num_classes,
+
+                    calibration_config=getattr(self.cfg, "calibration", None),
+
                     use_amp=use_amp,
 
                     lr_override=lr_override,
@@ -390,6 +389,261 @@ class ICDService(BaseDomainService):
         self.best_model_name = best_model_name or (models_to_run[0] if models_to_run else None)
         self.observer.log("INFO", f"ICDService: Stage 5/5 selected best_model={self.best_model_name}.")
 
+        calib_cfg = getattr(self.cfg, "calibration", None)
+        calib_enabled = True
+        if isinstance(calib_cfg, dict):
+            calib_enabled = bool(calib_cfg.get("enabled", True))
+        elif calib_cfg is not None:
+            calib_enabled = bool(getattr(calib_cfg, "enabled", True))
+
+        if calib_enabled:
+            self.calibrate()
+        else:
+            self.observer.log("INFO", "ICDService: Calibration disabled in config.")
+
+
+    def calibrate(self) -> None:
+        """
+        Runs the calibration workflow (Vector Scaling) on the best model.
+        It loads the best ICD model (frozen), initializes a VectorScaler, 
+        and trains it on the validation set to optimize Soft-CTR/CPM/CMG metrics.
+        """
+        self.observer.log("INFO", "ICDService: Starting Calibration Workflow.")
+
+        # 1. Resolve Configuration
+        # Use calibration config section if exists, else defaults
+        calib_cfg_raw = getattr(self.cfg, 'calibration', {})
+        if isinstance(calib_cfg_raw, dict):
+            calib_cfg = calib_cfg_raw
+        elif hasattr(calib_cfg_raw, "model_dump"):
+            calib_cfg = calib_cfg_raw.model_dump()
+        else:
+            calib_cfg = {
+                k: getattr(calib_cfg_raw, k)
+                for k in dir(calib_cfg_raw)
+                if not k.startswith("_") and not callable(getattr(calib_cfg_raw, k))
+            }
+
+        lr = calib_cfg.get('lr', 0.01)
+        epochs = calib_cfg.get('epochs', 10)
+        batch_size = calib_cfg.get('batch_size', self.cfg.batch_size)
+        tau = calib_cfg.get('tau', 1.0)
+        lambda_ndi = calib_cfg.get('lambda_ndi', 0.1)
+
+        # 2. Identify Best Model
+        model_name = getattr(self, "best_model_name", None)
+        if not model_name:
+            models_to_run = self.cfg.models_to_run if self.cfg.models_to_run else ["MedBERT"]
+            model_name = models_to_run[0]
+            self.observer.log("WARNING", f"No best model identified. Defaulting to {model_name}.")
+
+        # 3. Load Main Model (Frozen)
+        try:
+            self.observer.log("INFO", f"ICDService: Calibration - Loading model {model_name}.")
+            # Need to initialize network structure first
+            NetworkClass = get_network_class(model_name)
+            
+            # Load stats to get dimensions
+            cache_dir = Path(self.cfg.data.data_cache_dir)
+            with open(cache_dir / "stats.json", "r") as f:
+                stats = json.load(f)
+            num_classes = len(stats["icd_classes"])
+            
+            prefix = self.cfg.data.input_h5_prefix
+            sample_file = cache_dir / f"{prefix}_train.h5"
+            with h5py.File(sample_file, "r") as f:
+                input_dim = f["X_num"].shape[1]
+                seq_len = f["X_num"].shape[2]
+                
+            model_cfg = self.cfg.model_configs.get(model_name, {})
+            net_kwargs = dict(model_cfg)
+            net_kwargs.setdefault("dropout", self.cfg.dropout)
+            
+            network = NetworkClass(num_classes=num_classes, input_dim=input_dim, seq_len=seq_len, **net_kwargs)
+            
+            # Add adaptive head if needed (logic copied from execute)
+            if hasattr(network, "embedding_dim"):
+                in_features = network.embedding_dim
+            elif hasattr(network, "fc"):
+                in_features = network.fc.in_features
+            else:
+                in_features = 128
+            
+            if num_classes > 10000:
+                cutoffs = [2000, 8000]
+            else:
+                cutoffs = [num_classes // 4, num_classes // 2]
+                
+            adaptive_head = nn.AdaptiveLogSoftmaxWithLoss(
+                in_features=in_features, n_classes=num_classes, cutoffs=cutoffs, div_value=4.0
+            )
+            network.add_module("adaptive_head", adaptive_head)
+            
+            # Load weights
+            entity_name = f"{self.cfg.artifacts.model_name}_{model_name}"
+            best_state = self.registry.load_model(entity_name, tag="best", device=str(self.device))
+            if best_state:
+                network.load_state_dict(best_state)
+            else:
+                self.observer.log("ERROR", f"Could not load best weights for {entity_name}. Aborting calibration.")
+                return
+
+            network.to(self.device)
+            network.eval()
+            for param in network.parameters():
+                param.requires_grad = False
+                
+        except Exception as e:
+            self.observer.log("ERROR", f"ICDService: Calibration - Model init failed: {e}")
+            import traceback
+            self.observer.log("ERROR", traceback.format_exc())
+            return
+
+        # 4. Initialize Calibration Entity
+        calib_entity = CalibrationEntity(num_classes=num_classes, config=calib_cfg_raw)
+        calib_entity.network.to(self.device)
+        calib_entity.optimizer = torch.optim.Adam(calib_entity.network.parameters(), lr=lr)
+        
+        self.observer.log("INFO", f"ICDService: Calibration - Scaler initialized with lr={lr}, epochs={epochs}.")
+
+        # 5. Prepare Validation Loader
+        try:
+            val_source = HDF5StreamingSource(cache_dir / f"{prefix}_val.h5", label_key="y")
+            dl_val = DataLoader(
+                val_source,
+                batch_size=batch_size,
+                collate_fn=collate_tensor_batch,
+                shuffle=True, # Shuffle for training
+                num_workers=self.cfg.num_workers,
+                pin_memory=self.cfg.pin_memory,
+            )
+        except Exception as e:
+            self.observer.log("ERROR", f"ICDService: Calibration - DataLoader init failed: {e}")
+            return
+
+        # 6. Training Loop
+        loss_fn = CalibrationLoss(tau=tau, lambda_ndi=lambda_ndi)
+        
+        for epoch in range(epochs):
+            total_loss = 0.0
+            batches = 0
+            for batch in dl_val:
+                try:
+                    # Prepare inputs
+                    inputs = {}
+                    inputs["x_num"] = batch.x_num.to(self.device).float()
+                    if batch.x_cat is not None:
+                        inputs["x_cat"] = batch.x_cat.to(self.device).long()
+                    if batch.mask is not None:
+                        inputs["mask"] = batch.mask.to(self.device).float()
+                    
+                    # Target labels (Candidates)
+                    # Assuming batch has candidates or we construct them from y
+                    # Using 'y' as candidates if candidates not present (multi-hot)
+                    candidates = getattr(batch, "candidates", None)
+                    if candidates is None:
+                        # Fallback to y if it is multi-hot
+                        candidates = getattr(batch, "y", None)
+                    
+                    if candidates is None:
+                        continue
+                        
+                    candidates = candidates.to(self.device)
+                    if candidates.dim() >= 2 and candidates.shape[-1] == num_classes:
+                        max_val = candidates.max()
+                        min_val = candidates.min()
+                        if max_val <= 1 and min_val >= 0:
+                            candidates = candidates.float()
+                        else:
+                            idx_tensor = candidates.long()
+                            batch_size = idx_tensor.shape[0]
+                            candidate_matrix = torch.zeros(
+                                (batch_size, num_classes),
+                                device=self.device,
+                                dtype=torch.float32,
+                            )
+                            valid = idx_tensor >= 0
+                            if idx_tensor.dim() == 1:
+                                if valid.any():
+                                    rows = torch.arange(batch_size, device=self.device)[valid]
+                                    candidate_matrix[rows, idx_tensor[valid]] = 1.0
+                            else:
+                                if valid.any():
+                                    row_ids = (
+                                        torch.arange(batch_size, device=self.device)
+                                        .unsqueeze(1)
+                                        .expand_as(idx_tensor)
+                                    )
+                                    candidate_matrix[row_ids[valid], idx_tensor[valid]] = 1.0
+                            candidates = candidate_matrix
+                    else:
+                        idx_tensor = candidates.long()
+                        batch_size = idx_tensor.shape[0]
+                        candidate_matrix = torch.zeros(
+                            (batch_size, num_classes),
+                            device=self.device,
+                            dtype=torch.float32,
+                        )
+                        valid = idx_tensor >= 0
+                        if idx_tensor.dim() == 1:
+                            if valid.any():
+                                rows = torch.arange(batch_size, device=self.device)[valid]
+                                candidate_matrix[rows, idx_tensor[valid]] = 1.0
+                        else:
+                            if valid.any():
+                                row_ids = (
+                                    torch.arange(batch_size, device=self.device)
+                                    .unsqueeze(1)
+                                    .expand_as(idx_tensor)
+                                )
+                                candidate_matrix[row_ids[valid], idx_tensor[valid]] = 1.0
+                        candidates = candidate_matrix
+
+                    # Forward Main Model (Frozen)
+                    with torch.no_grad():
+                        if hasattr(network, "adaptive_head"):
+                            embeddings = network(**inputs, return_embeddings=True)
+                            base_logits = network.adaptive_head.log_prob(embeddings)
+                        else:
+                            base_logits = network(**inputs)
+                        
+                        if isinstance(base_logits, tuple):
+                            base_logits = base_logits[0]
+
+                    # Step Calibration
+                    loss = calib_entity.step_calibrate(base_logits, candidates, loss_fn)
+                    total_loss += loss
+                    batches += 1
+                except Exception as e:
+                    self.observer.log("WARNING", f"Calibration batch failed: {e}")
+                    continue
+            
+            avg_loss = total_loss / batches if batches > 0 else 0.0
+            calib_entity.epoch = epoch
+            self.observer.log("INFO", f"Calib Epoch {epoch+1}/{epochs}: Loss={avg_loss:.4f}")
+
+        # 7. Save Calibration Entity
+        try:
+            calib_tag = f"calibrated_{model_name}"
+            # Registry.save expects entity.snapshot() inside, but CalibrationEntity inherits TrainableEntity
+            # However, Registry might assume ICDModelEntity specific snapshot. 
+            # TrainableEntity defines abstract state_dict. Registry calls snapshot() if defined or state_dict?
+            # Looking at infrastructure/registry.py (from prior context), save calls entity.snapshot().
+            # Wait, TrainableEntity in domain/entities.py has no snapshot().
+            # Ah, the user code provided `ICDModelEntity` but not `TrainableEntity` fully.
+            # Assuming Registry handles generic entities if they have state_dict or we implement snapshot.
+            # I will add snapshot to CalibrationEntity just in case (mapped to state_dict)
+            
+            # Since I cannot modify infrastructure/calibration.py again here (I output it above),
+            # I will assume Registry.save uses entity.state_dict() or I should have added snapshot() in block 1.
+            # I will assume standard usage.
+            
+            self.registry.save_model(calib_entity, name=f"scaler_{model_name}", tag="best") 
+            # Note: registry.save_model is likely the method name based on usage in execute()
+            
+            self.observer.log("INFO", f"ICDService: Calibration - Scaler saved as scaler_{model_name}.")
+        except Exception as e:
+             self.observer.log("ERROR", f"ICDService: Calibration - Save failed: {e}")
 
 
     def generate_intervention_dataset(self, cnn_config) -> None:

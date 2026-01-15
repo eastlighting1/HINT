@@ -257,6 +257,31 @@ class ExecutionConfig(HyperparamVO):
 
 
 
+class CalibrationConfig(HyperparamVO):
+
+    """Summary of CalibrationConfig purpose.
+    
+    Holds default settings for the vector scaling calibration step.
+    """
+
+    enabled: bool = True
+
+    lr: float = 0.01
+
+    epochs: int = 10
+
+    batch_size: Optional[int] = None
+
+    tau: float = 1.0
+
+    lambda_ndi: float = 0.1
+
+    apply_to_train: bool = True
+
+    train_lambda: float = 0.0
+
+
+
 class ICDConfig(HyperparamVO):
 
     """Summary of ICDConfig purpose.
@@ -277,6 +302,10 @@ class ICDConfig(HyperparamVO):
 
     execution: ExecutionConfig = Field(default_factory=ExecutionConfig)
 
+
+    calibration: CalibrationConfig = Field(default_factory=CalibrationConfig)
+
+
     models_to_run: List[str] = Field(default_factory=lambda: ["MedBERT"])
 
     model_configs: Dict[str, Any] = Field(default_factory=dict)
@@ -284,6 +313,9 @@ class ICDConfig(HyperparamVO):
 
 
     loss_type: str = "clpl"
+    adaptive_clpl_head_size: int = 200
+    adaptive_clpl_tail_sample_size: int = 200
+    adaptive_clpl_logit_clip: float = 10.0
 
 
 
@@ -322,12 +354,6 @@ class ICDConfig(HyperparamVO):
     logit_adjust_tau: float = 1.0
 
     entropy_reg_lambda: float = 1e-3
-
-    temp_scaling_enabled: bool = False
-    temp_scaling_min: float = 0.5
-    temp_scaling_max: float = 5.0
-    temp_scaling_steps: int = 10
-    temp_scaling_lambda: float = 0.1
 
     freeze_bert_epochs: int = 1
 
@@ -407,6 +433,8 @@ class CNNConfig(HyperparamVO):
 
     patience: int = 10
 
+    grad_clip_norm: float = 1.0
+
     use_cosine_scheduler: bool = False
 
     T_0: int = 10
@@ -414,6 +442,7 @@ class CNNConfig(HyperparamVO):
     lr_patience: int = 5
 
     focal_gamma: float = 2.0
+    use_weighted_sampler: bool = True
 
     early_stop_metric: str = "f1"
 

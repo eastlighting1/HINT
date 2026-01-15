@@ -280,7 +280,8 @@ class TensorConverter(PipelineComponent):
 
 
 
-        max_cands = 50
+        max_cands = getattr(self.icd_cfg, "top_k_labels", None) or 50
+        max_cands = max(1, int(max_cands))
 
         y_icd_cands = np.full((n_samples, max_cands), -1, dtype=np.int64)
 

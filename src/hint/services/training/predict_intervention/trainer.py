@@ -365,6 +365,10 @@ class InterventionTrainer(BaseTrainer):
 
                 loss.backward()
 
+                grad_clip_norm = getattr(self.cfg, "grad_clip_norm", None)
+                if grad_clip_norm:
+                    torch.nn.utils.clip_grad_norm_(self.entity.network.parameters(), grad_clip_norm)
+
                 optimizer.step()
 
                 self.entity.update_ema()
