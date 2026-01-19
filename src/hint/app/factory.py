@@ -24,6 +24,7 @@ from ..infrastructure.telemetry import RichTelemetryObserver
 from ..infrastructure.datasource import HDF5StreamingSource, ParquetSource
 
 from ..infrastructure.networks import TCNClassifier
+import inspect
 
 
 
@@ -443,29 +444,22 @@ class AppFactory:
 
 
 
-        network = TCNClassifier(
-
+        net_kwargs = dict(
             in_chs=num_channels,
-
             n_cls=4,
-
             vocab_sizes=vocab_sizes,
-
             icd_dim=icd_dim,
-
             embed_dim=cfg.embed_dim,
-
             cat_embed_dim=cfg.cat_embed_dim,
-
             head_drop=cfg.dropout,
-
             tcn_drop=cfg.tcn_dropout,
-
             kernel=cfg.tcn_kernel_size,
-
-            layers=cfg.tcn_layers
-
+            layers=cfg.tcn_layers,
         )
+        if "use_icd_gating" in inspect.signature(TCNClassifier.__init__).parameters:
+            net_kwargs["use_icd_gating"] = cfg.use_icd_gating
+
+        network = TCNClassifier(**net_kwargs)
 
 
 

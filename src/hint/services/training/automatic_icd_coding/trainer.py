@@ -11,7 +11,7 @@ import numpy as np
 
 import random
 
-from typing import List, Optional, Dict, Any
+from typing import List, Optional, Dict
 
 from torch.utils.data import DataLoader
 
@@ -23,7 +23,6 @@ from ....domain.vo import ICDConfig
 
 from ....foundation.dtos import TensorBatch
 
-from ....infrastructure.calibration import CalibrationEntity
 
 
 
@@ -400,8 +399,6 @@ class ICDTrainer(BaseTrainer):
 
         num_classes: int = 0,
 
-        calibration_config: Optional[Any] = None,
-
         use_amp: Optional[bool] = None,
 
         lr_override: Optional[float] = None,
@@ -444,20 +441,6 @@ class ICDTrainer(BaseTrainer):
 
         self.num_classes = num_classes
 
-        self.calibration_config = calibration_config
-
-        self.calibration_entity: Optional[CalibrationEntity] = None
-
-        self.calibration_optimizer = None
-
-        self.calibration_loss = None
-
-        self.calibration_latest_state = None
-
-        self.apply_calibration_to_train = True
-
-        self.calibration_train_lambda = 0.0
-
         self.scaler = torch.amp.GradScaler('cuda') if torch.cuda.is_available() and self.use_amp else None
 
         self.loss_type = self.cfg.loss_type
@@ -476,143 +459,6 @@ class ICDTrainer(BaseTrainer):
         else:
 
             self.loss_fn = CLPLLoss(loss_type=self.loss_type)
-
-    @staticmethod
-    def _resolve_calibration_config(raw: Any) -> Dict[str, Any]:
-        if raw is None:
-            return {}
-        if isinstance(raw, dict):
-            return raw
-        if hasattr(raw, "model_dump"):
-            return raw.model_dump()
-        return {
-            k: getattr(raw, k)
-            for k in dir(raw)
-            if not k.startswith("_") and not callable(getattr(raw, k))
-        }
-
-    def _prepare_calibration_candidates(self, candidates: torch.Tensor) -> Optional[torch.Tensor]:
-        if candidates is None or self.num_classes <= 0:
-            return None
-
-        candidate_tensor = candidates.to(self.device)
-        idx_tensor = candidate_tensor.long()
-        batch_size = candidate_tensor.shape[0]
-
-        if candidate_tensor.dim() >= 2 and candidate_tensor.shape[-1] == self.num_classes:
-            max_val = candidate_tensor.max()
-            min_val = candidate_tensor.min()
-            if max_val <= 1 and min_val >= 0:
-                return candidate_tensor.float()
-
-        candidate_matrix = torch.zeros((batch_size, self.num_classes), device=self.device, dtype=torch.float32)
-        valid = candidate_tensor >= 0
-
-        if candidate_tensor.dim() == 1:
-            if valid.any():
-                rows = torch.arange(batch_size, device=self.device)[valid]
-                candidate_matrix[rows, idx_tensor[valid]] = 1.0
-            return candidate_matrix
-
-        if valid.any():
-            row_ids = torch.arange(batch_size, device=self.device).unsqueeze(1).expand_as(candidate_tensor)
-            candidate_matrix[row_ids[valid], idx_tensor[valid]] = 1.0
-        return candidate_matrix
-
-    def _initialize_calibration(self) -> None:
-        calib_cfg = self._resolve_calibration_config(self.calibration_config)
-        enabled = bool(calib_cfg.get("enabled", True))
-        if not enabled or self.num_classes <= 0:
-            self.calibration_entity = None
-            self.calibration_loss = None
-            self.calibration_optimizer = None
-            self.apply_calibration_to_train = False
-            self.calibration_train_lambda = 0.0
-            return
-
-        from .evaluator import CalibrationLoss
-
-        self.calibration_cfg = calib_cfg
-        self.apply_calibration_to_train = bool(calib_cfg.get("apply_to_train", False))
-        self.calibration_train_lambda = float(calib_cfg.get("train_lambda", 0.0))
-        self.calibration_entity = CalibrationEntity(num_classes=self.num_classes, config=self.calibration_config)
-        self.calibration_entity.network.to(self.device)
-        lr = calib_cfg.get("lr", 0.01)
-        self.calibration_optimizer = torch.optim.Adam(self.calibration_entity.network.parameters(), lr=lr)
-        self.calibration_entity.optimizer = self.calibration_optimizer
-        self.calibration_loss = CalibrationLoss(
-            tau=calib_cfg.get("tau", 1.0),
-            lambda_ndi=calib_cfg.get("lambda_ndi", 0.1),
-        )
-        self.calibration_best_state = None
-
-    def _set_calibration_requires_grad(self, enabled: bool) -> None:
-        if self.calibration_entity is None:
-            return
-        for param in self.calibration_entity.network.parameters():
-            param.requires_grad = enabled
-
-    def _prepare_calibration_for_training(self) -> None:
-        if not self.apply_calibration_to_train or self.calibration_entity is None:
-            return
-        if self.calibration_latest_state is not None:
-            self.calibration_entity.network.load_state_dict(self.calibration_latest_state)
-        self.calibration_entity.network.to(self.device)
-        self.calibration_entity.network.eval()
-        self._set_calibration_requires_grad(False)
-
-    def _run_validation_calibration(self, val_loader: DataLoader) -> Dict[str, float]:
-        if self.calibration_entity is None or self.calibration_loss is None:
-            return {}
-
-        self.entity.model.eval()
-        self.calibration_entity.network.train()
-        self._set_calibration_requires_grad(True)
-
-        total_loss = 0.0
-        steps = 0
-        hits = 0
-        total_samples = 0
-
-        for batch in val_loader:
-            inputs = self._prepare_inputs(batch)
-            candidates = self._prepare_calibration_candidates(getattr(batch, "candidates", None))
-            if candidates is None:
-                continue
-            with torch.no_grad():
-                if hasattr(self.entity.model, "adaptive_head"):
-                    embeddings = self.entity.model(**inputs, return_embeddings=True)
-                    base_logits = self.entity.model.adaptive_head.log_prob(embeddings)
-                else:
-                    base_logits = self.entity.model(**inputs)
-                    if isinstance(base_logits, tuple):
-                        base_logits = base_logits[0]
-
-            loss = self.calibration_entity.step_calibrate(base_logits, candidates, self.calibration_loss)
-            total_loss += loss
-            steps += 1
-
-            scaled_logits = self.calibration_entity.network(base_logits)
-            preds = scaled_logits.argmax(dim=-1)
-            batch_hits = candidates[torch.arange(preds.size(0), device=candidates.device), preds].float().sum().item()
-            hits += batch_hits
-            total_samples += preds.size(0)
-
-        avg_loss = total_loss / max(1, steps)
-        candidate_accuracy = hits / max(1, total_samples)
-
-        if candidate_accuracy > self.calibration_entity.best_metric:
-            self.calibration_entity.best_metric = candidate_accuracy
-            self.calibration_best_state = self.calibration_entity.network.state_dict()
-
-        self.calibration_latest_state = self.calibration_entity.network.state_dict()
-
-        return {
-            "calib_loss": avg_loss,
-            "calib_candidate_accuracy": candidate_accuracy,
-        }
-
-
 
     def _prepare_inputs(self, batch: TensorBatch) -> Dict[str, torch.Tensor]:
 
@@ -724,7 +570,6 @@ class ICDTrainer(BaseTrainer):
             "INFO",
             f"ICDTrainer: Stage 1/4 setup device={self.device} loss_type={self.loss_type} use_amp={self.use_amp} lr={lr}.",
         )
-        self._initialize_calibration()
 
 
 
@@ -741,8 +586,6 @@ class ICDTrainer(BaseTrainer):
             self.entity.epoch = epoch
 
             self.entity.model.train()
-
-            self._prepare_calibration_for_training()
 
             epoch_loss = 0.0
 
@@ -770,30 +613,18 @@ class ICDTrainer(BaseTrainer):
 
                     with torch.amp.autocast('cuda', enabled=self.scaler is not None):
 
-                        if hasattr(self.entity.model, "adaptive_head"):
-
+                        use_adaptive = self.loss_type in ("adaptive_softmax", "adaptive_clpl") and hasattr(
+                            self.entity.model, "adaptive_head"
+                        )
+                        if use_adaptive:
                             embeddings = self.entity.model(**inputs, return_embeddings=True)
-
                             logits = self.entity.model.adaptive_head.log_prob(embeddings)
-
                         else:
-
                             logits = self.entity.model(**inputs, return_embeddings=False)
-
                             if isinstance(logits, tuple):
-
                                 logits = logits[0]
 
-                        if self.apply_calibration_to_train and self.calibration_entity is not None:
-                            logits = self.calibration_entity.network(logits)
-
                         loss = self.loss_fn(logits, candidates)
-
-                        if self.calibration_loss is not None and self.calibration_train_lambda > 0.0:
-                            calib_candidates = self._prepare_calibration_candidates(candidates)
-                            if calib_candidates is not None:
-                                calib_loss = self.calibration_loss(logits, calib_candidates)
-                                loss = loss + (self.calibration_train_lambda * calib_loss)
 
 
 
@@ -854,26 +685,11 @@ class ICDTrainer(BaseTrainer):
 
 
             cand_acc = metrics.get("candidate_accuracy", 0.0)
-
+            val_loss = metrics.get("loss", 0.0)
             self.observer.log(
                 "INFO",
-                f"ICDTrainer: Stage 3/4 epoch={epoch} Loss={avg_loss:.4f} Candidate Accuracy={cand_acc:.4f}.",
+                f"ICDTrainer: Stage 3/4 epoch={epoch} Loss={val_loss:.4f} Candidate Accuracy={cand_acc:.4f}.",
             )
-
-            if self.calibration_entity:
-                calib_stats = self._run_validation_calibration(val_loader)
-                if calib_stats:
-                    self.observer.track_metric("icd_calib_loss", calib_stats["calib_loss"], step=epoch)
-                    self.observer.track_metric(
-                        "icd_calib_candidate_accuracy",
-                        calib_stats["calib_candidate_accuracy"],
-                        step=epoch,
-                    )
-                    self.observer.log(
-                        "INFO",
-                        f"ICDTrainer: Calibration epoch={epoch} loss={calib_stats['calib_loss']:.4f} "
-                        f"candidate_accuracy={calib_stats['calib_candidate_accuracy']:.4f}.",
-                    )
 
             if cand_acc > self.entity.best_metric:
 

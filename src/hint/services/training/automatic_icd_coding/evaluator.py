@@ -5,7 +5,6 @@ Longer description of the module purpose and usage.
 
 import torch
 import torch.nn as nn
-import torch.nn.functional as F
 import numpy as np
 
 from typing import List, Dict, Optional, Union
@@ -17,64 +16,6 @@ from .trainer import CLPLLoss, AdaptiveCLPLLoss
 from ....domain.entities import ICDModelEntity
 from ....domain.vo import ICDConfig
 from ....foundation.dtos import TensorBatch
-
-
-class CalibrationLoss(nn.Module):
-    """
-    Loss function for Vector Scaling Calibration.
-    Uses Gumbel-Softmax to approximate differentiable rank/choice metrics.
-    Includes:
-      - Soft-CTR (Candidate Accuracy)
-      - CPM (Candidate Probability Mass)
-      - CMG (Candidate Margin)
-      - NDI (Normalized Dominance Index for diversity)
-    """
-    def __init__(self, tau: float = 1.0, lambda_ndi: float = 0.1):
-        super().__init__()
-        self.tau = tau
-        self.lambda_ndi = lambda_ndi
-
-    def forward(self, logits: torch.Tensor, candidates: torch.Tensor) -> torch.Tensor:
-        """
-        Args:
-            logits: (Batch, K) - Scaled Logits from VectorScaler
-            candidates: (Batch, K) - Multi-hot labels (1 for candidate, 0 otherwise)
-        """
-        # 1. Soft Prediction (Gumbel-Softmax for differentiable argmax approximation)
-        probs = F.softmax(logits, dim=-1)
-        soft_y = F.gumbel_softmax(logits, tau=self.tau, hard=False, dim=-1)
-
-        # 2. CPM (Candidate Probability Mass) maximization -> Loss minimization
-        cpm = (probs * candidates).sum(dim=1).mean()
-        loss_cpm = 1.0 - cpm
-
-        # 3. CMG (Candidate Margin) maximization -> Loss minimization
-        # Mask non-candidates for max_cand, and candidates for max_non_cand
-        cand_probs = probs.clone()
-        cand_probs[candidates == 0] = -1.0
-        max_cand = cand_probs.max(dim=1)[0]
-
-        non_cand_probs = probs.clone()
-        non_cand_probs[candidates == 1] = -1.0
-        max_non_cand = non_cand_probs.max(dim=1)[0]
-
-        margin = max_cand - max_non_cand
-        # We want margin to be positive and large. 
-        # F.relu(-margin) penalizes negative margins. 
-        # To encourage larger positive margins, we can use a hinge-like loss or just -margin.
-        loss_margin = F.relu(-margin + 0.1).mean() 
-
-        # 4. NDI (Normalized Dominance Index) minimization
-        # q_k: average selection probability for class k across the batch
-        q_k = soft_y.mean(dim=0)
-        loss_ndi = q_k.max() 
-
-        # 5. Soft-CTR (Candidate Accuracy) maximization -> Loss minimization
-        soft_ctr = (soft_y * candidates).sum(dim=1).mean()
-        loss_ctr = 1.0 - soft_ctr
-
-        total_loss = loss_ctr + loss_cpm + loss_margin + (self.lambda_ndi * loss_ndi)
-        return total_loss
 
 
 class ICDEvaluator(BaseEvaluator):
@@ -245,19 +186,16 @@ class ICDEvaluator(BaseEvaluator):
 
                 filtered_inputs = batch_inputs
 
-                if hasattr(self.entity.model, "adaptive_head"):
-
+                use_adaptive = self.cfg.loss_type in ("adaptive_softmax", "adaptive_clpl") and hasattr(
+                    self.entity.model, "adaptive_head"
+                )
+                if use_adaptive:
                     embeddings = self.entity.model(**filtered_inputs, return_embeddings=True)
-
                     logits = self.entity.model.adaptive_head.log_prob(embeddings)
-
                 else:
-
                     logits = self.entity.model(**filtered_inputs)
-
-                if isinstance(logits, tuple):
-
-                    logits = logits[0]
+                    if isinstance(logits, tuple):
+                        logits = logits[0]
 
 
                 candidates = getattr(batch, "candidates", None)

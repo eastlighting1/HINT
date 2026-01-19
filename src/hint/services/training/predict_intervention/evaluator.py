@@ -23,83 +23,6 @@ from ....domain.vo import CNNConfig
 
 
 
-class ModelWithTemperature(nn.Module):
-
-    """Summary of ModelWithTemperature purpose.
-    
-    Longer description of the class behavior and usage.
-    
-    Attributes:
-    model (Any): Description of model.
-    temperature (Any): Description of temperature.
-    """
-
-    def __init__(self, model):
-
-        """Summary of __init__.
-        
-        Longer description of the __init__ behavior and usage.
-        
-        Args:
-        model (Any): Description of model.
-        
-        Returns:
-        None: Description of the return value.
-        
-        Raises:
-        Exception: Description of why this exception might be raised.
-        """
-
-        super().__init__()
-
-        self.model = model
-
-        self.temperature = nn.Parameter(torch.ones(1) * 1.5)
-
-
-
-    def forward(self, input):
-
-        """Summary of forward.
-        
-        Longer description of the forward behavior and usage.
-        
-        Args:
-        input (Any): Description of input.
-        
-        Returns:
-        Any: Description of the return value.
-        
-        Raises:
-        Exception: Description of why this exception might be raised.
-        """
-
-        logits = self.model(input)
-
-        return self.temperature_scale(logits)
-
-
-
-    def temperature_scale(self, logits):
-
-        """Summary of temperature_scale.
-        
-        Longer description of the temperature_scale behavior and usage.
-        
-        Args:
-        logits (Any): Description of logits.
-        
-        Returns:
-        Any: Description of the return value.
-        
-        Raises:
-        Exception: Description of why this exception might be raised.
-        """
-
-        return logits / self.temperature
-
-
-
 class InterventionEvaluator(BaseEvaluator):
 
     """Summary of InterventionEvaluator purpose.
@@ -109,7 +32,6 @@ class InterventionEvaluator(BaseEvaluator):
     Attributes:
     cfg (Any): Description of cfg.
     entity (Any): Description of entity.
-    temperature (Any): Description of temperature.
     """
 
     def __init__(self, config: CNNConfig, entity: InterventionModelEntity, registry, observer, device):
@@ -137,104 +59,6 @@ class InterventionEvaluator(BaseEvaluator):
         self.cfg = config
 
         self.entity = entity
-
-        self.temperature = 1.0
-
-
-
-    def calibrate(self, loader) -> None:
-
-        """Summary of calibrate.
-        
-        Longer description of the calibrate behavior and usage.
-        
-        Args:
-        loader (Any): Description of loader.
-        
-        Returns:
-        None: Description of the return value.
-        
-        Raises:
-        Exception: Description of why this exception might be raised.
-        """
-
-        self.entity.network.eval()
-
-        logits_list = []
-
-        labels_list = []
-
-
-
-        with torch.no_grad():
-
-            for batch in loader:
-
-                x_num = batch.x_num.to(self.device).float()
-
-                x_cat = batch.x_cat.to(self.device).long() if batch.x_cat is not None else None
-
-                x_icd = batch.x_icd.to(self.device).float() if batch.x_icd is not None else None
-
-                y = batch.y[:, -1].to(self.device)
-
-
-
-                logits = self.entity.network(x_num=x_num, x_cat=x_cat, x_icd=x_icd)
-
-                logits_list.append(logits)
-
-                labels_list.append(y)
-
-
-
-        logits = torch.cat(logits_list)
-
-        labels = torch.cat(labels_list)
-
-
-
-        self.observer.log("INFO", "InterventionEvaluator: Stage 1/2 temperature calibration start.")
-
-        temperature = nn.Parameter(torch.ones(1, device=self.device) * 1.5)
-
-        optimizer = torch.optim.LBFGS([temperature], lr=0.01, max_iter=50)
-
-
-
-        def eval():
-
-            """Summary of eval.
-            
-            Longer description of the eval behavior and usage.
-            
-            Args:
-            None (None): This function does not accept arguments.
-            
-            Returns:
-            Any: Description of the return value.
-            
-            Raises:
-            Exception: Description of why this exception might be raised.
-            """
-
-            optimizer.zero_grad()
-
-            loss = nn.CrossEntropyLoss()(logits / temperature, labels)
-
-            loss.backward()
-
-            return loss
-
-
-
-        optimizer.step(eval)
-
-        self.temperature = temperature.item()
-
-        self.observer.log("INFO", f"InterventionEvaluator: Stage 2/2 temperature calibration complete temperature={self.temperature:.4f}.")
-
-
 
     def _select_last_valid(self, y: torch.Tensor) -> torch.Tensor:
 
@@ -304,6 +128,7 @@ class InterventionEvaluator(BaseEvaluator):
         all_labels = []
 
         total_loss = 0.0
+        valid_batches = 0
 
 
 
@@ -327,9 +152,7 @@ class InterventionEvaluator(BaseEvaluator):
 
 
 
-                scaled_logits = logits / self.temperature
-
-                probs = torch.softmax(scaled_logits, dim=1)
+                probs = torch.softmax(logits, dim=1)
 
 
 
@@ -345,9 +168,9 @@ class InterventionEvaluator(BaseEvaluator):
 
 
 
-                loss = nn.CrossEntropyLoss()(scaled_logits[valid_mask], target[valid_mask])
-
+                loss = nn.CrossEntropyLoss()(logits[valid_mask], target[valid_mask])
                 total_loss += loss.item()
+                valid_batches += 1
 
 
 
@@ -476,7 +299,7 @@ class InterventionEvaluator(BaseEvaluator):
 
         return {
 
-            "loss": total_loss / len(loader),
+            "loss": total_loss / max(1, valid_batches),
 
             "accuracy": acc,
 

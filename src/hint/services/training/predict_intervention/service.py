@@ -10,6 +10,7 @@ import h5py
 import numpy as np
 
 import json
+import inspect
 
 from pathlib import Path
 
@@ -255,29 +256,24 @@ class InterventionService(BaseDomainService):
 
 
 
-        network = NetworkClass(
-
+        net_kwargs = dict(
             in_chs=num_feats,
-
             n_cls=4,
-
             vocab_sizes=vocab_sizes,
-
             icd_dim=icd_dim,
-
             embed_dim=self.cfg.embed_dim if hasattr(self.cfg, "embed_dim") else 128,
-
             cat_embed_dim=self.cfg.cat_embed_dim if hasattr(self.cfg, "cat_embed_dim") else 32,
-
             head_drop=self.cfg.dropout,
-
             tcn_drop=self.cfg.tcn_dropout if hasattr(self.cfg, "tcn_dropout") else 0.2,
-
             kernel=self.cfg.tcn_kernel_size if hasattr(self.cfg, "tcn_kernel_size") else 5,
-
-            layers=self.cfg.tcn_layers if hasattr(self.cfg, "tcn_layers") else 5
-
+            layers=self.cfg.tcn_layers if hasattr(self.cfg, "tcn_layers") else 5,
         )
+        if "use_icd_gating" in inspect.signature(NetworkClass.__init__).parameters:
+            net_kwargs["use_icd_gating"] = (
+                self.cfg.use_icd_gating if hasattr(self.cfg, "use_icd_gating") else True
+            )
+
+        network = NetworkClass(**net_kwargs)
 
 
 

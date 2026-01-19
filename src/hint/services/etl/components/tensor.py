@@ -400,12 +400,20 @@ class TensorConverter(PipelineComponent):
 
 
         valid_icd_mask = (y_icd_cands != -1).any(axis=1)
+        if not valid_icd_mask.any():
+            valid_icd_mask = np.ones(n_samples, dtype=bool)
 
-        icd_stay_ids = np.array(stay_ids)[valid_icd_mask]
+        stay_ids_arr = np.array(stay_ids)
+        stay_ids_filtered = stay_ids_arr[valid_icd_mask]
+        X_num = X_num[valid_icd_mask]
+        X_cat = X_cat[valid_icd_mask]
+        y_vent = y_vent[valid_icd_mask]
 
-        icd_X_num = X_num[valid_icd_mask]
+        icd_stay_ids = stay_ids_filtered
 
-        icd_X_cat = X_cat[valid_icd_mask]
+        icd_X_num = X_num
+
+        icd_X_cat = X_cat
 
         icd_y = y_icd_cands[valid_icd_mask]
 
@@ -441,7 +449,7 @@ class TensorConverter(PipelineComponent):
 
             f.create_dataset("X_cat", data=X_cat)
 
-            f.create_dataset("stay_ids", data=np.array(stay_ids))
+            f.create_dataset("stay_ids", data=stay_ids_filtered)
 
             f.create_dataset("y", data=y_vent)
 

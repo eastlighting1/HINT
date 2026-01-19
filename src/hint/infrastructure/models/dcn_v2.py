@@ -140,6 +140,8 @@ class DCNv2ICD(BaseICDClassifier):
 
         cross_scale: float = 1.0,
 
+        proj_dim: int = 0,
+
         **kwargs
 
     ):
@@ -210,10 +212,19 @@ class DCNv2ICD(BaseICDClassifier):
 
 
         stack_dim = self.flat_dim + deep_layers[-1]
-
-        self.final_mapping = nn.Linear(stack_dim, num_classes)
-
-        self.embedding_dim = stack_dim
+        proj_dim = int(proj_dim) if proj_dim else 0
+        if proj_dim > 0:
+            self.proj = nn.Sequential(
+                nn.Linear(stack_dim, proj_dim),
+                nn.ReLU(),
+                nn.Dropout(dropout),
+            )
+            self.final_mapping = nn.Linear(proj_dim, num_classes)
+            self.embedding_dim = proj_dim
+        else:
+            self.proj = None
+            self.final_mapping = nn.Linear(stack_dim, num_classes)
+            self.embedding_dim = stack_dim
 
 
 
@@ -258,13 +269,10 @@ class DCNv2ICD(BaseICDClassifier):
 
 
         x_stack = torch.cat([x_cross, x_deep], dim=1)
-
-
+        if self.proj is not None:
+            x_stack = self.proj(x_stack)
 
         if return_embeddings:
-
             return x_stack
-
-
 
         return self.final_mapping(x_stack)

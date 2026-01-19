@@ -1,6 +1,6 @@
 import torch
 from loguru import logger
-from hint.infrastructure.components import FocalLoss, TemperatureScaler
+from hint.infrastructure.components import FocalLoss
 
 def test_focal_loss_reduction() -> None:
     """
@@ -35,39 +35,3 @@ def test_focal_loss_reduction() -> None:
     assert loss.item() > 0, "Loss should be positive"
     
     logger.info("FocalLoss reduction verified successfully.")
-
-def test_temperature_scaler_scaling() -> None:
-    """
-    [One-line Summary] Confirm TemperatureScaler scales logits using the configured temperature.
-
-    [Description]
-    Manually set the calibration temperature, apply the scaler to known logits, and verify the
-    output equals logits divided by the configured value to ensure predictable calibration.
-
-    Test Case ID: INF-COMP-02
-    Scenario: Apply temperature scaling to a known tensor and compare with expected output.
-
-    Args:
-        None
-
-    Returns:
-        None
-    """
-    logger.info("Starting test: test_temperature_scaler_scaling")
-    
-    scaler = TemperatureScaler()
-    target_temp = 2.0
-    
-    logger.debug(f"Setting temperature to {target_temp}")
-    scaler.temperature.data.fill_(target_temp)
-    
-    logits = torch.tensor([[2.0, 4.0]])
-    logger.debug(f"Input logits: {logits}")
-    
-    scaled = scaler(logits)
-    logger.debug(f"Scaled logits: {scaled}")
-    
-    expected = torch.tensor([[1.0, 2.0]])
-    assert torch.allclose(scaled, expected), f"Expected {expected}, but got {scaled}"
-    
-    logger.info("TemperatureScaler scaling logic verified successfully.")

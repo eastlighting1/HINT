@@ -4,8 +4,8 @@ defaults:
   - icd_config@icd
   - cnn_config@cnn
 
-# 실행 모드 (etl, icd, cnn, train, all)
-mode: "all"
+# 실행 모드 (etl, icd, intervention, train, all)
+mode: "icd"
 seed: 42
 
 # 로깅 설정 (Hydra에 의해 보간됨)

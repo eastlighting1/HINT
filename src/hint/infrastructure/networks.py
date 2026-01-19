@@ -108,7 +108,7 @@ class TCNClassifier(nn.Module):
     numeric_branch (Any): Description of numeric_branch.
     """
 
-    def __init__(self, in_chs: Union[int, Sequence[int]], n_cls: int, vocab_sizes: List[int], icd_dim: int = 0, embed_dim: int = 128, cat_embed_dim: int = 32, head_drop: float = 0.3, tcn_drop: float = 0.2, kernel: int = 5, layers: int = 5) -> None:
+    def __init__(self, in_chs: Union[int, Sequence[int]], n_cls: int, vocab_sizes: List[int], icd_dim: int = 0, embed_dim: int = 128, cat_embed_dim: int = 32, head_drop: float = 0.3, tcn_drop: float = 0.2, kernel: int = 5, layers: int = 5, use_icd_gating: bool = True) -> None:
 
         """Summary of __init__.
         
@@ -196,6 +196,7 @@ class TCNClassifier(nn.Module):
 
 
         self.icd_dim = icd_dim
+        self.use_icd_gating = use_icd_gating
 
         self.icd_projector = None
 
@@ -216,6 +217,10 @@ class TCNClassifier(nn.Module):
             total_feature_dim += embed_dim
 
 
+        cat_feature_dim = (len(vocab_sizes) * cat_embed_dim) + (embed_dim if icd_dim > 0 else 0)
+        self.icd_gate = None
+        if self.use_icd_gating and icd_dim > 0 and cat_feature_dim > 0:
+            self.icd_gate = nn.Sequential(nn.Linear(cat_feature_dim, embed_dim), nn.Sigmoid())
 
         self.head = nn.Sequential(nn.Linear(total_feature_dim, total_feature_dim // 2), nn.ReLU(), nn.Dropout(head_drop), nn.Linear(total_feature_dim // 2, n_cls))
 
@@ -278,6 +283,14 @@ class TCNClassifier(nn.Module):
             icd_feat = self.icd_projector(x_icd)
 
 
+
+        if self.icd_gate is not None and icd_feat is not None:
+            if cat_pool_list:
+                p_cat = torch.cat(cat_pool_list + [icd_feat], dim=1)
+            else:
+                p_cat = icd_feat
+            gate = self.icd_gate(p_cat)
+            num_pool = num_pool * gate
 
         feats = [num_pool] + cat_pool_list
 

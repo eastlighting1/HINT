@@ -111,7 +111,7 @@ class ICDModelEntity(TrainableEntity):
     network (Any): Description of network.
     """
 
-    def __init__(self, model: nn.Module):
+    def __init__(self, model: nn.Module, num_classes: Optional[int] = None):
 
         """Summary of __init__.
         
@@ -132,6 +132,8 @@ class ICDModelEntity(TrainableEntity):
         self.model = model
 
         self.network = model
+
+        self.num_classes = num_classes
 
 
 
@@ -157,7 +159,9 @@ class ICDModelEntity(TrainableEntity):
 
             "best_metric": self.best_metric,
 
-            "epoch": self.epoch
+            "epoch": self.epoch,
+
+            "num_classes": self.num_classes,
 
         }
 
@@ -184,6 +188,9 @@ class ICDModelEntity(TrainableEntity):
         self.best_metric = state.get("best_metric", 0.0)
 
         self.epoch = state.get("epoch", 0)
+
+        if "num_classes" in state:
+            self.num_classes = state["num_classes"]
 
 
 

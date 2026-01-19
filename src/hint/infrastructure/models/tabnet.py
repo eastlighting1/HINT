@@ -380,6 +380,8 @@ class TabNetICD(BaseICDClassifier):
 
         momentum=0.02,
 
+        proj_dim: int = 0,
+
         **kwargs
 
     ):
@@ -479,9 +481,19 @@ class TabNetICD(BaseICDClassifier):
 
 
 
-        self.final_mapping = nn.Linear(n_d, num_classes)
-
-        self.embedding_dim = n_d
+        proj_dim = int(proj_dim) if proj_dim else 0
+        if proj_dim > 0:
+            self.proj = nn.Sequential(
+                nn.Linear(n_d, proj_dim),
+                nn.ReLU(),
+                nn.Dropout(dropout),
+            )
+            self.final_mapping = nn.Linear(proj_dim, num_classes)
+            self.embedding_dim = proj_dim
+        else:
+            self.proj = None
+            self.final_mapping = nn.Linear(n_d, num_classes)
+            self.embedding_dim = n_d
 
 
 
@@ -581,10 +593,10 @@ class TabNetICD(BaseICDClassifier):
 
 
 
+        if self.proj is not None:
+            out_accum = self.proj(out_accum)
+
         if return_embeddings:
-
             return out_accum
-
-
 
         return self.final_mapping(out_accum)

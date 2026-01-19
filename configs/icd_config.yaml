@@ -16,9 +16,9 @@ dropout: 0.3
 # Loss Configuration
 # Options: "standard", "clpl", "adaptive_clpl"
 loss_type: "adaptive_clpl"  # Recommended for XMC
-adaptive_clpl_head_size: 200
-adaptive_clpl_tail_sample_size: 200
-adaptive_clpl_logit_clip: 10.0
+adaptive_clpl_head_size: 800
+adaptive_clpl_tail_sample_size: 800
+adaptive_clpl_logit_clip: 30.0
 
 # Model Specific Configurations
 model_configs:
@@ -56,6 +56,7 @@ model_configs:
     n_shared: 2
     virtual_batch_size: 512
     momentum: 0.02
+    proj_dim: 512
 
   DCNv2:
     cross_layers: 2
@@ -63,6 +64,7 @@ model_configs:
     dropout: 0.2
     lr: 5.0e-5
     cross_scale: 0.1
+    proj_dim: 512
 
   FTTransformer:
     d_token: 192
@@ -73,8 +75,8 @@ model_configs:
 # Training
 batch_size: 128  # Reduced for stability with complex models
 lr: 5.0e-5
-epochs: 100
-patience: 5
+epochs: 150
+patience: 10
 use_amp: false
 grad_clip_norm: 1.0
 
@@ -83,15 +85,4 @@ num_workers: 8
 pin_memory: true
 
 # Validation
-top_k_labels: 500
-
-# Calibration
-calibration:
-  enabled: true
-  lr: 0.01
-  epochs: 5
-  batch_size: 128
-  tau: 1.0
-  lambda_ndi: 0.1
-  apply_to_train: false
-  train_lambda: 0.0
+top_k_labels: 1000
