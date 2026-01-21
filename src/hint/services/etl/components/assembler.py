@@ -12,7 +12,7 @@ from pathlib import Path
 
 from ....foundation.interfaces import PipelineComponent, Registry, TelemetryObserver
 
-from ....domain.vo import ETLConfig, CNNConfig
+from ....domain.vo import ETLConfig, InterventionConfig
 
 
 
@@ -25,36 +25,36 @@ class FeatureAssembler(PipelineComponent):
     Longer description of the class behavior and usage.
     
     Attributes:
-    cfg (Any): Description of cfg.
-    cnn_cfg (Any): Description of cnn_cfg.
-    observer (Any): Description of observer.
-    registry (Any): Description of registry.
+        cfg (Any): Description of cfg.
+        intervention_cfg (Any): Description of intervention_cfg.
+        observer (Any): Description of observer.
+        registry (Any): Description of registry.
     """
 
 
 
-    def __init__(self, config: ETLConfig, cnn_config: CNNConfig, registry: Registry, observer: TelemetryObserver):
+    def __init__(self, config: ETLConfig, intervention_config: InterventionConfig, registry: Registry, observer: TelemetryObserver):
 
         """Summary of __init__.
         
         Longer description of the __init__ behavior and usage.
         
         Args:
-        config (Any): Description of config.
-        cnn_config (Any): Description of cnn_config.
-        registry (Any): Description of registry.
-        observer (Any): Description of observer.
+            config (Any): Description of config.
+            intervention_config (Any): Description of intervention_config.
+            registry (Any): Description of registry.
+            observer (Any): Description of observer.
         
         Returns:
-        None: Description of the return value.
+            None: Description of the return value.
         
         Raises:
-        Exception: Description of why this exception might be raised.
+            Exception: Description of why this exception might be raised.
         """
 
         self.cfg = config
 
-        self.cnn_cfg = cnn_config
+        self.intervention_cfg = intervention_config
 
         self.registry = registry
 
@@ -69,13 +69,13 @@ class FeatureAssembler(PipelineComponent):
         Longer description of the execute behavior and usage.
         
         Args:
-        None (None): This function does not accept arguments.
+            None (None): This function does not accept arguments.
         
         Returns:
-        None: Description of the return value.
+            None: Description of the return value.
         
         Raises:
-        Exception: Description of why this exception might be raised.
+            Exception: Description of why this exception might be raised.
         """
 
         proc_dir = Path(self.cfg.proc_dir)
@@ -189,13 +189,13 @@ class FeatureAssembler(PipelineComponent):
             Longer description of the normalize_name_py behavior and usage.
             
             Args:
-            s (Any): Description of s.
+                s (Any): Description of s.
             
             Returns:
-            str: Description of the return value.
+                str: Description of the return value.
             
             Raises:
-            Exception: Description of why this exception might be raised.
+                Exception: Description of why this exception might be raised.
             """
 
             s = s.lower()
@@ -382,7 +382,7 @@ class FeatureAssembler(PipelineComponent):
 
 
 
-        time_norm = float(self.cnn_cfg.seq_len)
+        time_norm = float(self.intervention_cfg.seq_len)
 
         df_channels = df_channels.with_columns([
 
@@ -517,16 +517,16 @@ class FeatureAssembler(PipelineComponent):
             Longer description of the one_hot_fixed behavior and usage.
             
             Args:
-            d (Any): Description of d.
-            col (Any): Description of col.
-            levels (Any): Description of levels.
-            prefix (Any): Description of prefix.
+                d (Any): Description of d.
+                col (Any): Description of col.
+                levels (Any): Description of levels.
+                prefix (Any): Description of prefix.
             
             Returns:
-            Any: Description of the return value.
+                Any: Description of the return value.
             
             Raises:
-            Exception: Description of why this exception might be raised.
+                Exception: Description of why this exception might be raised.
             """
 
 

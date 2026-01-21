@@ -2,13 +2,11 @@ defaults:
   - _self_
   - etl_config@etl
   - icd_config@icd
-  - cnn_config@cnn
+  - intervention_config@intervention
 
-# 실행 모드 (etl, icd, intervention, train, all)
 mode: "all"
 seed: 42
 
-# 로깅 설정 (Hydra에 의해 보간됨)
 logging:
   output_dir: "outputs"
   artifacts_dir: "artifacts"

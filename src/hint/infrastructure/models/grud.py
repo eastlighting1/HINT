@@ -22,16 +22,16 @@ class GRUDClassifier(BaseICDClassifier):
     Longer description of the class behavior and usage.
     
     Attributes:
-    b_gamma_x (Any): Description of b_gamma_x.
-    dropout (Any): Description of dropout.
-    fc (Any): Description of fc.
-    h_layer (Any): Description of h_layer.
-    hidden_dim (Any): Description of hidden_dim.
-    input_dim (Any): Description of input_dim.
-    lin_gamma_h (Any): Description of lin_gamma_h.
-    r_layer (Any): Description of r_layer.
-    w_gamma_x (Any): Description of w_gamma_x.
-    z_layer (Any): Description of z_layer.
+        b_gamma_x (Any): Description of b_gamma_x.
+        dropout (Any): Description of dropout.
+        fc (Any): Description of fc.
+        h_layer (Any): Description of h_layer.
+        hidden_dim (Any): Description of hidden_dim.
+        input_dim (Any): Description of input_dim.
+        lin_gamma_h (Any): Description of lin_gamma_h.
+        r_layer (Any): Description of r_layer.
+        w_gamma_x (Any): Description of w_gamma_x.
+        z_layer (Any): Description of z_layer.
     """
 
     def __init__(self, num_classes: int, input_dim: int, seq_len: int, hidden_dim: int = 64, dropout: float = 0.3, **kwargs):
@@ -41,18 +41,18 @@ class GRUDClassifier(BaseICDClassifier):
         Longer description of the __init__ behavior and usage.
         
         Args:
-        num_classes (Any): Description of num_classes.
-        input_dim (Any): Description of input_dim.
-        seq_len (Any): Description of seq_len.
-        hidden_dim (Any): Description of hidden_dim.
-        dropout (Any): Description of dropout.
-        kwargs (Any): Description of kwargs.
+            num_classes (Any): Description of num_classes.
+            input_dim (Any): Description of input_dim.
+            seq_len (Any): Description of seq_len.
+            hidden_dim (Any): Description of hidden_dim.
+            dropout (Any): Description of dropout.
+            kwargs (Any): Description of kwargs.
         
         Returns:
-        None: Description of the return value.
+            None: Description of the return value.
         
         Raises:
-        Exception: Description of why this exception might be raised.
+            Exception: Description of why this exception might be raised.
         """
 
         super().__init__(num_classes, input_dim, seq_len, dropout=dropout, **kwargs)
@@ -104,13 +104,13 @@ class GRUDClassifier(BaseICDClassifier):
         Longer description of the _init_parameters behavior and usage.
         
         Args:
-        None (None): This function does not accept arguments.
+            None (None): This function does not accept arguments.
         
         Returns:
-        Any: Description of the return value.
+            Any: Description of the return value.
         
         Raises:
-        Exception: Description of why this exception might be raised.
+            Exception: Description of why this exception might be raised.
         """
 
         nn.init.xavier_uniform_(self.z_layer.weight)
@@ -138,16 +138,16 @@ class GRUDClassifier(BaseICDClassifier):
         Longer description of the forward behavior and usage.
         
         Args:
-        x_num (Any): Description of x_num.
-        mask (Any): Description of mask.
-        delta (Any): Description of delta.
-        kwargs (Any): Description of kwargs.
+            x_num (Any): Description of x_num.
+            mask (Any): Description of mask.
+            delta (Any): Description of delta.
+            kwargs (Any): Description of kwargs.
         
         Returns:
-        torch.Tensor: Description of the return value.
+            torch.Tensor: Description of the return value.
         
         Raises:
-        Exception: Description of why this exception might be raised.
+            Exception: Description of why this exception might be raised.
         """
 
         if x_num is None:

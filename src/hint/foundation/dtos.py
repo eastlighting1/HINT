@@ -8,7 +8,7 @@ from typing import Any, Dict, List, Optional
 
 import torch
 
-from hint.domain.vo import ETLConfig, ICDConfig, CNNConfig
+from hint.domain.vo import ETLConfig, ICDConfig, InterventionConfig
 
 
 
@@ -20,14 +20,14 @@ class AppContext:
     Longer description of the class behavior and usage.
     
     Attributes:
-    None (None): No documented attributes.
+        None (None): No documented attributes.
     """
 
     etl: ETLConfig
 
     icd: ICDConfig
 
-    cnn: CNNConfig
+    intervention: InterventionConfig
 
     mode: str
 
@@ -43,7 +43,7 @@ class TensorBatch:
     Longer description of the class behavior and usage.
     
     Attributes:
-    None (None): No documented attributes.
+        None (None): No documented attributes.
     """
 
     x_num: torch.Tensor
@@ -75,13 +75,13 @@ class TensorBatch:
         Longer description of the to behavior and usage.
         
         Args:
-        device (Any): Description of device.
+            device (Any): Description of device.
         
         Returns:
-        'TensorBatch': Description of the return value.
+            'TensorBatch': Description of the return value.
         
         Raises:
-        Exception: Description of why this exception might be raised.
+            Exception: Description of why this exception might be raised.
         """
 
         return TensorBatch(
@@ -116,7 +116,7 @@ class PredictionResult:
     Longer description of the class behavior and usage.
     
     Attributes:
-    None (None): No documented attributes.
+        None (None): No documented attributes.
     """
 
     logits: torch.Tensor

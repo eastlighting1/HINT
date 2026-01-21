@@ -17,9 +17,9 @@ class BaseComponent(ABC):
     Longer description of the class behavior and usage.
     
     Attributes:
-    device (Any): Description of device.
-    observer (Any): Description of observer.
-    registry (Any): Description of registry.
+        device (Any): Description of device.
+        observer (Any): Description of observer.
+        registry (Any): Description of registry.
     """
 
     def __init__(self, registry: Registry, observer: TelemetryObserver, device: str):
@@ -29,15 +29,15 @@ class BaseComponent(ABC):
         Longer description of the __init__ behavior and usage.
         
         Args:
-        registry (Any): Description of registry.
-        observer (Any): Description of observer.
-        device (Any): Description of device.
+            registry (Any): Description of registry.
+            observer (Any): Description of observer.
+            device (Any): Description of device.
         
         Returns:
-        None: Description of the return value.
+            None: Description of the return value.
         
         Raises:
-        Exception: Description of why this exception might be raised.
+            Exception: Description of why this exception might be raised.
         """
 
         self.registry = registry
@@ -55,7 +55,7 @@ class BaseTrainer(BaseComponent):
     Longer description of the class behavior and usage.
     
     Attributes:
-    None (None): No documented attributes.
+        None (None): No documented attributes.
     """
 
     @abstractmethod
@@ -67,16 +67,16 @@ class BaseTrainer(BaseComponent):
         Longer description of the train behavior and usage.
         
         Args:
-        train_loader (Any): Description of train_loader.
-        val_loader (Any): Description of val_loader.
-        evaluator (Any): Description of evaluator.
-        kwargs (Any): Description of kwargs.
+            train_loader (Any): Description of train_loader.
+            val_loader (Any): Description of val_loader.
+            evaluator (Any): Description of evaluator.
+            kwargs (Any): Description of kwargs.
         
         Returns:
-        None: Description of the return value.
+            None: Description of the return value.
         
         Raises:
-        Exception: Description of why this exception might be raised.
+            Exception: Description of why this exception might be raised.
         """
 
         raise NotImplementedError
@@ -90,7 +90,7 @@ class BaseEvaluator(BaseComponent):
     Longer description of the class behavior and usage.
     
     Attributes:
-    None (None): No documented attributes.
+        None (None): No documented attributes.
     """
 
     @abstractmethod
@@ -102,14 +102,14 @@ class BaseEvaluator(BaseComponent):
         Longer description of the evaluate behavior and usage.
         
         Args:
-        loader (Any): Description of loader.
-        kwargs (Any): Description of kwargs.
+            loader (Any): Description of loader.
+            kwargs (Any): Description of kwargs.
         
         Returns:
-        Dict[str, float]: Description of the return value.
+            Dict[str, float]: Description of the return value.
         
         Raises:
-        Exception: Description of why this exception might be raised.
+            Exception: Description of why this exception might be raised.
         """
 
         raise NotImplementedError
@@ -123,7 +123,7 @@ class BaseDomainService(ABC):
     Longer description of the class behavior and usage.
     
     Attributes:
-    observer (Any): Description of observer.
+        observer (Any): Description of observer.
     """
 
     def __init__(self, observer: TelemetryObserver):
@@ -133,13 +133,13 @@ class BaseDomainService(ABC):
         Longer description of the __init__ behavior and usage.
         
         Args:
-        observer (Any): Description of observer.
+            observer (Any): Description of observer.
         
         Returns:
-        None: Description of the return value.
+            None: Description of the return value.
         
         Raises:
-        Exception: Description of why this exception might be raised.
+            Exception: Description of why this exception might be raised.
         """
 
         self.observer = observer
@@ -155,13 +155,13 @@ class BaseDomainService(ABC):
         Longer description of the execute behavior and usage.
         
         Args:
-        None (None): This function does not accept arguments.
+            None (None): This function does not accept arguments.
         
         Returns:
-        None: Description of the return value.
+            None: Description of the return value.
         
         Raises:
-        Exception: Description of why this exception might be raised.
+            Exception: Description of why this exception might be raised.
         """
 
         raise NotImplementedError

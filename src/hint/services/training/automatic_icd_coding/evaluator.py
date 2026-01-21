@@ -25,10 +25,10 @@ class ICDEvaluator(BaseEvaluator):
     Longer description of the class behavior and usage.
     
     Attributes:
-    cfg (Any): Description of cfg.
-    entity (Any): Description of entity.
-    ignored_indices (Any): Description of ignored_indices.
-    loss_fn (Any): Description of loss_fn.
+        cfg (Any): Description of cfg.
+        entity (Any): Description of entity.
+        ignored_indices (Any): Description of ignored_indices.
+        loss_fn (Any): Description of loss_fn.
     """
 
     def __init__(
@@ -47,18 +47,18 @@ class ICDEvaluator(BaseEvaluator):
         Longer description of the __init__ behavior and usage.
         
         Args:
-        config (Any): Description of config.
-        entity (Any): Description of entity.
-        registry (Any): Description of registry.
-        observer (Any): Description of observer.
-        device (Any): Description of device.
-        ignored_indices (Any): Description of ignored_indices.
+            config (Any): Description of config.
+            entity (Any): Description of entity.
+            registry (Any): Description of registry.
+            observer (Any): Description of observer.
+            device (Any): Description of device.
+            ignored_indices (Any): Description of ignored_indices.
         
         Returns:
-        None: Description of the return value.
+            None: Description of the return value.
         
         Raises:
-        Exception: Description of why this exception might be raised.
+            Exception: Description of why this exception might be raised.
         """
 
         super().__init__(registry, observer, device)
@@ -95,13 +95,13 @@ class ICDEvaluator(BaseEvaluator):
         Longer description of the _prepare_inputs behavior and usage.
         
         Args:
-        batch (Any): Description of batch.
+            batch (Any): Description of batch.
         
         Returns:
-        Dict[str, torch.Tensor]: Description of the return value.
+            Dict[str, torch.Tensor]: Description of the return value.
         
         Raises:
-        Exception: Description of why this exception might be raised.
+            Exception: Description of why this exception might be raised.
         """
 
         inputs = {}
@@ -141,15 +141,15 @@ class ICDEvaluator(BaseEvaluator):
         Longer description of the evaluate behavior and usage.
         
         Args:
-        dataloader (Any): Description of dataloader.
-        temperature (Any): Description of temperature.
-        log_metrics (Any): Description of log_metrics.
+            dataloader (Any): Description of dataloader.
+            temperature (Any): Description of temperature.
+            log_metrics (Any): Description of log_metrics.
         
         Returns:
-        Dict[str, float]: Description of the return value.
+            Dict[str, float]: Description of the return value.
         
         Raises:
-        Exception: Description of why this exception might be raised.
+            Exception: Description of why this exception might be raised.
         """
 
         self.entity.model.eval()

@@ -18,8 +18,8 @@ class FeatureTokenizer(nn.Module):
     Longer description of the class behavior and usage.
     
     Attributes:
-    bias (Any): Description of bias.
-    weight (Any): Description of weight.
+        bias (Any): Description of bias.
+        weight (Any): Description of weight.
     """
 
     def __init__(self, num_features, d_token):
@@ -29,14 +29,14 @@ class FeatureTokenizer(nn.Module):
         Longer description of the __init__ behavior and usage.
         
         Args:
-        num_features (Any): Description of num_features.
-        d_token (Any): Description of d_token.
+            num_features (Any): Description of num_features.
+            d_token (Any): Description of d_token.
         
         Returns:
-        None: Description of the return value.
+            None: Description of the return value.
         
         Raises:
-        Exception: Description of why this exception might be raised.
+            Exception: Description of why this exception might be raised.
         """
 
         super().__init__()
@@ -58,13 +58,13 @@ class FeatureTokenizer(nn.Module):
         Longer description of the forward behavior and usage.
         
         Args:
-        x (Any): Description of x.
+            x (Any): Description of x.
         
         Returns:
-        Any: Description of the return value.
+            Any: Description of the return value.
         
         Raises:
-        Exception: Description of why this exception might be raised.
+            Exception: Description of why this exception might be raised.
         """
 
 
@@ -84,14 +84,14 @@ class FTTransformerICD(BaseICDClassifier):
     Longer description of the class behavior and usage.
     
     Attributes:
-    cls_token (Any): Description of cls_token.
-    d_token (Any): Description of d_token.
-    embedding_dim (Any): Description of embedding_dim.
-    final_mapping (Any): Description of final_mapping.
-    ln (Any): Description of ln.
-    num_features (Any): Description of num_features.
-    tokenizer (Any): Description of tokenizer.
-    transformer (Any): Description of transformer.
+        cls_token (Any): Description of cls_token.
+        d_token (Any): Description of d_token.
+        embedding_dim (Any): Description of embedding_dim.
+        final_mapping (Any): Description of final_mapping.
+        ln (Any): Description of ln.
+        num_features (Any): Description of num_features.
+        tokenizer (Any): Description of tokenizer.
+        transformer (Any): Description of transformer.
     """
 
     def __init__(
@@ -123,21 +123,21 @@ class FTTransformerICD(BaseICDClassifier):
         Longer description of the __init__ behavior and usage.
         
         Args:
-        num_classes (Any): Description of num_classes.
-        input_dim (Any): Description of input_dim.
-        seq_len (Any): Description of seq_len.
-        dropout (Any): Description of dropout.
-        d_token (Any): Description of d_token.
-        n_blocks (Any): Description of n_blocks.
-        n_heads (Any): Description of n_heads.
-        d_ffn (Any): Description of d_ffn.
-        kwargs (Any): Description of kwargs.
+            num_classes (Any): Description of num_classes.
+            input_dim (Any): Description of input_dim.
+            seq_len (Any): Description of seq_len.
+            dropout (Any): Description of dropout.
+            d_token (Any): Description of d_token.
+            n_blocks (Any): Description of n_blocks.
+            n_heads (Any): Description of n_heads.
+            d_ffn (Any): Description of d_ffn.
+            kwargs (Any): Description of kwargs.
         
         Returns:
-        None: Description of the return value.
+            None: Description of the return value.
         
         Raises:
-        Exception: Description of why this exception might be raised.
+            Exception: Description of why this exception might be raised.
         """
 
         super().__init__(num_classes, input_dim, seq_len, dropout)
@@ -211,15 +211,15 @@ class FTTransformerICD(BaseICDClassifier):
         Longer description of the forward behavior and usage.
         
         Args:
-        x_num (Any): Description of x_num.
-        return_embeddings (Any): Description of return_embeddings.
-        kwargs (Any): Description of kwargs.
+            x_num (Any): Description of x_num.
+            return_embeddings (Any): Description of return_embeddings.
+            kwargs (Any): Description of kwargs.
         
         Returns:
-        torch.Tensor: Description of the return value.
+            torch.Tensor: Description of the return value.
         
         Raises:
-        Exception: Description of why this exception might be raised.
+            Exception: Description of why this exception might be raised.
         """
 
 

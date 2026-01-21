@@ -1,0 +1,104 @@
+alanine aminotransferase
+albumin
+albumin ascites
+albumin pleural
+albumin urine
+alkaline phosphate
+anion gap
+aspartate aminotransferase
+basophils
+bicarbonate
+bilirubin
+blood urea nitrogen
+calcium
+calcium ionized
+calcium urine
+cardiac index
+cardiac output fick
+cardiac output thermodilution
+central venous pressure
+chloride
+chloride urine
+cholesterol
+cholesterol hdl
+cholesterol ldl
+co2
+co2 (etco2, pco2, etc.)
+creatinine
+creatinine ascites
+creatinine body fluid
+creatinine pleural
+creatinine urine
+diastolic blood pressure
+eosinophils
+fibrinogen
+fraction inspired oxygen
+fraction inspired oxygen set
+glascow coma scale total
+glucose
+heart rate
+height
+hematocrit
+hemoglobin
+lactate
+lactate dehydrogenase
+lactate dehydrogenase pleural
+lactic acid
+lymphocytes
+lymphocytes ascites
+lymphocytes atypical
+lymphocytes atypical csf
+lymphocytes body fluid
+lymphocytes percent
+lymphocytes pleural
+magnesium
+mean blood pressure
+mean corpuscular hemoglobin
+mean corpuscular hemoglobin concentration
+mean corpuscular volume
+monocytes
+monocytes csf
+neutrophils
+oxygen saturation
+partial pressure of carbon dioxide
+partial pressure of oxygen
+partial thromboplastin time
+peak inspiratory pressure
+ph
+ph urine
+phosphate
+phosphorous
+plateau pressure
+platelets
+positive end-expiratory pressure
+positive end-expiratory pressure set
+post void residual
+potassium
+potassium serum
+prothrombin time inr
+prothrombin time pt
+pulmonary artery pressure mean
+pulmonary artery pressure systolic
+pulmonary capillary wedge pressure
+red blood cell count
+red blood cell count ascites
+red blood cell count csf
+red blood cell count pleural
+red blood cell count urine
+respiratory rate
+respiratory rate set
+sodium
+systemic vascular resistance
+systolic blood pressure
+temperature
+tidal volume observed
+tidal volume set
+tidal volume spontaneous
+total protein
+total protein urine
+troponin-i
+troponin-t
+venous pvo2
+weight
+white blood cell count
+white blood cell count urine

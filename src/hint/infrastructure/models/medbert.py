@@ -22,11 +22,11 @@ class MedBERTClassifier(BaseICDClassifier):
     Longer description of the class behavior and usage.
     
     Attributes:
-    bert (Any): Description of bert.
-    dp (Any): Description of dp.
-    fc (Any): Description of fc.
-    hidden_size (Any): Description of hidden_size.
-    num_projection (Any): Description of num_projection.
+        bert (Any): Description of bert.
+        dp (Any): Description of dp.
+        fc (Any): Description of fc.
+        hidden_size (Any): Description of hidden_size.
+        num_projection (Any): Description of num_projection.
     """
 
     def __init__(self, num_classes: int, input_dim: int, seq_len: int, dropout: float = 0.3, bert_model_name: str = "Charangan/MedBERT", **kwargs):
@@ -36,18 +36,18 @@ class MedBERTClassifier(BaseICDClassifier):
         Longer description of the __init__ behavior and usage.
         
         Args:
-        num_classes (Any): Description of num_classes.
-        input_dim (Any): Description of input_dim.
-        seq_len (Any): Description of seq_len.
-        dropout (Any): Description of dropout.
-        bert_model_name (Any): Description of bert_model_name.
-        kwargs (Any): Description of kwargs.
+            num_classes (Any): Description of num_classes.
+            input_dim (Any): Description of input_dim.
+            seq_len (Any): Description of seq_len.
+            dropout (Any): Description of dropout.
+            bert_model_name (Any): Description of bert_model_name.
+            kwargs (Any): Description of kwargs.
         
         Returns:
-        None: Description of the return value.
+            None: Description of the return value.
         
         Raises:
-        Exception: Description of why this exception might be raised.
+            Exception: Description of why this exception might be raised.
         """
 
         super().__init__(num_classes, input_dim, seq_len, dropout)
@@ -83,16 +83,16 @@ class MedBERTClassifier(BaseICDClassifier):
         Longer description of the forward behavior and usage.
         
         Args:
-        input_ids (Any): Description of input_ids.
-        attention_mask (Any): Description of attention_mask.
-        x_num (Any): Description of x_num.
-        kwargs (Any): Description of kwargs.
+            input_ids (Any): Description of input_ids.
+            attention_mask (Any): Description of attention_mask.
+            x_num (Any): Description of x_num.
+            kwargs (Any): Description of kwargs.
         
         Returns:
-        torch.Tensor: Description of the return value.
+            torch.Tensor: Description of the return value.
         
         Raises:
-        Exception: Description of why this exception might be raised.
+            Exception: Description of why this exception might be raised.
         """
 
 
@@ -146,13 +146,13 @@ class MedBERTClassifier(BaseICDClassifier):
         Longer description of the set_backbone_grad behavior and usage.
         
         Args:
-        requires_grad (Any): Description of requires_grad.
+            requires_grad (Any): Description of requires_grad.
         
         Returns:
-        Any: Description of the return value.
+            Any: Description of the return value.
         
         Raises:
-        Exception: Description of why this exception might be raised.
+            Exception: Description of why this exception might be raised.
         """
 
         for p in self.bert.parameters():

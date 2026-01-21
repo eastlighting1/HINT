@@ -20,9 +20,9 @@ class TimeSeriesAggregator(PipelineComponent):
     Longer description of the class behavior and usage.
     
     Attributes:
-    cfg (Any): Description of cfg.
-    observer (Any): Description of observer.
-    registry (Any): Description of registry.
+        cfg (Any): Description of cfg.
+        observer (Any): Description of observer.
+        registry (Any): Description of registry.
     """
 
     def __init__(self, config: ETLConfig, registry: Registry, observer: TelemetryObserver):
@@ -32,15 +32,15 @@ class TimeSeriesAggregator(PipelineComponent):
         Longer description of the __init__ behavior and usage.
         
         Args:
-        config (Any): Description of config.
-        registry (Any): Description of registry.
-        observer (Any): Description of observer.
+            config (Any): Description of config.
+            registry (Any): Description of registry.
+            observer (Any): Description of observer.
         
         Returns:
-        None: Description of the return value.
+            None: Description of the return value.
         
         Raises:
-        Exception: Description of why this exception might be raised.
+            Exception: Description of why this exception might be raised.
         """
 
         self.cfg = config
@@ -58,13 +58,13 @@ class TimeSeriesAggregator(PipelineComponent):
         Longer description of the execute behavior and usage.
         
         Args:
-        None (None): This function does not accept arguments.
+            None (None): This function does not accept arguments.
         
         Returns:
-        None: Description of the return value.
+            None: Description of the return value.
         
         Raises:
-        Exception: Description of why this exception might be raised.
+            Exception: Description of why this exception might be raised.
         """
 
         raw_dir = Path(self.cfg.raw_dir)
@@ -178,14 +178,14 @@ class TimeSeriesAggregator(PipelineComponent):
             Longer description of the process_events behavior and usage.
             
             Args:
-            table (Any): Description of table.
-            time_col (Any): Description of time_col.
+                table (Any): Description of table.
+                time_col (Any): Description of time_col.
             
             Returns:
-            pl.LazyFrame: Description of the return value.
+                pl.LazyFrame: Description of the return value.
             
             Raises:
-            Exception: Description of why this exception might be raised.
+                Exception: Description of why this exception might be raised.
             """
 
             fpath = raw_dir / f"{table.upper()}.csv.gz"
@@ -491,13 +491,13 @@ class TimeSeriesAggregator(PipelineComponent):
         Longer description of the _to_datetime_iso behavior and usage.
         
         Args:
-        col (Any): Description of col.
+            col (Any): Description of col.
         
         Returns:
-        pl.Expr: Description of the return value.
+            pl.Expr: Description of the return value.
         
         Raises:
-        Exception: Description of why this exception might be raised.
+            Exception: Description of why this exception might be raised.
         """
 
         base = pl.col(col).str.to_datetime(time_unit="us", time_zone="UTC", strict=False)

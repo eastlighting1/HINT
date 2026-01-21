@@ -22,10 +22,10 @@ class BaseICDClassifier(nn.Module):
     Longer description of the class behavior and usage.
     
     Attributes:
-    dropout_val (Any): Description of dropout_val.
-    input_dim (Any): Description of input_dim.
-    num_classes (Any): Description of num_classes.
-    seq_len (Any): Description of seq_len.
+        dropout_val (Any): Description of dropout_val.
+        input_dim (Any): Description of input_dim.
+        num_classes (Any): Description of num_classes.
+        seq_len (Any): Description of seq_len.
     """
 
     def __init__(self, num_classes: int, input_dim: int, seq_len: int, dropout: float = 0.3, **kwargs):
@@ -35,17 +35,17 @@ class BaseICDClassifier(nn.Module):
         Longer description of the __init__ behavior and usage.
         
         Args:
-        num_classes (Any): Description of num_classes.
-        input_dim (Any): Description of input_dim.
-        seq_len (Any): Description of seq_len.
-        dropout (Any): Description of dropout.
-        kwargs (Any): Description of kwargs.
+            num_classes (Any): Description of num_classes.
+            input_dim (Any): Description of input_dim.
+            seq_len (Any): Description of seq_len.
+            dropout (Any): Description of dropout.
+            kwargs (Any): Description of kwargs.
         
         Returns:
-        None: Description of the return value.
+            None: Description of the return value.
         
         Raises:
-        Exception: Description of why this exception might be raised.
+            Exception: Description of why this exception might be raised.
         """
 
         super().__init__()
@@ -75,17 +75,17 @@ class BaseICDClassifier(nn.Module):
         Longer description of the forward behavior and usage.
         
         Args:
-        input_ids (Any): Description of input_ids.
-        attention_mask (Any): Description of attention_mask.
-        x_num (Any): Description of x_num.
-        return_embeddings (Any): Description of return_embeddings.
-        kwargs (Any): Description of kwargs.
+            input_ids (Any): Description of input_ids.
+            attention_mask (Any): Description of attention_mask.
+            x_num (Any): Description of x_num.
+            return_embeddings (Any): Description of return_embeddings.
+            kwargs (Any): Description of kwargs.
         
         Returns:
-        torch.Tensor: Description of the return value.
+            torch.Tensor: Description of the return value.
         
         Raises:
-        Exception: Description of why this exception might be raised.
+            Exception: Description of why this exception might be raised.
         """
 
         raise NotImplementedError
@@ -99,13 +99,13 @@ class TCNClassifier(nn.Module):
     Longer description of the class behavior and usage.
     
     Attributes:
-    cat_branches (Any): Description of cat_branches.
-    cat_embeddings (Any): Description of cat_embeddings.
-    embed_dim (Any): Description of embed_dim.
-    head (Any): Description of head.
-    icd_dim (Any): Description of icd_dim.
-    icd_projector (Any): Description of icd_projector.
-    numeric_branch (Any): Description of numeric_branch.
+        cat_branches (Any): Description of cat_branches.
+        cat_embeddings (Any): Description of cat_embeddings.
+        embed_dim (Any): Description of embed_dim.
+        head (Any): Description of head.
+        icd_dim (Any): Description of icd_dim.
+        icd_projector (Any): Description of icd_projector.
+        numeric_branch (Any): Description of numeric_branch.
     """
 
     def __init__(self, in_chs: Union[int, Sequence[int]], n_cls: int, vocab_sizes: List[int], icd_dim: int = 0, embed_dim: int = 128, cat_embed_dim: int = 32, head_drop: float = 0.3, tcn_drop: float = 0.2, kernel: int = 5, layers: int = 5, use_icd_gating: bool = True) -> None:
@@ -115,22 +115,22 @@ class TCNClassifier(nn.Module):
         Longer description of the __init__ behavior and usage.
         
         Args:
-        in_chs (Any): Description of in_chs.
-        n_cls (Any): Description of n_cls.
-        vocab_sizes (Any): Description of vocab_sizes.
-        icd_dim (Any): Description of icd_dim.
-        embed_dim (Any): Description of embed_dim.
-        cat_embed_dim (Any): Description of cat_embed_dim.
-        head_drop (Any): Description of head_drop.
-        tcn_drop (Any): Description of tcn_drop.
-        kernel (Any): Description of kernel.
-        layers (Any): Description of layers.
+            in_chs (Any): Description of in_chs.
+            n_cls (Any): Description of n_cls.
+            vocab_sizes (Any): Description of vocab_sizes.
+            icd_dim (Any): Description of icd_dim.
+            embed_dim (Any): Description of embed_dim.
+            cat_embed_dim (Any): Description of cat_embed_dim.
+            head_drop (Any): Description of head_drop.
+            tcn_drop (Any): Description of tcn_drop.
+            kernel (Any): Description of kernel.
+            layers (Any): Description of layers.
         
         Returns:
-        None: Description of the return value.
+            None: Description of the return value.
         
         Raises:
-        Exception: Description of why this exception might be raised.
+            Exception: Description of why this exception might be raised.
         """
 
         super().__init__()
@@ -233,15 +233,15 @@ class TCNClassifier(nn.Module):
         Longer description of the forward behavior and usage.
         
         Args:
-        x_num (Any): Description of x_num.
-        x_cat (Any): Description of x_cat.
-        x_icd (Any): Description of x_icd.
+            x_num (Any): Description of x_num.
+            x_cat (Any): Description of x_cat.
+            x_icd (Any): Description of x_icd.
         
         Returns:
-        torch.Tensor: Description of the return value.
+            torch.Tensor: Description of the return value.
         
         Raises:
-        Exception: Description of why this exception might be raised.
+            Exception: Description of why this exception might be raised.
         """
 
         num_out = self.numeric_branch(x_num)
@@ -313,13 +313,13 @@ def get_network_class(model_name: str) -> type:
     Longer description of the get_network_class behavior and usage.
     
     Args:
-    model_name (Any): Description of model_name.
+        model_name (Any): Description of model_name.
     
     Returns:
-    type: Description of the return value.
+        type: Description of the return value.
     
     Raises:
-    Exception: Description of why this exception might be raised.
+        Exception: Description of why this exception might be raised.
     """
 
     from .models.medbert import MedBERTClassifier

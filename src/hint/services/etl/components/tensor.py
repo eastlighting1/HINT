@@ -19,7 +19,7 @@ from sklearn.model_selection import train_test_split
 
 from ....foundation.interfaces import PipelineComponent, Registry, TelemetryObserver
 
-from ....domain.vo import ETLConfig, ICDConfig, CNNConfig
+from ....domain.vo import ETLConfig, ICDConfig, InterventionConfig
 
 
 
@@ -30,38 +30,38 @@ class TensorConverter(PipelineComponent):
     Longer description of the class behavior and usage.
     
     Attributes:
-    cnn_cfg (Any): Description of cnn_cfg.
-    etl_cfg (Any): Description of etl_cfg.
-    icd_cfg (Any): Description of icd_cfg.
-    observer (Any): Description of observer.
-    registry (Any): Description of registry.
+        intervention_cfg (Any): Description of intervention_cfg.
+        etl_cfg (Any): Description of etl_cfg.
+        icd_cfg (Any): Description of icd_cfg.
+        observer (Any): Description of observer.
+        registry (Any): Description of registry.
     """
 
 
 
-    def __init__(self, etl_config: ETLConfig, cnn_config: CNNConfig, icd_config: ICDConfig, registry: Registry, observer: TelemetryObserver):
+    def __init__(self, etl_config: ETLConfig, intervention_config: InterventionConfig, icd_config: ICDConfig, registry: Registry, observer: TelemetryObserver):
 
         """Summary of __init__.
         
         Longer description of the __init__ behavior and usage.
         
         Args:
-        etl_config (Any): Description of etl_config.
-        cnn_config (Any): Description of cnn_config.
-        icd_config (Any): Description of icd_config.
-        registry (Any): Description of registry.
-        observer (Any): Description of observer.
+            etl_config (Any): Description of etl_config.
+            intervention_config (Any): Description of intervention_config.
+            icd_config (Any): Description of icd_config.
+            registry (Any): Description of registry.
+            observer (Any): Description of observer.
         
         Returns:
-        None: Description of the return value.
+            None: Description of the return value.
         
         Raises:
-        Exception: Description of why this exception might be raised.
+            Exception: Description of why this exception might be raised.
         """
 
         self.etl_cfg = etl_config
 
-        self.cnn_cfg = cnn_config
+        self.intervention_cfg = intervention_config
 
         self.icd_cfg = icd_config
 
@@ -78,13 +78,13 @@ class TensorConverter(PipelineComponent):
         Longer description of the execute behavior and usage.
         
         Args:
-        None (None): This function does not accept arguments.
+            None (None): This function does not accept arguments.
         
         Returns:
-        None: Description of the return value.
+            None: Description of the return value.
         
         Raises:
-        Exception: Description of why this exception might be raised.
+            Exception: Description of why this exception might be raised.
         """
 
         proc_dir = Path(self.etl_cfg.proc_dir)
@@ -187,7 +187,7 @@ class TensorConverter(PipelineComponent):
 
 
 
-        prefixes = (self.icd_cfg.data.input_h5_prefix, self.cnn_cfg.data.input_h5_prefix)
+        prefixes = (self.icd_cfg.data.input_h5_prefix, self.intervention_cfg.data.input_h5_prefix)
 
 
 
@@ -206,20 +206,20 @@ class TensorConverter(PipelineComponent):
         Longer description of the _process_split behavior and usage.
         
         Args:
-        df (Any): Description of df.
-        name (Any): Description of name.
-        v_cols (Any): Description of v_cols.
-        m_cols (Any): Description of m_cols.
-        d_cols (Any): Description of d_cols.
-        out_dir (Any): Description of out_dir.
-        prefixes (Any): Description of prefixes.
-        stats (Any): Description of stats.
+            df (Any): Description of df.
+            name (Any): Description of name.
+            v_cols (Any): Description of v_cols.
+            m_cols (Any): Description of m_cols.
+            d_cols (Any): Description of d_cols.
+            out_dir (Any): Description of out_dir.
+            prefixes (Any): Description of prefixes.
+            stats (Any): Description of stats.
         
         Returns:
-        Any: Description of the return value.
+            Any: Description of the return value.
         
         Raises:
-        Exception: Description of why this exception might be raised.
+            Exception: Description of why this exception might be raised.
         """
 
         if df.height == 0:
@@ -246,7 +246,7 @@ class TensorConverter(PipelineComponent):
 
         n_samples = df.select("ICUSTAY_ID").n_unique()
 
-        seq_len = self.cnn_cfg.seq_len
+        seq_len = self.intervention_cfg.seq_len
 
         n_feats = len(v_cols)
 
@@ -256,7 +256,7 @@ class TensorConverter(PipelineComponent):
 
         icd_path = out_dir / f"{prefixes[0]}_{name}.h5"
 
-        cnn_path = out_dir / f"{prefixes[1]}_{name}.h5"
+        intervention_path = out_dir / f"{prefixes[1]}_{name}.h5"
 
 
 
@@ -443,7 +443,7 @@ class TensorConverter(PipelineComponent):
 
 
 
-        with h5py.File(cnn_path, "w") as f:
+        with h5py.File(intervention_path, "w") as f:
 
             f.create_dataset("X_num", data=X_num)
 

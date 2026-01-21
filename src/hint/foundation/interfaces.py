@@ -18,7 +18,7 @@ class TelemetryObserver(Protocol):
     Longer description of the class behavior and usage.
     
     Attributes:
-    None (None): No documented attributes.
+        None (None): No documented attributes.
     """
 
     def log(self, level: str, message: str) -> None:
@@ -28,14 +28,14 @@ class TelemetryObserver(Protocol):
         Longer description of the log behavior and usage.
         
         Args:
-        level (Any): Description of level.
-        message (Any): Description of message.
+            level (Any): Description of level.
+            message (Any): Description of message.
         
         Returns:
-        None: Description of the return value.
+            None: Description of the return value.
         
         Raises:
-        Exception: Description of why this exception might be raised.
+            Exception: Description of why this exception might be raised.
         """
 
         ...
@@ -49,15 +49,15 @@ class TelemetryObserver(Protocol):
         Longer description of the track_metric behavior and usage.
         
         Args:
-        name (Any): Description of name.
-        value (Any): Description of value.
-        step (Any): Description of step.
+            name (Any): Description of name.
+            value (Any): Description of value.
+            step (Any): Description of step.
         
         Returns:
-        None: Description of the return value.
+            None: Description of the return value.
         
         Raises:
-        Exception: Description of why this exception might be raised.
+            Exception: Description of why this exception might be raised.
         """
 
         ...
@@ -71,14 +71,14 @@ class TelemetryObserver(Protocol):
         Longer description of the create_progress behavior and usage.
         
         Args:
-        desc (Any): Description of desc.
-        total (Any): Description of total.
+            desc (Any): Description of desc.
+            total (Any): Description of total.
         
         Returns:
-        Any: Description of the return value.
+            Any: Description of the return value.
         
         Raises:
-        Exception: Description of why this exception might be raised.
+            Exception: Description of why this exception might be raised.
         """
 
         ...
@@ -92,7 +92,7 @@ class Registry(ABC):
     Longer description of the class behavior and usage.
     
     Attributes:
-    None (None): No documented attributes.
+        None (None): No documented attributes.
     """
 
     @abstractmethod
@@ -104,15 +104,15 @@ class Registry(ABC):
         Longer description of the save_model behavior and usage.
         
         Args:
-        state_dict (Any): Description of state_dict.
-        name (Any): Description of name.
-        tag (Any): Description of tag.
+            state_dict (Any): Description of state_dict.
+            name (Any): Description of name.
+            tag (Any): Description of tag.
         
         Returns:
-        Path: Description of the return value.
+            Path: Description of the return value.
         
         Raises:
-        Exception: Description of why this exception might be raised.
+            Exception: Description of why this exception might be raised.
         """
 
         raise NotImplementedError
@@ -128,15 +128,15 @@ class Registry(ABC):
         Longer description of the load_model behavior and usage.
         
         Args:
-        name (Any): Description of name.
-        tag (Any): Description of tag.
-        device (Any): Description of device.
+            name (Any): Description of name.
+            tag (Any): Description of tag.
+            device (Any): Description of device.
         
         Returns:
-        Dict[str, Any]: Description of the return value.
+            Dict[str, Any]: Description of the return value.
         
         Raises:
-        Exception: Description of why this exception might be raised.
+            Exception: Description of why this exception might be raised.
         """
 
         raise NotImplementedError
@@ -152,14 +152,14 @@ class Registry(ABC):
         Longer description of the save_dataframe behavior and usage.
         
         Args:
-        df (Any): Description of df.
-        name (Any): Description of name.
+            df (Any): Description of df.
+            name (Any): Description of name.
         
         Returns:
-        Path: Description of the return value.
+            Path: Description of the return value.
         
         Raises:
-        Exception: Description of why this exception might be raised.
+            Exception: Description of why this exception might be raised.
         """
 
         raise NotImplementedError
@@ -175,13 +175,13 @@ class Registry(ABC):
         Longer description of the load_dataframe behavior and usage.
         
         Args:
-        name (Any): Description of name.
+            name (Any): Description of name.
         
         Returns:
-        Any: Description of the return value.
+            Any: Description of the return value.
         
         Raises:
-        Exception: Description of why this exception might be raised.
+            Exception: Description of why this exception might be raised.
         """
 
         raise NotImplementedError
@@ -197,14 +197,14 @@ class Registry(ABC):
         Longer description of the save_json behavior and usage.
         
         Args:
-        data (Any): Description of data.
-        name (Any): Description of name.
+            data (Any): Description of data.
+            name (Any): Description of name.
         
         Returns:
-        Path: Description of the return value.
+            Path: Description of the return value.
         
         Raises:
-        Exception: Description of why this exception might be raised.
+            Exception: Description of why this exception might be raised.
         """
 
         raise NotImplementedError
@@ -220,13 +220,13 @@ class Registry(ABC):
         Longer description of the load_json behavior and usage.
         
         Args:
-        name (Any): Description of name.
+            name (Any): Description of name.
         
         Returns:
-        Dict[str, Any]: Description of the return value.
+            Dict[str, Any]: Description of the return value.
         
         Raises:
-        Exception: Description of why this exception might be raised.
+            Exception: Description of why this exception might be raised.
         """
 
         raise NotImplementedError
@@ -242,13 +242,13 @@ class Registry(ABC):
         Longer description of the get_artifact_path behavior and usage.
         
         Args:
-        name (Any): Description of name.
+            name (Any): Description of name.
         
         Returns:
-        Path: Description of the return value.
+            Path: Description of the return value.
         
         Raises:
-        Exception: Description of why this exception might be raised.
+            Exception: Description of why this exception might be raised.
         """
 
         raise NotImplementedError
@@ -262,7 +262,7 @@ class PipelineComponent(ABC):
     Longer description of the class behavior and usage.
     
     Attributes:
-    None (None): No documented attributes.
+        None (None): No documented attributes.
     """
 
     @abstractmethod
@@ -274,13 +274,13 @@ class PipelineComponent(ABC):
         Longer description of the execute behavior and usage.
         
         Args:
-        None (None): This function does not accept arguments.
+            None (None): This function does not accept arguments.
         
         Returns:
-        None: Description of the return value.
+            None: Description of the return value.
         
         Raises:
-        Exception: Description of why this exception might be raised.
+            Exception: Description of why this exception might be raised.
         """
 
         raise NotImplementedError
@@ -294,7 +294,7 @@ class StreamingSource(ABC):
     Longer description of the class behavior and usage.
     
     Attributes:
-    None (None): No documented attributes.
+        None (None): No documented attributes.
     """
 
     @abstractmethod
@@ -306,13 +306,13 @@ class StreamingSource(ABC):
         Longer description of the __len__ behavior and usage.
         
         Args:
-        None (None): This function does not accept arguments.
+            None (None): This function does not accept arguments.
         
         Returns:
-        int: Description of the return value.
+            int: Description of the return value.
         
         Raises:
-        Exception: Description of why this exception might be raised.
+            Exception: Description of why this exception might be raised.
         """
 
         raise NotImplementedError
@@ -328,13 +328,13 @@ class StreamingSource(ABC):
         Longer description of the __iter__ behavior and usage.
         
         Args:
-        None (None): This function does not accept arguments.
+            None (None): This function does not accept arguments.
         
         Returns:
-        Any: Description of the return value.
+            Any: Description of the return value.
         
         Raises:
-        Exception: Description of why this exception might be raised.
+            Exception: Description of why this exception might be raised.
         """
 
         raise NotImplementedError

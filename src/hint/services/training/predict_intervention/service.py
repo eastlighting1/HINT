@@ -34,7 +34,7 @@ from ..common.base import BaseDomainService
 
 from ....domain.entities import InterventionModelEntity
 
-from ....domain.vo import CNNConfig
+from ....domain.vo import InterventionConfig
 
 from ....foundation.interfaces import TelemetryObserver, Registry
 
@@ -51,37 +51,37 @@ class InterventionService(BaseDomainService):
     Longer description of the class behavior and usage.
     
     Attributes:
-    cfg (Any): Description of cfg.
-    device (Any): Description of device.
-    entity (Any): Description of entity.
-    registry (Any): Description of registry.
-    test_ds (Any): Description of test_ds.
-    train_ds (Any): Description of train_ds.
-    val_ds (Any): Description of val_ds.
+        cfg (Any): Description of cfg.
+        device (Any): Description of device.
+        entity (Any): Description of entity.
+        registry (Any): Description of registry.
+        test_ds (Any): Description of test_ds.
+        train_ds (Any): Description of train_ds.
+        val_ds (Any): Description of val_ds.
     """
 
 
 
-    def __init__(self, config: CNNConfig, registry: Registry, observer: TelemetryObserver, entity: InterventionModelEntity, train_dataset: Dataset, val_dataset: Dataset, test_dataset: Optional[Dataset] = None):
+    def __init__(self, config: InterventionConfig, registry: Registry, observer: TelemetryObserver, entity: InterventionModelEntity, train_dataset: Dataset, val_dataset: Dataset, test_dataset: Optional[Dataset] = None):
 
         """Summary of __init__.
         
         Longer description of the __init__ behavior and usage.
         
         Args:
-        config (Any): Description of config.
-        registry (Any): Description of registry.
-        observer (Any): Description of observer.
-        entity (Any): Description of entity.
-        train_dataset (Any): Description of train_dataset.
-        val_dataset (Any): Description of val_dataset.
-        test_dataset (Any): Description of test_dataset.
+            config (Any): Description of config.
+            registry (Any): Description of registry.
+            observer (Any): Description of observer.
+            entity (Any): Description of entity.
+            train_dataset (Any): Description of train_dataset.
+            val_dataset (Any): Description of val_dataset.
+            test_dataset (Any): Description of test_dataset.
         
         Returns:
-        None: Description of the return value.
+            None: Description of the return value.
         
         Raises:
-        Exception: Description of why this exception might be raised.
+            Exception: Description of why this exception might be raised.
         """
 
         super().__init__(observer)
@@ -109,13 +109,13 @@ class InterventionService(BaseDomainService):
         Longer description of the execute behavior and usage.
         
         Args:
-        None (None): This function does not accept arguments.
+            None (None): This function does not accept arguments.
         
         Returns:
-        None: Description of the return value.
+            None: Description of the return value.
         
         Raises:
-        Exception: Description of why this exception might be raised.
+            Exception: Description of why this exception might be raised.
         """
 
 

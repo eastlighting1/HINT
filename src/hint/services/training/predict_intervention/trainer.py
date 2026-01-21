@@ -16,7 +16,7 @@ from ..common.base import BaseTrainer, BaseEvaluator
 
 from ....domain.entities import InterventionModelEntity
 
-from ....domain.vo import CNNConfig
+from ....domain.vo import InterventionConfig
 
 
 
@@ -27,33 +27,33 @@ class InterventionTrainer(BaseTrainer):
     Longer description of the class behavior and usage.
     
     Attributes:
-    cfg (Any): Description of cfg.
-    class_weights (Any): Description of class_weights.
-    entity (Any): Description of entity.
-    gamma (Any): Description of gamma.
+        cfg (Any): Description of cfg.
+        class_weights (Any): Description of class_weights.
+        entity (Any): Description of entity.
+        gamma (Any): Description of gamma.
     """
 
 
 
-    def __init__(self, config: CNNConfig, entity: InterventionModelEntity, registry, observer, device, class_weights=None):
+    def __init__(self, config: InterventionConfig, entity: InterventionModelEntity, registry, observer, device, class_weights=None):
 
         """Summary of __init__.
         
         Longer description of the __init__ behavior and usage.
         
         Args:
-        config (Any): Description of config.
-        entity (Any): Description of entity.
-        registry (Any): Description of registry.
-        observer (Any): Description of observer.
-        device (Any): Description of device.
-        class_weights (Any): Description of class_weights.
+            config (Any): Description of config.
+            entity (Any): Description of entity.
+            registry (Any): Description of registry.
+            observer (Any): Description of observer.
+            device (Any): Description of device.
+            class_weights (Any): Description of class_weights.
         
         Returns:
-        None: Description of the return value.
+            None: Description of the return value.
         
         Raises:
-        Exception: Description of why this exception might be raised.
+            Exception: Description of why this exception might be raised.
         """
 
         super().__init__(registry, observer, device)
@@ -75,14 +75,14 @@ class InterventionTrainer(BaseTrainer):
         Longer description of the focal_loss behavior and usage.
         
         Args:
-        logits (Any): Description of logits.
-        targets (Any): Description of targets.
+            logits (Any): Description of logits.
+            targets (Any): Description of targets.
         
         Returns:
-        torch.Tensor: Description of the return value.
+            torch.Tensor: Description of the return value.
         
         Raises:
-        Exception: Description of why this exception might be raised.
+            Exception: Description of why this exception might be raised.
         """
 
         ce_loss = F.cross_entropy(logits, targets, reduction='none', ignore_index=-100)
@@ -124,13 +124,13 @@ class InterventionTrainer(BaseTrainer):
         Longer description of the _prepare_inputs behavior and usage.
         
         Args:
-        batch (Any): Description of batch.
+            batch (Any): Description of batch.
         
         Returns:
-        dict: Description of the return value.
+            dict: Description of the return value.
         
         Raises:
-        Exception: Description of why this exception might be raised.
+            Exception: Description of why this exception might be raised.
         """
 
         x_num = batch.x_num.to(self.device).float()
@@ -168,13 +168,13 @@ class InterventionTrainer(BaseTrainer):
         Longer description of the _select_last_valid behavior and usage.
         
         Args:
-        y (Any): Description of y.
+            y (Any): Description of y.
         
         Returns:
-        torch.Tensor: Description of the return value.
+            torch.Tensor: Description of the return value.
         
         Raises:
-        Exception: Description of why this exception might be raised.
+            Exception: Description of why this exception might be raised.
         """
 
         if y.dim() == 1:
@@ -206,15 +206,15 @@ class InterventionTrainer(BaseTrainer):
         Longer description of the train behavior and usage.
         
         Args:
-        train_loader (Any): Description of train_loader.
-        val_loader (Any): Description of val_loader.
-        evaluator (Any): Description of evaluator.
+            train_loader (Any): Description of train_loader.
+            val_loader (Any): Description of val_loader.
+            evaluator (Any): Description of evaluator.
         
         Returns:
-        None: Description of the return value.
+            None: Description of the return value.
         
         Raises:
-        Exception: Description of why this exception might be raised.
+            Exception: Description of why this exception might be raised.
         """
 
         self.entity.to(self.device)
@@ -352,15 +352,15 @@ class InterventionTrainer(BaseTrainer):
         Longer description of the _train_epoch behavior and usage.
         
         Args:
-        epoch (Any): Description of epoch.
-        loader (Any): Description of loader.
-        optimizer (Any): Description of optimizer.
+            epoch (Any): Description of epoch.
+            loader (Any): Description of loader.
+            optimizer (Any): Description of optimizer.
         
         Returns:
-        None: Description of the return value.
+            None: Description of the return value.
         
         Raises:
-        Exception: Description of why this exception might be raised.
+            Exception: Description of why this exception might be raised.
         """
 
         self.entity.network.train()

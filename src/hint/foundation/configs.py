@@ -10,7 +10,7 @@ from hydra.core.global_hydra import GlobalHydra
 from omegaconf import DictConfig, OmegaConf
 
 from hint.foundation.dtos import AppContext
-from hint.domain.vo import ETLConfig, ICDConfig, CNNConfig
+from hint.domain.vo import ETLConfig, ICDConfig, InterventionConfig
 
 
 
@@ -21,8 +21,8 @@ class HydraConfigLoader:
     Longer description of the class behavior and usage.
     
     Attributes:
-    config_name (Any): Description of config_name.
-    config_path (Any): Description of config_path.
+        config_name (Any): Description of config_name.
+        config_path (Any): Description of config_path.
     """
 
     def __init__(self, config_name: str = "config", config_path: str = "configs"):
@@ -32,14 +32,14 @@ class HydraConfigLoader:
         Longer description of the __init__ behavior and usage.
         
         Args:
-        config_name (Any): Description of config_name.
-        config_path (Any): Description of config_path.
+            config_name (Any): Description of config_name.
+            config_path (Any): Description of config_path.
         
         Returns:
-        None: Description of the return value.
+            None: Description of the return value.
         
         Raises:
-        Exception: Description of why this exception might be raised.
+            Exception: Description of why this exception might be raised.
         """
 
         self.config_name = config_name
@@ -55,13 +55,13 @@ class HydraConfigLoader:
         Longer description of the load behavior and usage.
         
         Args:
-        None (None): This function does not accept arguments.
+            None (None): This function does not accept arguments.
         
         Returns:
-        DictConfig: Description of the return value.
+            DictConfig: Description of the return value.
         
         Raises:
-        Exception: Description of why this exception might be raised.
+            Exception: Description of why this exception might be raised.
         """
 
         GlobalHydra.instance().clear()
@@ -97,13 +97,13 @@ def load_app_context(cfg: DictConfig) -> AppContext:
     Longer description of the load_app_context behavior and usage.
     
     Args:
-    cfg (Any): Description of cfg.
+        cfg (Any): Description of cfg.
     
     Returns:
-    AppContext: Description of the return value.
+        AppContext: Description of the return value.
     
     Raises:
-    Exception: Description of why this exception might be raised.
+        Exception: Description of why this exception might be raised.
     """
 
     etl_raw = OmegaConf.to_container(cfg.get("etl", {}), resolve=True) or {}
@@ -124,9 +124,9 @@ def load_app_context(cfg: DictConfig) -> AppContext:
 
     icd_cfg = ICDConfig(**icd_raw)
 
-    cnn_raw = OmegaConf.to_container(cfg.get("cnn", {}), resolve=True) or {}
+    intervention_raw = OmegaConf.to_container(cfg.get("intervention", {}), resolve=True) or {}
 
-    cnn_cfg = CNNConfig(**cnn_raw)
+    intervention_cfg = InterventionConfig(**intervention_raw)
 
     return AppContext(
 
@@ -134,7 +134,7 @@ def load_app_context(cfg: DictConfig) -> AppContext:
 
         icd=icd_cfg,
 
-        cnn=cnn_cfg,
+        intervention=intervention_cfg,
 
         mode=cfg.get("mode", "train"),
 

@@ -206,17 +206,10 @@ marimo/_static/
 marimo/_lsp/
 __marimo__/
 
-data/
-resources/
-outputs/
-artifacts/
-nohup.out
-design.md
-requirements.md
-tasks.md
-output123.txt
-all_schemas.txt
-example.py
-mismatches.txt
-test.csv
-logging_strategy.txt
+# HINT
+Analyzer/Report/*.md
+!Analyzer/Report/README.md
+
+artifacts
+data
+outputs

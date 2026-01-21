@@ -11,7 +11,7 @@ class HINTError(Exception):
     Longer description of the class behavior and usage.
     
     Attributes:
-    None (None): No documented attributes.
+        None (None): No documented attributes.
     """
 
     pass
@@ -25,7 +25,7 @@ class ConfigurationError(HINTError):
     Longer description of the class behavior and usage.
     
     Attributes:
-    None (None): No documented attributes.
+        None (None): No documented attributes.
     """
 
     pass
@@ -39,7 +39,7 @@ class PipelineError(HINTError):
     Longer description of the class behavior and usage.
     
     Attributes:
-    None (None): No documented attributes.
+        None (None): No documented attributes.
     """
 
     pass
@@ -53,7 +53,7 @@ class DataError(HINTError):
     Longer description of the class behavior and usage.
     
     Attributes:
-    None (None): No documented attributes.
+        None (None): No documented attributes.
     """
 
     pass
@@ -67,7 +67,7 @@ class ModelError(HINTError):
     Longer description of the class behavior and usage.
     
     Attributes:
-    None (None): No documented attributes.
+        None (None): No documented attributes.
     """
 
     pass

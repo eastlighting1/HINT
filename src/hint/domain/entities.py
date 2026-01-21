@@ -19,11 +19,11 @@ class TrainableEntity(ABC):
     Longer description of the class behavior and usage.
     
     Attributes:
-    best_metric (Any): Description of best_metric.
-    epoch (Any): Description of epoch.
-    global_step (Any): Description of global_step.
-    name (Any): Description of name.
-    network (Any): Description of network.
+        best_metric (Any): Description of best_metric.
+        epoch (Any): Description of epoch.
+        global_step (Any): Description of global_step.
+        name (Any): Description of name.
+        network (Any): Description of network.
     """
 
     def __init__(self, name: str):
@@ -33,13 +33,13 @@ class TrainableEntity(ABC):
         Longer description of the __init__ behavior and usage.
         
         Args:
-        name (Any): Description of name.
+            name (Any): Description of name.
         
         Returns:
-        None: Description of the return value.
+            None: Description of the return value.
         
         Raises:
-        Exception: Description of why this exception might be raised.
+            Exception: Description of why this exception might be raised.
         """
 
         self.name = name
@@ -63,13 +63,13 @@ class TrainableEntity(ABC):
         Longer description of the state_dict behavior and usage.
         
         Args:
-        None (None): This function does not accept arguments.
+            None (None): This function does not accept arguments.
         
         Returns:
-        Dict[str, Any]: Description of the return value.
+            Dict[str, Any]: Description of the return value.
         
         Raises:
-        Exception: Description of why this exception might be raised.
+            Exception: Description of why this exception might be raised.
         """
 
         raise NotImplementedError
@@ -85,13 +85,13 @@ class TrainableEntity(ABC):
         Longer description of the load_state_dict behavior and usage.
         
         Args:
-        state (Any): Description of state.
+            state (Any): Description of state.
         
         Returns:
-        None: Description of the return value.
+            None: Description of the return value.
         
         Raises:
-        Exception: Description of why this exception might be raised.
+            Exception: Description of why this exception might be raised.
         """
 
         raise NotImplementedError
@@ -105,10 +105,10 @@ class ICDModelEntity(TrainableEntity):
     Longer description of the class behavior and usage.
     
     Attributes:
-    best_metric (Any): Description of best_metric.
-    epoch (Any): Description of epoch.
-    model (Any): Description of model.
-    network (Any): Description of network.
+        best_metric (Any): Description of best_metric.
+        epoch (Any): Description of epoch.
+        model (Any): Description of model.
+        network (Any): Description of network.
     """
 
     def __init__(self, model: nn.Module, num_classes: Optional[int] = None):
@@ -118,13 +118,13 @@ class ICDModelEntity(TrainableEntity):
         Longer description of the __init__ behavior and usage.
         
         Args:
-        model (Any): Description of model.
+            model (Any): Description of model.
         
         Returns:
-        None: Description of the return value.
+            None: Description of the return value.
         
         Raises:
-        Exception: Description of why this exception might be raised.
+            Exception: Description of why this exception might be raised.
         """
 
         super().__init__("icd_entity")
@@ -145,13 +145,13 @@ class ICDModelEntity(TrainableEntity):
         Longer description of the state_dict behavior and usage.
         
         Args:
-        None (None): This function does not accept arguments.
+            None (None): This function does not accept arguments.
         
         Returns:
-        Dict[str, Any]: Description of the return value.
+            Dict[str, Any]: Description of the return value.
         
         Raises:
-        Exception: Description of why this exception might be raised.
+            Exception: Description of why this exception might be raised.
         """
 
         return {
@@ -175,13 +175,13 @@ class ICDModelEntity(TrainableEntity):
         Longer description of the load_state_dict behavior and usage.
         
         Args:
-        state (Any): Description of state.
+            state (Any): Description of state.
         
         Returns:
-        None: Description of the return value.
+            None: Description of the return value.
         
         Raises:
-        Exception: Description of why this exception might be raised.
+            Exception: Description of why this exception might be raised.
         """
 
         self.model.load_state_dict(state["model"])
@@ -202,13 +202,13 @@ class ICDModelEntity(TrainableEntity):
         Longer description of the to behavior and usage.
         
         Args:
-        device (Any): Description of device.
+            device (Any): Description of device.
         
         Returns:
-        None: Description of the return value.
+            None: Description of the return value.
         
         Raises:
-        Exception: Description of why this exception might be raised.
+            Exception: Description of why this exception might be raised.
         """
 
         self.model.to(device)
@@ -222,14 +222,14 @@ class ICDModelEntity(TrainableEntity):
         Longer description of the forward behavior and usage.
         
         Args:
-        args (Any): Description of args.
-        kwargs (Any): Description of kwargs.
+            args (Any): Description of args.
+            kwargs (Any): Description of kwargs.
         
         Returns:
-        Any: Description of the return value.
+            Any: Description of the return value.
         
         Raises:
-        Exception: Description of why this exception might be raised.
+            Exception: Description of why this exception might be raised.
         """
 
         return self.model(*args, **kwargs)
@@ -243,12 +243,12 @@ class InterventionModelEntity(TrainableEntity):
     Longer description of the class behavior and usage.
     
     Attributes:
-    best_metric (Any): Description of best_metric.
-    ema (Any): Description of ema.
-    epoch (Any): Description of epoch.
-    network (Any): Description of network.
-    temperature (Any): Description of temperature.
-    thresholds (Any): Description of thresholds.
+        best_metric (Any): Description of best_metric.
+        ema (Any): Description of ema.
+        epoch (Any): Description of epoch.
+        network (Any): Description of network.
+        temperature (Any): Description of temperature.
+        thresholds (Any): Description of thresholds.
     """
 
     def __init__(self, network: nn.Module, ema_decay: float = 0.999):
@@ -258,14 +258,14 @@ class InterventionModelEntity(TrainableEntity):
         Longer description of the __init__ behavior and usage.
         
         Args:
-        network (Any): Description of network.
-        ema_decay (Any): Description of ema_decay.
+            network (Any): Description of network.
+            ema_decay (Any): Description of ema_decay.
         
         Returns:
-        None: Description of the return value.
+            None: Description of the return value.
         
         Raises:
-        Exception: Description of why this exception might be raised.
+            Exception: Description of why this exception might be raised.
         """
 
         super().__init__("intervention_cnn")
@@ -287,13 +287,13 @@ class InterventionModelEntity(TrainableEntity):
         Longer description of the update_ema behavior and usage.
         
         Args:
-        None (None): This function does not accept arguments.
+            None (None): This function does not accept arguments.
         
         Returns:
-        None: Description of the return value.
+            None: Description of the return value.
         
         Raises:
-        Exception: Description of why this exception might be raised.
+            Exception: Description of why this exception might be raised.
         """
 
         self.ema.update(self.network.parameters())
@@ -307,13 +307,13 @@ class InterventionModelEntity(TrainableEntity):
         Longer description of the state_dict behavior and usage.
         
         Args:
-        None (None): This function does not accept arguments.
+            None (None): This function does not accept arguments.
         
         Returns:
-        Dict[str, Any]: Description of the return value.
+            Dict[str, Any]: Description of the return value.
         
         Raises:
-        Exception: Description of why this exception might be raised.
+            Exception: Description of why this exception might be raised.
         """
 
         with self.ema.average_parameters():
@@ -343,13 +343,13 @@ class InterventionModelEntity(TrainableEntity):
         Longer description of the load_state_dict behavior and usage.
         
         Args:
-        state (Any): Description of state.
+            state (Any): Description of state.
         
         Returns:
-        None: Description of the return value.
+            None: Description of the return value.
         
         Raises:
-        Exception: Description of why this exception might be raised.
+            Exception: Description of why this exception might be raised.
         """
 
         self.network.load_state_dict(state["network"])
@@ -373,13 +373,13 @@ class InterventionModelEntity(TrainableEntity):
         Longer description of the to behavior and usage.
         
         Args:
-        device (Any): Description of device.
+            device (Any): Description of device.
         
         Returns:
-        None: Description of the return value.
+            None: Description of the return value.
         
         Raises:
-        Exception: Description of why this exception might be raised.
+            Exception: Description of why this exception might be raised.
         """
 
         self.network.to(device)

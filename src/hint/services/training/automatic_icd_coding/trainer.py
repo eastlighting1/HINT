@@ -36,7 +36,7 @@ class CLPLLoss(nn.Module):
     Longer description of the class behavior and usage.
     
     Attributes:
-    loss_type (Any): Description of loss_type.
+        loss_type (Any): Description of loss_type.
     """
 
     def __init__(self, loss_type: str = "exponential", class_weights: Optional[torch.Tensor] = None):
@@ -46,13 +46,13 @@ class CLPLLoss(nn.Module):
         Longer description of the __init__ behavior and usage.
         
         Args:
-        loss_type (Any): Description of loss_type.
+            loss_type (Any): Description of loss_type.
         
         Returns:
-        None: Description of the return value.
+            None: Description of the return value.
         
         Raises:
-        Exception: Description of why this exception might be raised.
+            Exception: Description of why this exception might be raised.
         """
 
         super().__init__()
@@ -69,13 +69,13 @@ class CLPLLoss(nn.Module):
         Longer description of the psi behavior and usage.
         
         Args:
-        u (Any): Description of u.
+            u (Any): Description of u.
         
         Returns:
-        torch.Tensor: Description of the return value.
+            torch.Tensor: Description of the return value.
         
         Raises:
-        Exception: Description of why this exception might be raised.
+            Exception: Description of why this exception might be raised.
         """
 
         if self.loss_type == "exponential":
@@ -101,14 +101,14 @@ class CLPLLoss(nn.Module):
         Longer description of the forward behavior and usage.
         
         Args:
-        logits (Any): Description of logits.
-        candidates (Any): Description of candidates.
+            logits (Any): Description of logits.
+            candidates (Any): Description of candidates.
         
         Returns:
-        torch.Tensor: Description of the return value.
+            torch.Tensor: Description of the return value.
         
         Raises:
-        Exception: Description of why this exception might be raised.
+            Exception: Description of why this exception might be raised.
         """
 
         if candidates is None:
@@ -169,10 +169,10 @@ class AdaptiveCLPLLoss(nn.Module):
     Longer description of the class behavior and usage.
     
     Attributes:
-    head_size (Any): Description of head_size.
-    logit_clip (Any): Description of logit_clip.
-    loss_type (Any): Description of loss_type.
-    tail_sample_size (Any): Description of tail_sample_size.
+        head_size (Any): Description of head_size.
+        logit_clip (Any): Description of logit_clip.
+        loss_type (Any): Description of loss_type.
+        tail_sample_size (Any): Description of tail_sample_size.
     """
 
     def __init__(
@@ -195,16 +195,16 @@ class AdaptiveCLPLLoss(nn.Module):
         Longer description of the __init__ behavior and usage.
         
         Args:
-        head_size (Any): Description of head_size.
-        tail_sample_size (Any): Description of tail_sample_size.
-        loss_type (Any): Description of loss_type.
-        logit_clip (Any): Description of logit_clip.
+            head_size (Any): Description of head_size.
+            tail_sample_size (Any): Description of tail_sample_size.
+            loss_type (Any): Description of loss_type.
+            logit_clip (Any): Description of logit_clip.
         
         Returns:
-        None: Description of the return value.
+            None: Description of the return value.
         
         Raises:
-        Exception: Description of why this exception might be raised.
+            Exception: Description of why this exception might be raised.
         """
 
         super().__init__()
@@ -227,13 +227,13 @@ class AdaptiveCLPLLoss(nn.Module):
         Longer description of the psi behavior and usage.
         
         Args:
-        u (Any): Description of u.
+            u (Any): Description of u.
         
         Returns:
-        torch.Tensor: Description of the return value.
+            torch.Tensor: Description of the return value.
         
         Raises:
-        Exception: Description of why this exception might be raised.
+            Exception: Description of why this exception might be raised.
         """
 
         if self.loss_type == "exponential":
@@ -259,14 +259,14 @@ class AdaptiveCLPLLoss(nn.Module):
         Longer description of the forward behavior and usage.
         
         Args:
-        logits (Any): Description of logits.
-        candidates (Any): Description of candidates.
+            logits (Any): Description of logits.
+            candidates (Any): Description of candidates.
         
         Returns:
-        torch.Tensor: Description of the return value.
+            torch.Tensor: Description of the return value.
         
         Raises:
-        Exception: Description of why this exception might be raised.
+            Exception: Description of why this exception might be raised.
         """
 
         if candidates is None:
@@ -391,14 +391,14 @@ class ICDTrainer(BaseTrainer):
     Longer description of the class behavior and usage.
     
     Attributes:
-    cfg (Any): Description of cfg.
-    class_freq (Any): Description of class_freq.
-    entity (Any): Description of entity.
-    loss_fn (Any): Description of loss_fn.
-    loss_type (Any): Description of loss_type.
-    lr_override (Any): Description of lr_override.
-    scaler (Any): Description of scaler.
-    use_amp (Any): Description of use_amp.
+        cfg (Any): Description of cfg.
+        class_freq (Any): Description of class_freq.
+        entity (Any): Description of entity.
+        loss_fn (Any): Description of loss_fn.
+        loss_type (Any): Description of loss_type.
+        lr_override (Any): Description of lr_override.
+        scaler (Any): Description of scaler.
+        use_amp (Any): Description of use_amp.
     """
 
 
@@ -434,21 +434,21 @@ class ICDTrainer(BaseTrainer):
         Longer description of the __init__ behavior and usage.
         
         Args:
-        config (Any): Description of config.
-        entity (Any): Description of entity.
-        registry (Any): Description of registry.
-        observer (Any): Description of observer.
-        device (Any): Description of device.
-        class_freq (Any): Description of class_freq.
-        ignored_indices (Any): Description of ignored_indices.
-        use_amp (Any): Description of use_amp.
-        lr_override (Any): Description of lr_override.
+            config (Any): Description of config.
+            entity (Any): Description of entity.
+            registry (Any): Description of registry.
+            observer (Any): Description of observer.
+            device (Any): Description of device.
+            class_freq (Any): Description of class_freq.
+            ignored_indices (Any): Description of ignored_indices.
+            use_amp (Any): Description of use_amp.
+            lr_override (Any): Description of lr_override.
         
         Returns:
-        None: Description of the return value.
+            None: Description of the return value.
         
         Raises:
-        Exception: Description of why this exception might be raised.
+            Exception: Description of why this exception might be raised.
         """
 
         super().__init__(registry, observer, device)
@@ -504,13 +504,13 @@ class ICDTrainer(BaseTrainer):
         Longer description of the _prepare_inputs behavior and usage.
         
         Args:
-        batch (Any): Description of batch.
+            batch (Any): Description of batch.
         
         Returns:
-        Dict[str, torch.Tensor]: Description of the return value.
+            Dict[str, torch.Tensor]: Description of the return value.
         
         Raises:
-        Exception: Description of why this exception might be raised.
+            Exception: Description of why this exception might be raised.
         """
 
         inputs = {}
@@ -548,13 +548,13 @@ class ICDTrainer(BaseTrainer):
         Longer description of the _sample_target_from_candidates behavior and usage.
         
         Args:
-        candidates (Any): Description of candidates.
+            candidates (Any): Description of candidates.
         
         Returns:
-        torch.Tensor: Description of the return value.
+            torch.Tensor: Description of the return value.
         
         Raises:
-        Exception: Description of why this exception might be raised.
+            Exception: Description of why this exception might be raised.
         """
 
         valid_mask = candidates >= 0
@@ -583,15 +583,15 @@ class ICDTrainer(BaseTrainer):
         Longer description of the train behavior and usage.
         
         Args:
-        train_loader (Any): Description of train_loader.
-        val_loader (Any): Description of val_loader.
-        evaluator (Any): Description of evaluator.
+            train_loader (Any): Description of train_loader.
+            val_loader (Any): Description of val_loader.
+            evaluator (Any): Description of evaluator.
         
         Returns:
-        None: Description of the return value.
+            None: Description of the return value.
         
         Raises:
-        Exception: Description of why this exception might be raised.
+            Exception: Description of why this exception might be raised.
         """
 
         self.entity.to(self.device)
@@ -785,21 +785,19 @@ class ICDTrainer(BaseTrainer):
 
                 metrics = evaluator.evaluate(val_loader)
 
-
-
-            val_loss = metrics.get("loss", 0.0)
-            cand_acc = metrics.get("candidate_accuracy", 0.0)
-            hit3 = metrics.get("cand_hit@3", 0.0)
-            hit5 = metrics.get("cand_hit@5", 0.0)
-            hit10 = metrics.get("cand_hit@10", 0.0)
-            self.observer.log(
-                "INFO",
-                (
-                    f"[EPOCH END] e={epoch} val_loss={val_loss:.4f} "
-                    f"cand_acc={cand_acc:.4f} hit3={hit3:.4f} "
-                    f"hit5={hit5:.4f} hit10={hit10:.4f}"
-                ),
-            )
+                val_loss = metrics.get("loss", 0.0)
+                cand_acc = metrics.get("candidate_accuracy", 0.0)
+                hit3 = metrics.get("cand_hit@3", 0.0)
+                hit5 = metrics.get("cand_hit@5", 0.0)
+                hit10 = metrics.get("cand_hit@10", 0.0)
+                self.observer.log(
+                    "INFO",
+                    (
+                        f"[EPOCH END] e={epoch} val_loss={val_loss:.4f} "
+                        f"cand_acc={cand_acc:.4f} hit3={hit3:.4f} "
+                        f"hit5={hit5:.4f} hit10={hit10:.4f}"
+                    ),
+                )
                 if use_dashboard:
                     self.observer.update_dashboard(
                         "ICD Training",

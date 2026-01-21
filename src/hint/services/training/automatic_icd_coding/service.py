@@ -40,11 +40,11 @@ class ICDService(BaseDomainService):
     Longer description of the class behavior and usage.
     
     Attributes:
-    best_model_name (Any): Description of best_model_name.
-    cfg (Any): Description of cfg.
-    device (Any): Description of device.
-    ignored_indices (Any): Description of ignored_indices.
-    registry (Any): Description of registry.
+        best_model_name (Any): Description of best_model_name.
+        cfg (Any): Description of cfg.
+        device (Any): Description of device.
+        ignored_indices (Any): Description of ignored_indices.
+        registry (Any): Description of registry.
     """
 
     def __init__(self, config: ICDConfig, registry: Registry, observer: TelemetryObserver, **kwargs):
@@ -54,16 +54,16 @@ class ICDService(BaseDomainService):
         Longer description of the __init__ behavior and usage.
         
         Args:
-        config (Any): Description of config.
-        registry (Any): Description of registry.
-        observer (Any): Description of observer.
-        kwargs (Any): Description of kwargs.
+            config (Any): Description of config.
+            registry (Any): Description of registry.
+            observer (Any): Description of observer.
+            kwargs (Any): Description of kwargs.
         
         Returns:
-        None: Description of the return value.
+            None: Description of the return value.
         
         Raises:
-        Exception: Description of why this exception might be raised.
+            Exception: Description of why this exception might be raised.
         """
 
         super().__init__(observer)
@@ -113,6 +113,13 @@ class ICDService(BaseDomainService):
 
         return summary, class_inclusion
 
+    def _resolve_model_entries(self):
+        if self.cfg.model_testing:
+            models = self.cfg.models_to_run or list(self.cfg.model_configs.keys())
+        else:
+            models = ["DCNv2"]
+        return [(name, self.cfg.model_configs.get(name, {})) for name in models]
+
 
     def execute(self) -> None:
 
@@ -121,13 +128,13 @@ class ICDService(BaseDomainService):
         Longer description of the execute behavior and usage.
         
         Args:
-        None (None): This function does not accept arguments.
+            None (None): This function does not accept arguments.
         
         Returns:
-        None: Description of the return value.
+            None: Description of the return value.
         
         Raises:
-        Exception: Description of why this exception might be raised.
+            Exception: Description of why this exception might be raised.
         """
 
 
@@ -295,7 +302,8 @@ class ICDService(BaseDomainService):
 
 
 
-        models_to_run = self.cfg.models_to_run if self.cfg.models_to_run else ["MedBERT"]
+        model_entries = self._resolve_model_entries()
+        models_to_run = [name for name, _ in model_entries]
 
         best_model_name = None
 
@@ -303,13 +311,11 @@ class ICDService(BaseDomainService):
 
         self.observer.log("INFO", f"[2.5] Model roster ready. models={models_to_run}")
 
-        for model_name in models_to_run:
+        for model_name, model_cfg in model_entries:
 
             self.observer.log("INFO", f"[2.5] Model workflow start. model={model_name}")
 
             try:
-
-                model_cfg = self.cfg.model_configs.get(model_name, {})
 
                 NetworkClass = get_network_class(model_name)
 
@@ -463,27 +469,28 @@ class ICDService(BaseDomainService):
 
         self.best_model_name = best_model_name or (models_to_run[0] if models_to_run else None)
         self.observer.log("INFO", f"[2.5] Best model selected. model={self.best_model_name}")
-    def generate_intervention_dataset(self, cnn_config) -> None:
+    def generate_intervention_dataset(self, intervention_config) -> None:
 
         """Summary of generate_intervention_dataset.
         
         Longer description of the generate_intervention_dataset behavior and usage.
         
         Args:
-        cnn_config (Any): Description of cnn_config.
+            intervention_config (Any): Description of intervention_config.
         
         Returns:
-        None: Description of the return value.
+            None: Description of the return value.
         
         Raises:
-        Exception: Description of why this exception might be raised.
+            Exception: Description of why this exception might be raised.
         """
 
         self.observer.log("INFO", "[2B.1] Feature injection started")
 
 
 
-        models_to_run = self.cfg.models_to_run if self.cfg.models_to_run else ["MedBERT"]
+        model_entries = self._resolve_model_entries()
+        models_to_run = [name for name, _ in model_entries]
 
         if not models_to_run:
 
@@ -506,7 +513,7 @@ class ICDService(BaseDomainService):
 
         icd_prefix = self.cfg.data.input_h5_prefix
 
-        cnn_prefix = cnn_config.data.input_h5_prefix
+        intervention_prefix = intervention_config.data.input_h5_prefix
 
 
 
@@ -529,7 +536,7 @@ class ICDService(BaseDomainService):
 
             NetworkClass = get_network_class(model_name)
 
-            model_cfg = self.cfg.model_configs.get(model_name, {})
+            model_cfg = dict(next((cfg for name, cfg in model_entries if name == model_name), {}))
 
             net_kwargs = dict(model_cfg)
 
@@ -600,8 +607,7 @@ class ICDService(BaseDomainService):
         for split in splits:
 
             src_path = cache_dir / f"{icd_prefix}_{split}.h5"
-
-            tgt_path = cache_dir / f"{cnn_prefix}_{split}.h5"
+            tgt_path = cache_dir / f"{intervention_prefix}_{split}.h5"
 
 
 

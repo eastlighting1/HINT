@@ -5,55 +5,49 @@ data:
 artifacts:
   model_name: "icd_model"
 
-# Execution Strategy
+model_testing: false
 models_to_run:
   - "TabNet"
   - "DCNv2"
 
-# Common Hyperparameters
 dropout: 0.3
 
-# Loss Configuration
-# Options: "standard", "clpl", "adaptive_clpl"
-loss_type: "adaptive_clpl"  # Recommended for XMC
+loss_type: "adaptive_clpl"
 adaptive_clpl_head_size: 800
 adaptive_clpl_tail_sample_size: 800
 adaptive_clpl_logit_clip: 30.0
 lambda_sparse: 1.0e-3
 
-# Candidate-only pseudo-labeling
 pseudo_label_ce_weight: 0.2
 pseudo_label_margin: 0.1
 class_weight_power: 1.0
 class_weight_clip: 10.0
 
-# Model Specific Configurations
 model_configs:
   MedBERT:
     bert_model_name: "Charangan/MedBERT"
-  
+
   GRU-D:
     hidden_dim: 128
     decay_rate: 0.99
-  
+
   TST:
     d_model: 128
     n_heads: 4
     num_layers: 3
     d_ff: 256
-  
+
   LatentODE:
     latent_dim: 64
     rec_dim: 128
     ode_solver: "rk4"
-  
+
   iTransformer:
     d_model: 128
     n_heads: 4
     num_layers: 3
     d_ff: 256
 
-  # --- New XMC Models ---
   TabNet:
     n_d: 64
     n_a: 64
@@ -79,20 +73,17 @@ model_configs:
     n_heads: 8
     d_ffn: 256
 
-# Training
-batch_size: 128  # Reduced for stability with complex models
+batch_size: 128
 lr: 5.0e-5
 lr_plateau_factor: 0.5
 lr_plateau_patience: 2
 lr_plateau_min_lr: 1.0e-6
-epochs: 150
+epochs: 100
 patience: 5
 use_amp: false
 grad_clip_norm: 1.0
 
-# Resources
 num_workers: 8
 pin_memory: true
 
-# Validation
 top_k_labels: 1000

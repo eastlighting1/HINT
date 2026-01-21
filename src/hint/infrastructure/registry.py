@@ -28,8 +28,8 @@ class FileSystemRegistry(Registry):
     Longer description of the class behavior and usage.
     
     Attributes:
-    base_dir (Any): Description of base_dir.
-    dirs (Any): Description of dirs.
+        base_dir (Any): Description of base_dir.
+        dirs (Any): Description of dirs.
     """
 
     def __init__(self, base_dir: Union[str, Path]):
@@ -39,13 +39,13 @@ class FileSystemRegistry(Registry):
         Longer description of the __init__ behavior and usage.
         
         Args:
-        base_dir (Any): Description of base_dir.
+            base_dir (Any): Description of base_dir.
         
         Returns:
-        None: Description of the return value.
+            None: Description of the return value.
         
         Raises:
-        Exception: Description of why this exception might be raised.
+            Exception: Description of why this exception might be raised.
         """
 
         self.base_dir = Path(base_dir)
@@ -79,14 +79,14 @@ class FileSystemRegistry(Registry):
         Longer description of the _resolve_path behavior and usage.
         
         Args:
-        name (Any): Description of name.
-        category (Any): Description of category.
+            name (Any): Description of name.
+            category (Any): Description of category.
         
         Returns:
-        Path: Description of the return value.
+            Path: Description of the return value.
         
         Raises:
-        Exception: Description of why this exception might be raised.
+            Exception: Description of why this exception might be raised.
         """
 
         if isinstance(name, Path) or "/" in str(name) or "\\" in str(name):
@@ -116,13 +116,13 @@ class FileSystemRegistry(Registry):
         Longer description of the get_artifact_path behavior and usage.
         
         Args:
-        name (Any): Description of name.
+            name (Any): Description of name.
         
         Returns:
-        Path: Description of the return value.
+            Path: Description of the return value.
         
         Raises:
-        Exception: Description of why this exception might be raised.
+            Exception: Description of why this exception might be raised.
         """
 
         return self._resolve_path(name, "data")
@@ -136,15 +136,15 @@ class FileSystemRegistry(Registry):
         Longer description of the save_model behavior and usage.
         
         Args:
-        state_dict (Any): Description of state_dict.
-        name (Any): Description of name.
-        tag (Any): Description of tag.
+            state_dict (Any): Description of state_dict.
+            name (Any): Description of name.
+            tag (Any): Description of tag.
         
         Returns:
-        Path: Description of the return value.
+            Path: Description of the return value.
         
         Raises:
-        Exception: Description of why this exception might be raised.
+            Exception: Description of why this exception might be raised.
         """
 
         filename = f"{name}_{tag}.pt"
@@ -164,15 +164,15 @@ class FileSystemRegistry(Registry):
         Longer description of the load_model behavior and usage.
         
         Args:
-        name (Any): Description of name.
-        tag (Any): Description of tag.
-        device (Any): Description of device.
+            name (Any): Description of name.
+            tag (Any): Description of tag.
+            device (Any): Description of device.
         
         Returns:
-        Dict[str, Any]: Description of the return value.
+            Dict[str, Any]: Description of the return value.
         
         Raises:
-        Exception: Description of why this exception might be raised.
+            Exception: Description of why this exception might be raised.
         """
 
         filename = f"{name}_{tag}.pt"
@@ -206,14 +206,14 @@ class FileSystemRegistry(Registry):
         Longer description of the save_dataframe behavior and usage.
         
         Args:
-        df (Any): Description of df.
-        name (Any): Description of name.
+            df (Any): Description of df.
+            name (Any): Description of name.
         
         Returns:
-        Path: Description of the return value.
+            Path: Description of the return value.
         
         Raises:
-        Exception: Description of why this exception might be raised.
+            Exception: Description of why this exception might be raised.
         """
 
         path = self._resolve_path(name, "data")
@@ -237,13 +237,13 @@ class FileSystemRegistry(Registry):
         Longer description of the load_dataframe behavior and usage.
         
         Args:
-        name (Any): Description of name.
+            name (Any): Description of name.
         
         Returns:
-        pl.DataFrame: Description of the return value.
+            pl.DataFrame: Description of the return value.
         
         Raises:
-        Exception: Description of why this exception might be raised.
+            Exception: Description of why this exception might be raised.
         """
 
         path = self._resolve_path(name, "data")
@@ -263,14 +263,14 @@ class FileSystemRegistry(Registry):
         Longer description of the save_labels behavior and usage.
         
         Args:
-        df (Any): Description of df.
-        name (Any): Description of name.
+            df (Any): Description of df.
+            name (Any): Description of name.
         
         Returns:
-        Path: Description of the return value.
+            Path: Description of the return value.
         
         Raises:
-        Exception: Description of why this exception might be raised.
+            Exception: Description of why this exception might be raised.
         """
 
         return self.save_dataframe(df, name)
@@ -284,13 +284,13 @@ class FileSystemRegistry(Registry):
         Longer description of the load_labels behavior and usage.
         
         Args:
-        name (Any): Description of name.
+            name (Any): Description of name.
         
         Returns:
-        pl.DataFrame: Description of the return value.
+            pl.DataFrame: Description of the return value.
         
         Raises:
-        Exception: Description of why this exception might be raised.
+            Exception: Description of why this exception might be raised.
         """
 
         return self.load_dataframe(name)
@@ -304,14 +304,14 @@ class FileSystemRegistry(Registry):
         Longer description of the save_json behavior and usage.
         
         Args:
-        data (Any): Description of data.
-        name (Any): Description of name.
+            data (Any): Description of data.
+            name (Any): Description of name.
         
         Returns:
-        Path: Description of the return value.
+            Path: Description of the return value.
         
         Raises:
-        Exception: Description of why this exception might be raised.
+            Exception: Description of why this exception might be raised.
         """
 
         path = self._resolve_path(name, "metrics")
@@ -331,13 +331,13 @@ class FileSystemRegistry(Registry):
         Longer description of the load_json behavior and usage.
         
         Args:
-        name (Any): Description of name.
+            name (Any): Description of name.
         
         Returns:
-        Dict[str, Any]: Description of the return value.
+            Dict[str, Any]: Description of the return value.
         
         Raises:
-        Exception: Description of why this exception might be raised.
+            Exception: Description of why this exception might be raised.
         """
 
         path = self._resolve_path(name, "metrics")
@@ -359,14 +359,14 @@ class FileSystemRegistry(Registry):
         Longer description of the save_sklearn behavior and usage.
         
         Args:
-        model (Any): Description of model.
-        name (Any): Description of name.
+            model (Any): Description of model.
+            name (Any): Description of name.
         
         Returns:
-        Path: Description of the return value.
+            Path: Description of the return value.
         
         Raises:
-        Exception: Description of why this exception might be raised.
+            Exception: Description of why this exception might be raised.
         """
 
         path = self._resolve_path(f"{name}.joblib", "checkpoints")
@@ -384,13 +384,13 @@ class FileSystemRegistry(Registry):
         Longer description of the load_sklearn behavior and usage.
         
         Args:
-        name (Any): Description of name.
+            name (Any): Description of name.
         
         Returns:
-        Any: Description of the return value.
+            Any: Description of the return value.
         
         Raises:
-        Exception: Description of why this exception might be raised.
+            Exception: Description of why this exception might be raised.
         """
 
         path = self._resolve_path(f"{name}.joblib", "checkpoints")

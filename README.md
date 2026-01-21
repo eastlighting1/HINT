@@ -2,7 +2,7 @@
 
 <div align="center">
 
-![Version](https://img.shields.io/badge/Version-1.0.0-blue?style=for-the-badge)
+![Version](https://img.shields.io/badge/Version-0.1.0-blue?style=for-the-badge)
 ![License](https://img.shields.io/badge/License-MIT-yellow?style=for-the-badge)
 ![Python](https://img.shields.io/badge/Python-3.10%2B-3776AB?style=for-the-badge&logo=python&logoColor=white)
 ![PyTorch](https://img.shields.io/badge/PyTorch-2.0%2B-EE4C2C?style=for-the-badge&logo=pytorch&logoColor=white)
@@ -11,25 +11,25 @@
 
 **A Hierarchical Clinical Decision Support System (CDSS) for ICU Mechanical Ventilation Prediction**
 
-[📖 Introduction](#-introduction) • [🧠 Core Architecture](#-core-architecture) • [⚡ Quick Start](#-quick-start-with-uv) • [🛠️ Usage Guide](#-usage-guide) • [🧪 Testing](#-testing) • [📊 Benchmarks](#-benchmarks--performance)
+[Introduction](#introduction) • [Core Architecture](#core-architecture) • [Quick Start](#quick-start-with-uv) • [Usage Guide](#usage-guide) • [Project Layout](#project-layout) • [Benchmarks](#benchmarks--performance)
 
 </div>
 
 ---
 
-## 👋 Introduction
+## Introduction
 
 Welcome to the **HINT** repository!
 
 **HINT** stands for *Hierarchical ICD-aware Network for Time-series Intervention*. It is a cutting-edge Clinical Decision Support System (CDSS) developed to assist clinicians in the Intensive Care Unit (ICU) by predicting the need for **mechanical ventilation interventions**.
 
-### 🏥 Why is this important?
+### Why is this important?
 
 In the ICU, a patient's condition changes rapidly. Clinicians must process massive amounts of data—vital signs (heart rate, SpO2) and lab results—in real-time. However, existing AI models often fail to connect these "low-level" signals with the patient's "high-level" diagnosis (ICD codes), leading to suboptimal predictions.
 
 **HINT solves this by thinking like a doctor:** it first understands the patient's underlying diagnosis (even if records are incomplete!) and then uses that context to interpret the fluctuating vital signs more accurately.
 
-### ✨ Key Features at a Glance
+### Key Features at a Glance
 
 - **Hierarchical Thinking**: A two-stage pipeline that separates *diagnosis inference* from *event prediction*, mimicking clinical reasoning.
 - **Robust to Noisy Data**: Uses **Partial Label Learning** with MedBERT. Even if the medical records are messy or incomplete, HINT can infer the probable diagnosis.
@@ -39,7 +39,7 @@ In the ICU, a patient's condition changes rapidly. Clinicians must process massi
 
 ---
 
-## 🧠 Core Architecture
+## Core Architecture
 
 The system is built upon a **Domain-Driven Design (DDD)** architecture, ensuring that the code is as robust as the model itself.
 
@@ -71,7 +71,7 @@ This is where the magic happens. The model combines the context from Stage 1 wit
 
 ---
 
-## ⚡ Quick Start (with `uv`)
+## Quick Start (with `uv`)
 
 We use **[uv](https://github.com/astral-sh/uv)**, a blazing fast Python package manager. If you haven't used it before, you'll love the speed!
 
@@ -100,33 +100,33 @@ Since we cannot distribute MIMIC-III data, please place your downloaded CSV file
 
 ```bash
 # Example directory structure
-mkdir -p data/mimic3/raw
-# Place ADMISSIONS.csv, CHARTEVENTS.csv, etc. inside data/mimic3/raw
+mkdir -p data/raw
+# Place ADMISSIONS.csv, CHARTEVENTS.csv, etc. inside data/raw
 ```
 
 -----
 
-## 🛠️ Usage Guide
+## Usage Guide
 
 HINT is configured using **Hydra**. This allows you to orchestrate the entire pipeline via the command line interface (CLI) exposed by `src/hint/app/main.py`.
 
 The basic command structure is:
 
 ```bash
-uv run hint mode=[etl|icd|cnn|train] [overrides]
+uv run hint mode=[etl|icd|intervention|all] [overrides]
 ```
 
-### 1️⃣ ETL Pipeline (Data Processing)
+### 1. ETL Pipeline (Data Processing)
 
 Cleans the raw CSV data and generates HDF5 tensors.
 
 ```bash
-uv run hint mode=etl data.raw_dir="./data/mimic3/raw"
+uv run hint mode=etl data.raw_dir="./data/raw"
 ```
 
-> **Output**: Processed artifacts are saved in `artifacts/data/` by default.
+> **Output**: Processed artifacts are saved in `data/processed/` and `data/cache/` by default.
 
-### 2️⃣ Diagnosis Inference (Stage 1)
+### 2. Diagnosis Inference (Stage 1)
 
 Trains the ICD coding module to learn patient representations.
 
@@ -134,60 +134,49 @@ Trains the ICD coding module to learn patient representations.
 uv run hint mode=icd
 ```
 
-### 3️⃣ Intervention Prediction (Stage 2)
+### 3. Intervention Prediction (Stage 2)
 
-Trains the GFINet (CNN) model using the output from Stage 1. You can dynamically override hyperparameters.
+Trains the intervention prediction model using the output from Stage 1. You can dynamically override hyperparameters.
 
 ```bash
-uv run hint mode=cnn \
-    cnn.model.epochs=50 \
-    cnn.model.batch_size=256 \
-    cnn.optimizer.lr=0.001
+uv run hint mode=intervention \
+    intervention.epochs=50 \
+    intervention.batch_size=256 \
+    intervention.lr=0.0003
 ```
 
-### 4️⃣ Full Pipeline
+### 4. Full Pipeline
 
-Executes the complete workflow sequentially (ICD -> CNN -> Evaluation).
+Executes the complete workflow sequentially (ETL -> ICD -> intervention).
 
 ```bash
-uv run hint mode=train
+uv run hint mode=all
 ```
 
 -----
 
-## 🧪 Testing
+## Project Layout
 
-We use a custom **Hydra-powered Test Runner** (`src/test/runner.py`) instead of running `pytest` directly. This ensures that the test environment shares the same configuration context as the main application.
+Key directories you will interact with during development and runs:
 
-### Running the Full Suite
-
-To run all tests (Unit, Integration, E2E) with coverage report:
-
-```bash
-uv run python -m src.test.runner
+```text
+HINT/
+├── configs/                 # Hydra configuration files
+├── data/
+│   ├── raw/                 # Raw MIMIC-III CSV files
+│   ├── processed/           # ETL outputs (Parquet)
+│   └── cache/               # Cached HDF5 tensors
+├── resources/               # ICD/variable metadata
+├── artifacts/               # Trained model artifacts
+├── outputs/                 # Logs and run outputs
+└── Analyzer/                # Data inspection utilities
 ```
 
-### Selective Testing
-
-The test configuration is controlled by `configs/test_config.yaml`. You can skip slow-running integration or E2E tests using CLI overrides:
-
-```bash
-# Run ONLY Unit Tests (Fast)
-uv run python -m src.test.runner tests.run_integration=false tests.run_e2e=false
-
-# Run Unit + Integration Tests
-uv run python -m src.test.runner tests.run_e2e=false
-```
-
-### 📝 Test Strategy
-
-- **Unit Tests**: `src/test/unit/` – Isolated tests for entities, value objects, and components.
-- **Integration Tests**: `src/test/integration/` – Tests interacting with HDF5 files and model persistence.
-- **E2E Tests**: `src/test/e2e/` – Full pipeline validation.
+You can review and override defaults in `configs/config.yaml`, `configs/etl_config.yaml`, `configs/icd_config.yaml`, and `configs/intervention_config.yaml`.
 
 -----
 
-## 📊 Benchmarks & Performance
+## Benchmarks & Performance
 
 HINT has been rigorously evaluated on the MIMIC-III dataset. It specifically excels in the **Macro AUPRC** metric, which is the most critical metric for imbalanced medical data.
 
@@ -198,39 +187,29 @@ HINT has been rigorously evaluated on the MIMIC-III dataset. It specifically exc
 | **MTS-GCNN**       |   91.9    |      52.5       |   60.6   |
 | **HINT (Ours)**    | **92.3**  |   **75.2**      | **69.8** |
 
-> **📈 Result:** HINT improves the AUPRC by **+22.7%** compared to the strongest baseline (MTS-GCNN). This means significantly fewer false alarms for clinicians.
+> **Result:** HINT improves the AUPRC by **+22.7%** compared to the strongest baseline (MTS-GCNN). This means significantly fewer false alarms for clinicians.
 
 -----
 
-## 📂 Project Structure
+## Code Structure
 
-We follow a strict **DDD (Domain-Driven Design)** pattern to keep things organized.
+We follow a **DDD (Domain-Driven Design)** pattern to keep things organized.
 
 ```text
 src/
 ├── hint/
-│   ├── app/                  # 🏁 Entry Points
-│   │   ├── main.py           # CLI Argument Parser & Dispatcher
-│   │   └── factory.py        # System Initialization
-│   ├── domain/               # 🧠 Core Logic & States
-│   │   ├── entities.py       # Trainable Model States (Checkpoints)
-│   │   └── vo.py             # Hyperparameter Configurations
-│   ├── foundation/           # 🧱 Shared Utilities
-│   │   ├── configs.py        # Hydra Configuration Schemas
-│   │   └── dtos.py           # Tensor Data Structures
-│   ├── infrastructure/       # 🔌 Deep Learning Backend
-│   │   ├── datasource.py     # Data Loaders (HDF5 & Parquet)
-│   │   ├── networks.py       # Neural Network Architectures (PyTorch)
-│   │   └── telemetry.py      # Experiment Tracking (WandB/Rich)
-│   └── services/             # 🚀 Execution Pipelines
-│       ├── etl/              # Preprocessing & Tensor Generation
-│       ├── icd/              # Stage 1: Representation Learning (MedBERT)
-│       └── training/         # Stage 2: Temporal Prediction Loop (GFINet)
-└── test/                     # 🧪 Test Suite
-    ├── runner.py             # Custom Test Runner (Hydra-aware)
-    ├── unit/                 # Component-level Logic Tests
-    ├── integration/          # Data Flow & I/O Verification
-    └── e2e/                  # Full Training Pipeline Tests
+│   ├── app/                       # Entry points and app wiring
+│   │   ├── main.py                # CLI entry point
+│   │   └── factory.py             # Service composition
+│   ├── domain/                    # Core entities and value objects
+│   ├── foundation/                # DTOs, configs, and shared interfaces
+│   ├── infrastructure/            # Models, data sources, telemetry
+│   └── services/                  # Execution pipelines
+│       ├── etl/                   # Data preprocessing
+│       └── training/
+│           ├── automatic_icd_coding/   # Stage 1 training
+│           ├── predict_intervention/   # Stage 2 training
+│           └── common/                 # Shared training utilities
 ```
 
 -----

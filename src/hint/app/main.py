@@ -31,13 +31,13 @@ def _seed_everything(seed: int) -> None:
     Longer description of the _seed_everything behavior and usage.
     
     Args:
-    seed (Any): Description of seed.
+        seed (Any): Description of seed.
     
     Returns:
-    None: Description of the return value.
+        None: Description of the return value.
     
     Raises:
-    Exception: Description of why this exception might be raised.
+        Exception: Description of why this exception might be raised.
     """
     random.seed(seed)
     if np is not None:
@@ -55,13 +55,13 @@ def main() -> None:
     Longer description of the main behavior and usage.
     
     Args:
-    None (None): This function does not accept arguments.
+        None (None): This function does not accept arguments.
     
     Returns:
-    None: Description of the return value.
+        None: Description of the return value.
     
     Raises:
-    Exception: Description of why this exception might be raised.
+        Exception: Description of why this exception might be raised.
     """
 
     factory = AppFactory()
@@ -155,7 +155,7 @@ def main() -> None:
 
             icd_service.observer.log("INFO", "[STAGE 2B START] Feature injection start.")
 
-            icd_service.generate_intervention_dataset(factory.ctx.cnn)
+            icd_service.generate_intervention_dataset(factory.ctx.intervention)
 
             icd_service.observer.log("INFO", "[STAGE 2B END] Feature injection complete.")
 

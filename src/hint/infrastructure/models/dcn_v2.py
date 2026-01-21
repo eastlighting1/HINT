@@ -18,9 +18,9 @@ class CrossNetV2(nn.Module):
     Longer description of the class behavior and usage.
     
     Attributes:
-    biases (Any): Description of biases.
-    kernels (Any): Description of kernels.
-    num_layers (Any): Description of num_layers.
+        biases (Any): Description of biases.
+        kernels (Any): Description of kernels.
+        num_layers (Any): Description of num_layers.
     """
 
     def __init__(self, input_dim, num_layers):
@@ -30,14 +30,14 @@ class CrossNetV2(nn.Module):
         Longer description of the __init__ behavior and usage.
         
         Args:
-        input_dim (Any): Description of input_dim.
-        num_layers (Any): Description of num_layers.
+            input_dim (Any): Description of input_dim.
+            num_layers (Any): Description of num_layers.
         
         Returns:
-        None: Description of the return value.
+            None: Description of the return value.
         
         Raises:
-        Exception: Description of why this exception might be raised.
+            Exception: Description of why this exception might be raised.
         """
 
         super(CrossNetV2, self).__init__()
@@ -67,13 +67,13 @@ class CrossNetV2(nn.Module):
         Longer description of the forward behavior and usage.
         
         Args:
-        x (Any): Description of x.
+            x (Any): Description of x.
         
         Returns:
-        Any: Description of the return value.
+            Any: Description of the return value.
         
         Raises:
-        Exception: Description of why this exception might be raised.
+            Exception: Description of why this exception might be raised.
         """
 
 
@@ -113,13 +113,13 @@ class DCNv2ICD(BaseICDClassifier):
     Longer description of the class behavior and usage.
     
     Attributes:
-    cross_net (Any): Description of cross_net.
-    cross_scale (Any): Description of cross_scale.
-    deep_net (Any): Description of deep_net.
-    embedding_dim (Any): Description of embedding_dim.
-    final_mapping (Any): Description of final_mapping.
-    flat_dim (Any): Description of flat_dim.
-    input_bn (Any): Description of input_bn.
+        cross_net (Any): Description of cross_net.
+        cross_scale (Any): Description of cross_scale.
+        deep_net (Any): Description of deep_net.
+        embedding_dim (Any): Description of embedding_dim.
+        final_mapping (Any): Description of final_mapping.
+        flat_dim (Any): Description of flat_dim.
+        input_bn (Any): Description of input_bn.
     """
 
     def __init__(
@@ -151,20 +151,20 @@ class DCNv2ICD(BaseICDClassifier):
         Longer description of the __init__ behavior and usage.
         
         Args:
-        num_classes (Any): Description of num_classes.
-        input_dim (Any): Description of input_dim.
-        seq_len (Any): Description of seq_len.
-        dropout (Any): Description of dropout.
-        cross_layers (Any): Description of cross_layers.
-        deep_layers (Any): Description of deep_layers.
-        cross_scale (Any): Description of cross_scale.
-        kwargs (Any): Description of kwargs.
+            num_classes (Any): Description of num_classes.
+            input_dim (Any): Description of input_dim.
+            seq_len (Any): Description of seq_len.
+            dropout (Any): Description of dropout.
+            cross_layers (Any): Description of cross_layers.
+            deep_layers (Any): Description of deep_layers.
+            cross_scale (Any): Description of cross_scale.
+            kwargs (Any): Description of kwargs.
         
         Returns:
-        None: Description of the return value.
+            None: Description of the return value.
         
         Raises:
-        Exception: Description of why this exception might be raised.
+            Exception: Description of why this exception might be raised.
         """
 
         super().__init__(num_classes, input_dim, seq_len, dropout)
@@ -235,15 +235,15 @@ class DCNv2ICD(BaseICDClassifier):
         Longer description of the forward behavior and usage.
         
         Args:
-        x_num (Any): Description of x_num.
-        return_embeddings (Any): Description of return_embeddings.
-        kwargs (Any): Description of kwargs.
+            x_num (Any): Description of x_num.
+            return_embeddings (Any): Description of return_embeddings.
+            kwargs (Any): Description of kwargs.
         
         Returns:
-        torch.Tensor: Description of the return value.
+            torch.Tensor: Description of the return value.
         
         Raises:
-        Exception: Description of why this exception might be raised.
+            Exception: Description of why this exception might be raised.
         """
 
 

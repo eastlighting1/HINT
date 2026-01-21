@@ -18,7 +18,7 @@ class HyperparamVO(BaseModel):
     Longer description of the class behavior and usage.
     
     Attributes:
-    None (None): No documented attributes.
+        None (None): No documented attributes.
     """
 
     model_config = ConfigDict(frozen=True)
@@ -32,7 +32,7 @@ class ArtifactsConfig(HyperparamVO):
     Longer description of the class behavior and usage.
     
     Attributes:
-    None (None): No documented attributes.
+        None (None): No documented attributes.
     """
 
     patients_file: str = "patients.parquet"
@@ -66,7 +66,7 @@ class ETLKeys(str, Enum):
     Longer description of the class behavior and usage.
     
     Attributes:
-    None (None): No documented attributes.
+        None (None): No documented attributes.
     """
 
     STAY_ID = "sid"
@@ -92,7 +92,7 @@ class ICDKeys(str, Enum):
     Longer description of the class behavior and usage.
     
     Attributes:
-    None (None): No documented attributes.
+        None (None): No documented attributes.
     """
 
     TARGET_ICD_MULTI = "y"
@@ -108,7 +108,7 @@ class InterventionKeys(str, Enum):
     Longer description of the class behavior and usage.
     
     Attributes:
-    None (None): No documented attributes.
+        None (None): No documented attributes.
     """
 
     TARGET_VENT_STATE = "y_vent"
@@ -122,13 +122,13 @@ def _load_exact_features() -> List[str]:
     Longer description of the _load_exact_features behavior and usage.
     
     Args:
-    None (None): This function does not accept arguments.
+        None (None): This function does not accept arguments.
     
     Returns:
-    List[str]: Description of the return value.
+        List[str]: Description of the return value.
     
     Raises:
-    Exception: Description of why this exception might be raised.
+        Exception: Description of why this exception might be raised.
     """
 
     candidates = [
@@ -170,7 +170,7 @@ class ETLConfig(HyperparamVO):
     Longer description of the class behavior and usage.
     
     Attributes:
-    None (None): No documented attributes.
+        None (None): No documented attributes.
     """
 
     raw_dir: str = "./data/raw"
@@ -214,7 +214,7 @@ class ICDDataConfig(HyperparamVO):
     Longer description of the class behavior and usage.
     
     Attributes:
-    None (None): No documented attributes.
+        None (None): No documented attributes.
     """
 
     input_h5_prefix: str = "train_coding"
@@ -234,7 +234,7 @@ class ICDArtifactsConfig(HyperparamVO):
     Longer description of the class behavior and usage.
     
     Attributes:
-    None (None): No documented attributes.
+        None (None): No documented attributes.
     """
 
     model_name: str = "icd_model"
@@ -250,7 +250,7 @@ class ExecutionConfig(HyperparamVO):
     Longer description of the class behavior and usage.
     
     Attributes:
-    None (None): No documented attributes.
+        None (None): No documented attributes.
     """
 
     subset_ratio: float = 1.0
@@ -264,7 +264,7 @@ class ICDConfig(HyperparamVO):
     Longer description of the class behavior and usage.
     
     Attributes:
-    None (None): No documented attributes.
+        None (None): No documented attributes.
     """
 
     data: ICDDataConfig = Field(default_factory=ICDDataConfig)
@@ -278,7 +278,9 @@ class ICDConfig(HyperparamVO):
     execution: ExecutionConfig = Field(default_factory=ExecutionConfig)
 
 
-    models_to_run: List[str] = Field(default_factory=lambda: ["MedBERT"])
+    model_testing: bool = True
+
+    models_to_run: List[str] = Field(default_factory=lambda: ["DCNv2"])
 
     model_configs: Dict[str, Any] = Field(default_factory=dict)
 
@@ -354,14 +356,14 @@ class ICDConfig(HyperparamVO):
 
 
 
-class CNNDataConfig(HyperparamVO):
+class InterventionDataConfig(HyperparamVO):
 
-    """Summary of CNNDataConfig purpose.
+    """Summary of InterventionDataConfig purpose.
     
     Longer description of the class behavior and usage.
     
     Attributes:
-    None (None): No documented attributes.
+        None (None): No documented attributes.
     """
 
     input_h5_prefix: str = "train_intervention"
@@ -372,33 +374,33 @@ class CNNDataConfig(HyperparamVO):
 
 
 
-class CNNArtifactsConfig(HyperparamVO):
+class InterventionArtifactsConfig(HyperparamVO):
 
-    """Summary of CNNArtifactsConfig purpose.
+    """Summary of InterventionArtifactsConfig purpose.
     
     Longer description of the class behavior and usage.
     
     Attributes:
-    None (None): No documented attributes.
+        None (None): No documented attributes.
     """
 
     model_name: str = "intervention_model"
 
 
 
-class CNNConfig(HyperparamVO):
+class InterventionConfig(HyperparamVO):
 
-    """Summary of CNNConfig purpose.
+    """Summary of InterventionConfig purpose.
     
     Longer description of the class behavior and usage.
     
     Attributes:
-    None (None): No documented attributes.
+        None (None): No documented attributes.
     """
 
-    data: CNNDataConfig = Field(default_factory=CNNDataConfig)
+    data: InterventionDataConfig = Field(default_factory=InterventionDataConfig)
 
-    artifacts: CNNArtifactsConfig = Field(default_factory=CNNArtifactsConfig)
+    artifacts: InterventionArtifactsConfig = Field(default_factory=InterventionArtifactsConfig)
 
     keys: InterventionKeys = Field(default_factory=lambda: InterventionKeys)
 

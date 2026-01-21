@@ -17,9 +17,9 @@ class ETLService:
     Longer description of the class behavior and usage.
     
     Attributes:
-    components (Any): Description of components.
-    observer (Any): Description of observer.
-    registry (Any): Description of registry.
+        components (Any): Description of components.
+        observer (Any): Description of observer.
+        registry (Any): Description of registry.
     """
 
     def __init__(
@@ -39,15 +39,15 @@ class ETLService:
         Longer description of the __init__ behavior and usage.
         
         Args:
-        registry (Any): Description of registry.
-        observer (Any): Description of observer.
-        components (Any): Description of components.
+            registry (Any): Description of registry.
+            observer (Any): Description of observer.
+            components (Any): Description of components.
         
         Returns:
-        None: Description of the return value.
+            None: Description of the return value.
         
         Raises:
-        Exception: Description of why this exception might be raised.
+            Exception: Description of why this exception might be raised.
         """
 
         self.registry = registry
@@ -65,13 +65,13 @@ class ETLService:
         Longer description of the run_pipeline behavior and usage.
         
         Args:
-        None (None): This function does not accept arguments.
+            None (None): This function does not accept arguments.
         
         Returns:
-        None: Description of the return value.
+            None: Description of the return value.
         
         Raises:
-        Exception: Description of why this exception might be raised.
+            Exception: Description of why this exception might be raised.
         """
 
         self.observer.log("INFO", "[STAGE 1 START] ETL pipeline execution started.")

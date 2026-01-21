@@ -36,11 +36,11 @@ class RichTelemetryObserver(TelemetryObserver):
     Longer description of the class behavior and usage.
     
     Attributes:
-    _active_progress (Any): Description of _active_progress.
-    console (Any): Description of console.
-    console_logger (Any): Description of console_logger.
-    file_logger (Any): Description of file_logger.
-    metrics (Any): Description of metrics.
+        _active_progress (Any): Description of _active_progress.
+        console (Any): Description of console.
+        console_logger (Any): Description of console_logger.
+        file_logger (Any): Description of file_logger.
+        metrics (Any): Description of metrics.
     """
 
 
@@ -52,13 +52,13 @@ class RichTelemetryObserver(TelemetryObserver):
         Longer description of the __init__ behavior and usage.
         
         Args:
-        None (None): This function does not accept arguments.
+            None (None): This function does not accept arguments.
         
         Returns:
-        None: Description of the return value.
+            None: Description of the return value.
         
         Raises:
-        Exception: Description of why this exception might be raised.
+            Exception: Description of why this exception might be raised.
         """
 
         self.console = Console()
@@ -131,7 +131,20 @@ class RichTelemetryObserver(TelemetryObserver):
 
     def trace_event(self, name: str, payload: Dict[str, object]) -> None:
 
-        """Append a JSONL trace event."""
+        """Record a trace event as JSONL.
+
+        Append a timestamped payload to the execution trace log.
+
+        Args:
+            name (str): Name of the trace event.
+            payload (Dict[str, object]): Event metadata to store.
+
+        Returns:
+            None: This method does not return a value.
+
+        Raises:
+            Exception: If the trace file cannot be written.
+        """
 
         record = {"ts": time.time(), "name": name}
 
@@ -146,7 +159,22 @@ class RichTelemetryObserver(TelemetryObserver):
 
     def trace_bottleneck(self, name: str, duration_sec: float, threshold_sec: float) -> None:
 
-        """Record a bottleneck entry when duration exceeds the threshold."""
+        """Record a bottleneck entry when duration exceeds the threshold.
+
+        Write a log line to the bottleneck file when the duration crosses the
+        threshold.
+
+        Args:
+            name (str): Name of the measured operation.
+            duration_sec (float): Observed duration in seconds.
+            threshold_sec (float): Duration threshold in seconds.
+
+        Returns:
+            None: This method does not return a value.
+
+        Raises:
+            Exception: If the bottleneck log cannot be written.
+        """
 
         if duration_sec < threshold_sec:
 
@@ -169,13 +197,13 @@ class RichTelemetryObserver(TelemetryObserver):
         Longer description of the _build_file_logger behavior and usage.
         
         Args:
-        None (None): This function does not accept arguments.
+            None (None): This function does not accept arguments.
         
         Returns:
-        Any: Description of the return value.
+            Any: Description of the return value.
         
         Raises:
-        Exception: Description of why this exception might be raised.
+            Exception: Description of why this exception might be raised.
         """
 
         loguru_logger.remove()
@@ -233,14 +261,14 @@ class RichTelemetryObserver(TelemetryObserver):
         Longer description of the log behavior and usage.
         
         Args:
-        level (Any): Description of level.
-        message (Any): Description of message.
+            level (Any): Description of level.
+            message (Any): Description of message.
         
         Returns:
-        None: Description of the return value.
+            None: Description of the return value.
         
         Raises:
-        Exception: Description of why this exception might be raised.
+            Exception: Description of why this exception might be raised.
         """
 
         normalized = level.upper()
@@ -256,15 +284,15 @@ class RichTelemetryObserver(TelemetryObserver):
         Longer description of the track_metric behavior and usage.
         
         Args:
-        name (Any): Description of name.
-        value (Any): Description of value.
-        step (Any): Description of step.
+            name (Any): Description of name.
+            value (Any): Description of value.
+            step (Any): Description of step.
         
         Returns:
-        None: Description of the return value.
+            None: Description of the return value.
         
         Raises:
-        Exception: Description of why this exception might be raised.
+            Exception: Description of why this exception might be raised.
         """
 
         if name not in self.metrics:
@@ -296,14 +324,14 @@ class RichTelemetryObserver(TelemetryObserver):
         Longer description of the create_progress behavior and usage.
         
         Args:
-        desc (Any): Description of desc.
-        total (Any): Description of total.
+            desc (Any): Description of desc.
+            total (Any): Description of total.
         
         Returns:
-        Progress: Description of the return value.
+            Progress: Description of the return value.
         
         Raises:
-        Exception: Description of why this exception might be raised.
+            Exception: Description of why this exception might be raised.
         """
 
         progress = Progress(
@@ -337,20 +365,32 @@ class RichTelemetryObserver(TelemetryObserver):
         Longer description of the get_child_progress behavior and usage.
         
         Args:
-        None (None): This function does not accept arguments.
+            None (None): This function does not accept arguments.
         
         Returns:
-        Optional[Progress]: Description of the return value.
+            Optional[Progress]: Description of the return value.
         
         Raises:
-        Exception: Description of why this exception might be raised.
+            Exception: Description of why this exception might be raised.
         """
 
         return self._active_progress
 
     def render_stage0_receipt(self, context: object) -> None:
 
-        """Render a static receipt-style summary for stage 0."""
+        """Render a static receipt-style summary for stage 0.
+
+        Display initialization details and output paths for the current run.
+
+        Args:
+            context (object): Context object with optional run metadata.
+
+        Returns:
+            None: This method does not return a value.
+
+        Raises:
+            Exception: If rendering to the console fails.
+        """
 
         tree = Tree("Pipeline Receipt", guide_style="dim")
 
@@ -379,7 +419,20 @@ class RichTelemetryObserver(TelemetryObserver):
 
     def render_run_end(self, status: str, message: str) -> None:
 
-        """Render a run-end panel with status."""
+        """Render a run-end panel with status.
+
+        Print a status panel indicating success or failure and a message.
+
+        Args:
+            status (str): Run status label such as "success" or "failed".
+            message (str): Human-readable status message.
+
+        Returns:
+            None: This method does not return a value.
+
+        Raises:
+            Exception: If rendering to the console fails.
+        """
 
         style = "green" if status == "success" else "red"
 
@@ -390,7 +443,19 @@ class RichTelemetryObserver(TelemetryObserver):
 
     def start_dashboard(self, title: str) -> None:
 
-        """Start a live dashboard for training metrics."""
+        """Start a live dashboard for training metrics.
+
+        Initialize the layout and progress widgets needed for live updates.
+
+        Args:
+            title (str): Title to display in the dashboard header.
+
+        Returns:
+            None: This method does not return a value.
+
+        Raises:
+            Exception: If the live dashboard cannot be started.
+        """
 
         if self._dashboard_live is not None:
 
@@ -437,7 +502,23 @@ class RichTelemetryObserver(TelemetryObserver):
         note: str = "",
     ) -> None:
 
-        """Update the live dashboard content."""
+        """Update the live dashboard content.
+
+        Refresh the dashboard header and metrics table with the latest values.
+
+        Args:
+            stage (str): Name of the current training stage.
+            epoch (Optional[int]): Current epoch number when available.
+            total_epochs (Optional[int]): Total epochs when available.
+            metrics (Dict[str, float]): Key-value metrics to render.
+            note (str): Optional note to append to the header.
+
+        Returns:
+            None: This method does not return a value.
+
+        Raises:
+            Exception: If the dashboard cannot be updated.
+        """
 
         if self._dashboard_live is None or self._dashboard_layout is None:
 
@@ -505,7 +586,20 @@ class RichTelemetryObserver(TelemetryObserver):
 
     def start_progress_view(self, title: str, total: int) -> None:
 
-        """Start a live progress view for ETL."""
+        """Start a live progress view for ETL.
+
+        Initialize the layout and progress widget for ETL stages.
+
+        Args:
+            title (str): Title to display in the progress header.
+            total (int): Total number of steps to track.
+
+        Returns:
+            None: This method does not return a value.
+
+        Raises:
+            Exception: If the progress view cannot be started.
+        """
 
         if self._progress_live is not None:
             return

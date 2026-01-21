@@ -36,13 +36,13 @@ def _to_python_list(val: Any) -> List[str]:
     Longer description of the _to_python_list behavior and usage.
     
     Args:
-    val (Any): Description of val.
+        val (Any): Description of val.
     
     Returns:
-    List[str]: Description of the return value.
+        List[str]: Description of the return value.
     
     Raises:
-    Exception: Description of why this exception might be raised.
+        Exception: Description of why this exception might be raised.
     """
 
     if isinstance(val, np.ndarray):
@@ -84,15 +84,15 @@ def custom_collate(batch, tokenizer, max_length):
     Longer description of the custom_collate behavior and usage.
     
     Args:
-    batch (Any): Description of batch.
-    tokenizer (Any): Description of tokenizer.
-    max_length (Any): Description of max_length.
+        batch (Any): Description of batch.
+        tokenizer (Any): Description of tokenizer.
+        max_length (Any): Description of max_length.
     
     Returns:
-    Any: Description of the return value.
+        Any: Description of the return value.
     
     Raises:
-    Exception: Description of why this exception might be raised.
+        Exception: Description of why this exception might be raised.
     """
 
     nums, labs, lists, cands = zip(*[(b["num"], b["lab"], b["lst"], b["cand"]) for b in batch])
@@ -140,10 +140,10 @@ class ICDDataset(Dataset):
     Longer description of the class behavior and usage.
     
     Attributes:
-    X (Any): Description of X.
-    cand (Any): Description of cand.
-    lst (Any): Description of lst.
-    y (Any): Description of y.
+        X (Any): Description of X.
+        cand (Any): Description of cand.
+        lst (Any): Description of lst.
+        y (Any): Description of y.
     """
 
     def __init__(self, df, feats, label_col, list_col, cand_col="candidate_indices"):
@@ -153,17 +153,17 @@ class ICDDataset(Dataset):
         Longer description of the __init__ behavior and usage.
         
         Args:
-        df (Any): Description of df.
-        feats (Any): Description of feats.
-        label_col (Any): Description of label_col.
-        list_col (Any): Description of list_col.
-        cand_col (Any): Description of cand_col.
+            df (Any): Description of df.
+            feats (Any): Description of feats.
+            label_col (Any): Description of label_col.
+            list_col (Any): Description of list_col.
+            cand_col (Any): Description of cand_col.
         
         Returns:
-        None: Description of the return value.
+            None: Description of the return value.
         
         Raises:
-        Exception: Description of why this exception might be raised.
+            Exception: Description of why this exception might be raised.
         """
 
         self.X = df[feats].to_numpy(dtype=np.float32, copy=True)
@@ -189,13 +189,13 @@ class ICDDataset(Dataset):
         Longer description of the __len__ behavior and usage.
         
         Args:
-        None (None): This function does not accept arguments.
+            None (None): This function does not accept arguments.
         
         Returns:
-        int: Description of the return value.
+            int: Description of the return value.
         
         Raises:
-        Exception: Description of why this exception might be raised.
+            Exception: Description of why this exception might be raised.
         """
 
         return len(self.y)
@@ -209,13 +209,13 @@ class ICDDataset(Dataset):
         Longer description of the __getitem__ behavior and usage.
         
         Args:
-        i (Any): Description of i.
+            i (Any): Description of i.
         
         Returns:
-        Dict[str, Any]: Description of the return value.
+            Dict[str, Any]: Description of the return value.
         
         Raises:
-        Exception: Description of why this exception might be raised.
+            Exception: Description of why this exception might be raised.
         """
 
         num = torch.tensor(self.X[i], dtype=torch.float32)
@@ -235,13 +235,13 @@ def collate_tensor_batch(batch: List[TensorBatch]) -> TensorBatch:
     Longer description of the collate_tensor_batch behavior and usage.
     
     Args:
-    batch (Any): Description of batch.
+        batch (Any): Description of batch.
     
     Returns:
-    TensorBatch: Description of the return value.
+        TensorBatch: Description of the return value.
     
     Raises:
-    Exception: Description of why this exception might be raised.
+        Exception: Description of why this exception might be raised.
     """
 
     x_num = torch.stack([b.x_num for b in batch])
@@ -305,8 +305,8 @@ class ParquetSource(StreamingSource):
     Longer description of the class behavior and usage.
     
     Attributes:
-    _df (Any): Description of _df.
-    file_path (Any): Description of file_path.
+        _df (Any): Description of _df.
+        file_path (Any): Description of file_path.
     """
 
     def __init__(self, file_path: Union[str, Path]):
@@ -316,13 +316,13 @@ class ParquetSource(StreamingSource):
         Longer description of the __init__ behavior and usage.
         
         Args:
-        file_path (Any): Description of file_path.
+            file_path (Any): Description of file_path.
         
         Returns:
-        None: Description of the return value.
+            None: Description of the return value.
         
         Raises:
-        Exception: Description of why this exception might be raised.
+            Exception: Description of why this exception might be raised.
         """
 
         self.file_path = Path(file_path)
@@ -348,13 +348,13 @@ class ParquetSource(StreamingSource):
         Longer description of the load behavior and usage.
         
         Args:
-        None (None): This function does not accept arguments.
+            None (None): This function does not accept arguments.
         
         Returns:
-        pl.DataFrame: Description of the return value.
+            pl.DataFrame: Description of the return value.
         
         Raises:
-        Exception: Description of why this exception might be raised.
+            Exception: Description of why this exception might be raised.
         """
 
         try:
@@ -378,13 +378,13 @@ class ParquetSource(StreamingSource):
         Longer description of the __iter__ behavior and usage.
         
         Args:
-        None (None): This function does not accept arguments.
+            None (None): This function does not accept arguments.
         
         Returns:
-        Generator[Dict[str, Any], None, None]: Description of the return value.
+            Generator[Dict[str, Any], None, None]: Description of the return value.
         
         Raises:
-        Exception: Description of why this exception might be raised.
+            Exception: Description of why this exception might be raised.
         """
 
         try:
@@ -410,13 +410,13 @@ class ParquetSource(StreamingSource):
         Longer description of the __len__ behavior and usage.
         
         Args:
-        None (None): This function does not accept arguments.
+            None (None): This function does not accept arguments.
         
         Returns:
-        int: Description of the return value.
+            int: Description of the return value.
         
         Raises:
-        Exception: Description of why this exception might be raised.
+            Exception: Description of why this exception might be raised.
         """
 
         try:
@@ -436,10 +436,10 @@ class HDF5StreamingSource(Dataset):
     Longer description of the class behavior and usage.
     
     Attributes:
-    _len (Any): Description of _len.
-    h5_file (Any): Description of h5_file.
-    h5_path (Any): Description of h5_path.
-    label_key (Any): Description of label_key.
+        _len (Any): Description of _len.
+        h5_file (Any): Description of h5_file.
+        h5_path (Any): Description of h5_path.
+        label_key (Any): Description of label_key.
     """
 
     def __init__(self, h5_path: Path, seq_len: int = 0, label_key: str = "y"):
@@ -449,15 +449,15 @@ class HDF5StreamingSource(Dataset):
         Longer description of the __init__ behavior and usage.
         
         Args:
-        h5_path (Any): Description of h5_path.
-        seq_len (Any): Description of seq_len.
-        label_key (Any): Description of label_key.
+            h5_path (Any): Description of h5_path.
+            seq_len (Any): Description of seq_len.
+            label_key (Any): Description of label_key.
         
         Returns:
-        None: Description of the return value.
+            None: Description of the return value.
         
         Raises:
-        Exception: Description of why this exception might be raised.
+            Exception: Description of why this exception might be raised.
         """
 
         self.h5_path = Path(h5_path)
@@ -497,13 +497,13 @@ class HDF5StreamingSource(Dataset):
         Longer description of the __len__ behavior and usage.
         
         Args:
-        None (None): This function does not accept arguments.
+            None (None): This function does not accept arguments.
         
         Returns:
-        int: Description of the return value.
+            int: Description of the return value.
         
         Raises:
-        Exception: Description of why this exception might be raised.
+            Exception: Description of why this exception might be raised.
         """
 
         return self._len
@@ -517,13 +517,13 @@ class HDF5StreamingSource(Dataset):
         Longer description of the __getitem__ behavior and usage.
         
         Args:
-        idx (Any): Description of idx.
+            idx (Any): Description of idx.
         
         Returns:
-        TensorBatch: Description of the return value.
+            TensorBatch: Description of the return value.
         
         Raises:
-        Exception: Description of why this exception might be raised.
+            Exception: Description of why this exception might be raised.
         """
 
         if self.h5_file is None:
@@ -629,13 +629,13 @@ class HDF5StreamingSource(Dataset):
         Longer description of the get_real_vocab_sizes behavior and usage.
         
         Args:
-        None (None): This function does not accept arguments.
+            None (None): This function does not accept arguments.
         
         Returns:
-        List[int]: Description of the return value.
+            List[int]: Description of the return value.
         
         Raises:
-        Exception: Description of why this exception might be raised.
+            Exception: Description of why this exception might be raised.
         """
 
         should_close = False
@@ -683,13 +683,13 @@ class HDF5StreamingSource(Dataset):
         Longer description of the close behavior and usage.
         
         Args:
-        None (None): This function does not accept arguments.
+            None (None): This function does not accept arguments.
         
         Returns:
-        Any: Description of the return value.
+            Any: Description of the return value.
         
         Raises:
-        Exception: Description of why this exception might be raised.
+            Exception: Description of why this exception might be raised.
         """
 
         if self.h5_file is not None:

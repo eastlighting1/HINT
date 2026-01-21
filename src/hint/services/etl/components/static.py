@@ -20,9 +20,9 @@ class StaticExtractor(PipelineComponent):
     Longer description of the class behavior and usage.
     
     Attributes:
-    cfg (Any): Description of cfg.
-    observer (Any): Description of observer.
-    registry (Any): Description of registry.
+        cfg (Any): Description of cfg.
+        observer (Any): Description of observer.
+        registry (Any): Description of registry.
     """
 
 
@@ -34,15 +34,15 @@ class StaticExtractor(PipelineComponent):
         Longer description of the __init__ behavior and usage.
         
         Args:
-        config (Any): Description of config.
-        registry (Any): Description of registry.
-        observer (Any): Description of observer.
+            config (Any): Description of config.
+            registry (Any): Description of registry.
+            observer (Any): Description of observer.
         
         Returns:
-        None: Description of the return value.
+            None: Description of the return value.
         
         Raises:
-        Exception: Description of why this exception might be raised.
+            Exception: Description of why this exception might be raised.
         """
 
         self.cfg = config
@@ -60,13 +60,13 @@ class StaticExtractor(PipelineComponent):
         Longer description of the execute behavior and usage.
         
         Args:
-        None (None): This function does not accept arguments.
+            None (None): This function does not accept arguments.
         
         Returns:
-        None: Description of the return value.
+            None: Description of the return value.
         
         Raises:
-        Exception: Description of why this exception might be raised.
+            Exception: Description of why this exception might be raised.
         """
 
         raw_dir = Path(self.cfg.raw_dir)
@@ -88,13 +88,13 @@ class StaticExtractor(PipelineComponent):
             Longer description of the find_raw_file behavior and usage.
             
             Args:
-            table (Any): Description of table.
+                table (Any): Description of table.
             
             Returns:
-            Path: Description of the return value.
+                Path: Description of the return value.
             
             Raises:
-            Exception: Description of why this exception might be raised.
+                Exception: Description of why this exception might be raised.
             """
 
             cand_gz = raw_dir / f"{table}.csv.gz"
@@ -116,13 +116,13 @@ class StaticExtractor(PipelineComponent):
             Longer description of the to_datetime_iso behavior and usage.
             
             Args:
-            col (Any): Description of col.
+                col (Any): Description of col.
             
             Returns:
-            pl.Expr: Description of the return value.
+                pl.Expr: Description of the return value.
             
             Raises:
-            Exception: Description of why this exception might be raised.
+                Exception: Description of why this exception might be raised.
             """
 
             base = pl.col(col).str.to_datetime(time_unit="us", time_zone="UTC", strict=False)

@@ -18,7 +18,7 @@ from omegaconf import OmegaConf
 
 from ..foundation.interfaces import Registry, TelemetryObserver, PipelineComponent
 
-from ..domain.vo import ETLConfig, ICDConfig, CNNConfig
+from ..domain.vo import ETLConfig, ICDConfig, InterventionConfig
 
 from ..domain.entities import InterventionModelEntity, ICDModelEntity
 
@@ -68,9 +68,9 @@ class AppFactory:
     Longer description of the class behavior and usage.
     
     Attributes:
-    ctx (Any): Description of ctx.
-    loader (Any): Description of loader.
-    raw_cfg (Any): Description of raw_cfg.
+        ctx (Any): Description of ctx.
+        loader (Any): Description of loader.
+        raw_cfg (Any): Description of raw_cfg.
     """
 
     def __init__(self, config_name: str = "config", config_path: str = "configs"):
@@ -80,14 +80,14 @@ class AppFactory:
         Longer description of the __init__ behavior and usage.
         
         Args:
-        config_name (Any): Description of config_name.
-        config_path (Any): Description of config_path.
+            config_name (Any): Description of config_name.
+            config_path (Any): Description of config_path.
         
         Returns:
-        None: Description of the return value.
+            None: Description of the return value.
         
         Raises:
-        Exception: Description of why this exception might be raised.
+            Exception: Description of why this exception might be raised.
         """
 
         self.loader = HydraConfigLoader(config_name=config_name, config_path=config_path)
@@ -108,13 +108,13 @@ class AppFactory:
         Longer description of the _init_run_dir behavior and usage.
         
         Args:
-        None (None): This function does not accept arguments.
+            None (None): This function does not accept arguments.
         
         Returns:
-        Path: Description of the return value.
+            Path: Description of the return value.
         
         Raises:
-        Exception: Description of why this exception might be raised.
+            Exception: Description of why this exception might be raised.
         """
 
         logging_cfg = self.raw_cfg.get("logging", {}) or {}
@@ -157,7 +157,20 @@ class AppFactory:
 
     def _write_initial_artifacts(self) -> None:
 
-        """Write config and system metadata into the run artifacts directory."""
+        """Write initial configuration artifacts.
+
+        Create the artifacts directory and persist the configuration snapshot and
+        system metadata for the current run.
+
+        Args:
+            None (None): This function does not accept arguments.
+
+        Returns:
+            None: This method does not return a value.
+
+        Raises:
+            Exception: If writing the artifacts to disk fails.
+        """
 
         artifacts_dir = self.run_dir / "artifacts"
 
@@ -202,13 +215,13 @@ class AppFactory:
         Longer description of the create_registry behavior and usage.
         
         Args:
-        None (None): This function does not accept arguments.
+            None (None): This function does not accept arguments.
         
         Returns:
-        Registry: Description of the return value.
+            Registry: Description of the return value.
         
         Raises:
-        Exception: Description of why this exception might be raised.
+            Exception: Description of why this exception might be raised.
         """
 
         path = self.raw_cfg.get("logging", {}).get("artifacts_dir", "artifacts")
@@ -224,13 +237,13 @@ class AppFactory:
         Longer description of the create_telemetry behavior and usage.
         
         Args:
-        None (None): This function does not accept arguments.
+            None (None): This function does not accept arguments.
         
         Returns:
-        TelemetryObserver: Description of the return value.
+            TelemetryObserver: Description of the return value.
         
         Raises:
-        Exception: Description of why this exception might be raised.
+            Exception: Description of why this exception might be raised.
         """
 
         return RichTelemetryObserver(run_dir=self.run_dir)
@@ -244,13 +257,13 @@ class AppFactory:
         Longer description of the create_etl_service behavior and usage.
         
         Args:
-        None (None): This function does not accept arguments.
+            None (None): This function does not accept arguments.
         
         Returns:
-        Any: Description of the return value.
+            Any: Description of the return value.
         
         Raises:
-        Exception: Description of why this exception might be raised.
+            Exception: Description of why this exception might be raised.
         """
 
 
@@ -261,7 +274,7 @@ class AppFactory:
 
         etl_cfg = self.ctx.etl
 
-        cnn_cfg = self.ctx.cnn
+        intervention_cfg = self.ctx.intervention
 
         icd_cfg = self.ctx.icd
 
@@ -278,13 +291,13 @@ class AppFactory:
 
         ts_aggregator = TimeSeriesAggregator(etl_cfg, registry, observer)
 
-        outcomes_builder = OutcomesBuilder(etl_cfg, cnn_cfg, registry, observer)
+        outcomes_builder = OutcomesBuilder(etl_cfg, intervention_cfg, registry, observer)
 
         vent_tagger = VentilationTagger(etl_cfg, registry, observer)
 
 
 
-        assembler = FeatureAssembler(etl_cfg, cnn_cfg, registry, observer)
+        assembler = FeatureAssembler(etl_cfg, intervention_cfg, registry, observer)
 
         label_gen = LabelGenerator(
 
@@ -292,7 +305,7 @@ class AppFactory:
 
             icd_config=icd_cfg,
 
-            cnn_config=cnn_cfg,
+            intervention_config=intervention_cfg,
 
             registry=registry,
 
@@ -306,7 +319,7 @@ class AppFactory:
 
             etl_config=etl_cfg,
 
-            cnn_config=cnn_cfg,
+            intervention_config=intervention_cfg,
 
             icd_config=icd_cfg,
 
@@ -354,13 +367,13 @@ class AppFactory:
         Longer description of the create_icd_service behavior and usage.
         
         Args:
-        None (None): This function does not accept arguments.
+            None (None): This function does not accept arguments.
         
         Returns:
-        Any: Description of the return value.
+            Any: Description of the return value.
         
         Raises:
-        Exception: Description of why this exception might be raised.
+            Exception: Description of why this exception might be raised.
         """
 
 
@@ -441,13 +454,13 @@ class AppFactory:
         Longer description of the create_intervention_service behavior and usage.
         
         Args:
-        None (None): This function does not accept arguments.
+            None (None): This function does not accept arguments.
         
         Returns:
-        Any: Description of the return value.
+            Any: Description of the return value.
         
         Raises:
-        Exception: Description of why this exception might be raised.
+            Exception: Description of why this exception might be raised.
         """
 
 
@@ -456,7 +469,7 @@ class AppFactory:
 
 
 
-        cfg = self.ctx.cnn
+        cfg = self.ctx.intervention
 
         registry = self.create_registry()
 

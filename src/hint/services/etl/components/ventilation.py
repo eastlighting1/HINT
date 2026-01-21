@@ -20,9 +20,9 @@ class VentilationTagger(PipelineComponent):
     Longer description of the class behavior and usage.
     
     Attributes:
-    cfg (Any): Description of cfg.
-    observer (Any): Description of observer.
-    registry (Any): Description of registry.
+        cfg (Any): Description of cfg.
+        observer (Any): Description of observer.
+        registry (Any): Description of registry.
     """
 
 
@@ -34,15 +34,15 @@ class VentilationTagger(PipelineComponent):
         Longer description of the __init__ behavior and usage.
         
         Args:
-        config (Any): Description of config.
-        registry (Any): Description of registry.
-        observer (Any): Description of observer.
+            config (Any): Description of config.
+            registry (Any): Description of registry.
+            observer (Any): Description of observer.
         
         Returns:
-        None: Description of the return value.
+            None: Description of the return value.
         
         Raises:
-        Exception: Description of why this exception might be raised.
+            Exception: Description of why this exception might be raised.
         """
 
         self.cfg = config
@@ -60,13 +60,13 @@ class VentilationTagger(PipelineComponent):
         Longer description of the execute behavior and usage.
         
         Args:
-        None (None): This function does not accept arguments.
+            None (None): This function does not accept arguments.
         
         Returns:
-        None: Description of the return value.
+            None: Description of the return value.
         
         Raises:
-        Exception: Description of why this exception might be raised.
+            Exception: Description of why this exception might be raised.
         """
 
         resources_dir = Path(self.cfg.resources_dir)

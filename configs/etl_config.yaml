@@ -1,6 +1,6 @@
 data:
   raw_dir: "data/raw"
-  proc_dir: "data/processed" 
+  proc_dir: "data/processed"
   resources_dir: "resources"
 
 cohort:

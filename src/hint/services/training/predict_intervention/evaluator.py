@@ -19,7 +19,7 @@ from ..common.base import BaseEvaluator
 
 from ....domain.entities import InterventionModelEntity
 
-from ....domain.vo import CNNConfig
+from ....domain.vo import InterventionConfig
 
 
 
@@ -30,28 +30,28 @@ class InterventionEvaluator(BaseEvaluator):
     Longer description of the class behavior and usage.
     
     Attributes:
-    cfg (Any): Description of cfg.
-    entity (Any): Description of entity.
+        cfg (Any): Description of cfg.
+        entity (Any): Description of entity.
     """
 
-    def __init__(self, config: CNNConfig, entity: InterventionModelEntity, registry, observer, device):
+    def __init__(self, config: InterventionConfig, entity: InterventionModelEntity, registry, observer, device):
 
         """Summary of __init__.
         
         Longer description of the __init__ behavior and usage.
         
         Args:
-        config (Any): Description of config.
-        entity (Any): Description of entity.
-        registry (Any): Description of registry.
-        observer (Any): Description of observer.
-        device (Any): Description of device.
+            config (Any): Description of config.
+            entity (Any): Description of entity.
+            registry (Any): Description of registry.
+            observer (Any): Description of observer.
+            device (Any): Description of device.
         
         Returns:
-        None: Description of the return value.
+            None: Description of the return value.
         
         Raises:
-        Exception: Description of why this exception might be raised.
+            Exception: Description of why this exception might be raised.
         """
 
         super().__init__(registry, observer, device)
@@ -67,13 +67,13 @@ class InterventionEvaluator(BaseEvaluator):
         Longer description of the _select_last_valid behavior and usage.
         
         Args:
-        y (Any): Description of y.
+            y (Any): Description of y.
         
         Returns:
-        torch.Tensor: Description of the return value.
+            torch.Tensor: Description of the return value.
         
         Raises:
-        Exception: Description of why this exception might be raised.
+            Exception: Description of why this exception might be raised.
         """
 
         if y.dim() == 1:
@@ -105,14 +105,14 @@ class InterventionEvaluator(BaseEvaluator):
         Longer description of the evaluate behavior and usage.
         
         Args:
-        loader (Any): Description of loader.
-        kwargs (Any): Description of kwargs.
+            loader (Any): Description of loader.
+            kwargs (Any): Description of kwargs.
         
         Returns:
-        Dict[str, float]: Description of the return value.
+            Dict[str, float]: Description of the return value.
         
         Raises:
-        Exception: Description of why this exception might be raised.
+            Exception: Description of why this exception might be raised.
         """
 
         self.entity.network.eval()

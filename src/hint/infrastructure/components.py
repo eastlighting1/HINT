@@ -26,10 +26,10 @@ class FocalLoss(nn.Module):
     Longer description of the class behavior and usage.
     
     Attributes:
-    alpha (Any): Description of alpha.
-    gamma (Any): Description of gamma.
-    label_smoothing (Any): Description of label_smoothing.
-    num_classes (Any): Description of num_classes.
+        alpha (Any): Description of alpha.
+        gamma (Any): Description of gamma.
+        label_smoothing (Any): Description of label_smoothing.
+        num_classes (Any): Description of num_classes.
     """
 
     def __init__(self, alpha: Optional[torch.Tensor] = None, gamma: float = 2.0, label_smoothing: float = 0.0, num_classes: int = 4):
@@ -39,16 +39,16 @@ class FocalLoss(nn.Module):
         Longer description of the __init__ behavior and usage.
         
         Args:
-        alpha (Any): Description of alpha.
-        gamma (Any): Description of gamma.
-        label_smoothing (Any): Description of label_smoothing.
-        num_classes (Any): Description of num_classes.
+            alpha (Any): Description of alpha.
+            gamma (Any): Description of gamma.
+            label_smoothing (Any): Description of label_smoothing.
+            num_classes (Any): Description of num_classes.
         
         Returns:
-        None: Description of the return value.
+            None: Description of the return value.
         
         Raises:
-        Exception: Description of why this exception might be raised.
+            Exception: Description of why this exception might be raised.
         """
 
         super().__init__()
@@ -70,14 +70,14 @@ class FocalLoss(nn.Module):
         Longer description of the forward behavior and usage.
         
         Args:
-        logits (Any): Description of logits.
-        targets (Any): Description of targets.
+            logits (Any): Description of logits.
+            targets (Any): Description of targets.
         
         Returns:
-        torch.Tensor: Description of the return value.
+            torch.Tensor: Description of the return value.
         
         Raises:
-        Exception: Description of why this exception might be raised.
+            Exception: Description of why this exception might be raised.
         """
 
         log_probs = F.log_softmax(logits, dim=1)
@@ -125,8 +125,8 @@ class CBFocalLoss(nn.Module):
     Longer description of the class behavior and usage.
     
     Attributes:
-    class_weights (Any): Description of class_weights.
-    gamma (Any): Description of gamma.
+        class_weights (Any): Description of class_weights.
+        gamma (Any): Description of gamma.
     """
 
     def __init__(self, class_counts: np.ndarray, beta: float = 0.999, gamma: float = 1.5, device: str = 'cpu'):
@@ -136,16 +136,16 @@ class CBFocalLoss(nn.Module):
         Longer description of the __init__ behavior and usage.
         
         Args:
-        class_counts (Any): Description of class_counts.
-        beta (Any): Description of beta.
-        gamma (Any): Description of gamma.
-        device (Any): Description of device.
+            class_counts (Any): Description of class_counts.
+            beta (Any): Description of beta.
+            gamma (Any): Description of gamma.
+            device (Any): Description of device.
         
         Returns:
-        None: Description of the return value.
+            None: Description of the return value.
         
         Raises:
-        Exception: Description of why this exception might be raised.
+            Exception: Description of why this exception might be raised.
         """
 
         super().__init__()
@@ -185,14 +185,14 @@ class CBFocalLoss(nn.Module):
         Longer description of the forward behavior and usage.
         
         Args:
-        logits (Any): Description of logits.
-        targets (Any): Description of targets.
+            logits (Any): Description of logits.
+            targets (Any): Description of targets.
         
         Returns:
-        Any: Description of the return value.
+            Any: Description of the return value.
         
         Raises:
-        Exception: Description of why this exception might be raised.
+            Exception: Description of why this exception might be raised.
         """
 
         if self.class_weights.device != logits.device:
@@ -218,7 +218,7 @@ class CLPLLoss(nn.Module):
     Longer description of the class behavior and usage.
     
     Attributes:
-    None (None): No documented attributes.
+        None (None): No documented attributes.
     """
 
     def __init__(self):
@@ -228,13 +228,13 @@ class CLPLLoss(nn.Module):
         Longer description of the __init__ behavior and usage.
         
         Args:
-        None (None): This function does not accept arguments.
+            None (None): This function does not accept arguments.
         
         Returns:
-        None: Description of the return value.
+            None: Description of the return value.
         
         Raises:
-        Exception: Description of why this exception might be raised.
+            Exception: Description of why this exception might be raised.
         """
 
         super().__init__()
@@ -248,14 +248,14 @@ class CLPLLoss(nn.Module):
         Longer description of the forward behavior and usage.
         
         Args:
-        logits (Any): Description of logits.
-        candidate_mask (Any): Description of candidate_mask.
+            logits (Any): Description of logits.
+            candidate_mask (Any): Description of candidate_mask.
         
         Returns:
-        torch.Tensor: Description of the return value.
+            torch.Tensor: Description of the return value.
         
         Raises:
-        Exception: Description of why this exception might be raised.
+            Exception: Description of why this exception might be raised.
         """
 
 
@@ -307,9 +307,9 @@ class XGBoostStacker:
     Longer description of the class behavior and usage.
     
     Attributes:
-    model (Any): Description of model.
-    params (Any): Description of params.
-    pca (Any): Description of pca.
+        model (Any): Description of model.
+        params (Any): Description of params.
+        pca (Any): Description of pca.
     """
 
     def __init__(self, params: Dict):
@@ -319,13 +319,13 @@ class XGBoostStacker:
         Longer description of the __init__ behavior and usage.
         
         Args:
-        params (Any): Description of params.
+            params (Any): Description of params.
         
         Returns:
-        None: Description of the return value.
+            None: Description of the return value.
         
         Raises:
-        Exception: Description of why this exception might be raised.
+            Exception: Description of why this exception might be raised.
         """
 
         self.params = params
@@ -345,14 +345,14 @@ class XGBoostStacker:
         Longer description of the fit_pca behavior and usage.
         
         Args:
-        X (Any): Description of X.
-        n_components (Any): Description of n_components.
+            X (Any): Description of X.
+            n_components (Any): Description of n_components.
         
         Returns:
-        Any: Description of the return value.
+            Any: Description of the return value.
         
         Raises:
-        Exception: Description of why this exception might be raised.
+            Exception: Description of why this exception might be raised.
         """
 
         self.pca = PCA(n_components=n_components)
@@ -368,13 +368,13 @@ class XGBoostStacker:
         Longer description of the transform_pca behavior and usage.
         
         Args:
-        X (Any): Description of X.
+            X (Any): Description of X.
         
         Returns:
-        Any: Description of the return value.
+            Any: Description of the return value.
         
         Raises:
-        Exception: Description of why this exception might be raised.
+            Exception: Description of why this exception might be raised.
         """
 
         if self.pca is None: return X
@@ -390,14 +390,14 @@ class XGBoostStacker:
         Longer description of the fit behavior and usage.
         
         Args:
-        X (Any): Description of X.
-        y (Any): Description of y.
+            X (Any): Description of X.
+            y (Any): Description of y.
         
         Returns:
-        Any: Description of the return value.
+            Any: Description of the return value.
         
         Raises:
-        Exception: Description of why this exception might be raised.
+            Exception: Description of why this exception might be raised.
         """
 
         self.model.fit(X, y)
@@ -411,13 +411,13 @@ class XGBoostStacker:
         Longer description of the predict behavior and usage.
         
         Args:
-        X (Any): Description of X.
+            X (Any): Description of X.
         
         Returns:
-        Any: Description of the return value.
+            Any: Description of the return value.
         
         Raises:
-        Exception: Description of why this exception might be raised.
+            Exception: Description of why this exception might be raised.
         """
 
         return self.model.predict(X)

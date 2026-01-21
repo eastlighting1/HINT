@@ -20,7 +20,7 @@ class RK4Solver(nn.Module):
     Longer description of the class behavior and usage.
     
     Attributes:
-    func (Any): Description of func.
+        func (Any): Description of func.
     """
 
     def __init__(self, func):
@@ -30,13 +30,13 @@ class RK4Solver(nn.Module):
         Longer description of the __init__ behavior and usage.
         
         Args:
-        func (Any): Description of func.
+            func (Any): Description of func.
         
         Returns:
-        None: Description of the return value.
+            None: Description of the return value.
         
         Raises:
-        Exception: Description of why this exception might be raised.
+            Exception: Description of why this exception might be raised.
         """
 
         super().__init__()
@@ -52,14 +52,14 @@ class RK4Solver(nn.Module):
         Longer description of the forward behavior and usage.
         
         Args:
-        z0 (Any): Description of z0.
-        t_span (Any): Description of t_span.
+            z0 (Any): Description of z0.
+            t_span (Any): Description of t_span.
         
         Returns:
-        Any: Description of the return value.
+            Any: Description of the return value.
         
         Raises:
-        Exception: Description of why this exception might be raised.
+            Exception: Description of why this exception might be raised.
         """
 
 
@@ -97,7 +97,7 @@ class ODEFunc(nn.Module):
     Longer description of the class behavior and usage.
     
     Attributes:
-    net (Any): Description of net.
+        net (Any): Description of net.
     """
 
     def __init__(self, latent_dim, hidden_dim=64):
@@ -107,14 +107,14 @@ class ODEFunc(nn.Module):
         Longer description of the __init__ behavior and usage.
         
         Args:
-        latent_dim (Any): Description of latent_dim.
-        hidden_dim (Any): Description of hidden_dim.
+            latent_dim (Any): Description of latent_dim.
+            hidden_dim (Any): Description of hidden_dim.
         
         Returns:
-        None: Description of the return value.
+            None: Description of the return value.
         
         Raises:
-        Exception: Description of why this exception might be raised.
+            Exception: Description of why this exception might be raised.
         """
 
         super().__init__()
@@ -136,14 +136,14 @@ class ODEFunc(nn.Module):
         Longer description of the forward behavior and usage.
         
         Args:
-        t (Any): Description of t.
-        x (Any): Description of x.
+            t (Any): Description of t.
+            x (Any): Description of x.
         
         Returns:
-        Any: Description of the return value.
+            Any: Description of the return value.
         
         Raises:
-        Exception: Description of why this exception might be raised.
+            Exception: Description of why this exception might be raised.
         """
 
         return self.net(x)
@@ -157,13 +157,13 @@ class LatentODEClassifier(BaseICDClassifier):
     Longer description of the class behavior and usage.
     
     Attributes:
-    classifier (Any): Description of classifier.
-    fc_mean (Any): Description of fc_mean.
-    fc_std (Any): Description of fc_std.
-    latent_dim (Any): Description of latent_dim.
-    ode_func (Any): Description of ode_func.
-    rnn (Any): Description of rnn.
-    solver (Any): Description of solver.
+        classifier (Any): Description of classifier.
+        fc_mean (Any): Description of fc_mean.
+        fc_std (Any): Description of fc_std.
+        latent_dim (Any): Description of latent_dim.
+        ode_func (Any): Description of ode_func.
+        rnn (Any): Description of rnn.
+        solver (Any): Description of solver.
     """
 
     def __init__(self, num_classes: int, input_dim: int, seq_len: int, latent_dim: int = 64, rec_dim: int = 128, **kwargs):
@@ -173,18 +173,18 @@ class LatentODEClassifier(BaseICDClassifier):
         Longer description of the __init__ behavior and usage.
         
         Args:
-        num_classes (Any): Description of num_classes.
-        input_dim (Any): Description of input_dim.
-        seq_len (Any): Description of seq_len.
-        latent_dim (Any): Description of latent_dim.
-        rec_dim (Any): Description of rec_dim.
-        kwargs (Any): Description of kwargs.
+            num_classes (Any): Description of num_classes.
+            input_dim (Any): Description of input_dim.
+            seq_len (Any): Description of seq_len.
+            latent_dim (Any): Description of latent_dim.
+            rec_dim (Any): Description of rec_dim.
+            kwargs (Any): Description of kwargs.
         
         Returns:
-        None: Description of the return value.
+            None: Description of the return value.
         
         Raises:
-        Exception: Description of why this exception might be raised.
+            Exception: Description of why this exception might be raised.
         """
 
         super().__init__(num_classes, input_dim, seq_len)
@@ -228,14 +228,14 @@ class LatentODEClassifier(BaseICDClassifier):
         Longer description of the forward behavior and usage.
         
         Args:
-        x_num (Any): Description of x_num.
-        kwargs (Any): Description of kwargs.
+            x_num (Any): Description of x_num.
+            kwargs (Any): Description of kwargs.
         
         Returns:
-        torch.Tensor: Description of the return value.
+            torch.Tensor: Description of the return value.
         
         Raises:
-        Exception: Description of why this exception might be raised.
+            Exception: Description of why this exception might be raised.
         """
 
 

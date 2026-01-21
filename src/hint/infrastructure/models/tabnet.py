@@ -22,8 +22,8 @@ class Sparsemax(nn.Module):
     Longer description of the class behavior and usage.
     
     Attributes:
-    dim (Any): Description of dim.
-    output (Any): Description of output.
+        dim (Any): Description of dim.
+        output (Any): Description of output.
     """
 
     def __init__(self, dim=-1):
@@ -33,13 +33,13 @@ class Sparsemax(nn.Module):
         Longer description of the __init__ behavior and usage.
         
         Args:
-        dim (Any): Description of dim.
+            dim (Any): Description of dim.
         
         Returns:
-        None: Description of the return value.
+            None: Description of the return value.
         
         Raises:
-        Exception: Description of why this exception might be raised.
+            Exception: Description of why this exception might be raised.
         """
 
         super(Sparsemax, self).__init__()
@@ -55,13 +55,13 @@ class Sparsemax(nn.Module):
         Longer description of the forward behavior and usage.
         
         Args:
-        input (Any): Description of input.
+            input (Any): Description of input.
         
         Returns:
-        Any: Description of the return value.
+            Any: Description of the return value.
         
         Raises:
-        Exception: Description of why this exception might be raised.
+            Exception: Description of why this exception might be raised.
         """
 
         input = input.transpose(0, self.dim)
@@ -123,9 +123,9 @@ class GhostBatchNorm(nn.Module):
     Longer description of the class behavior and usage.
     
     Attributes:
-    bn (Any): Description of bn.
-    input_dim (Any): Description of input_dim.
-    virtual_batch_size (Any): Description of virtual_batch_size.
+        bn (Any): Description of bn.
+        input_dim (Any): Description of input_dim.
+        virtual_batch_size (Any): Description of virtual_batch_size.
     """
 
     def __init__(self, input_dim, virtual_batch_size=128, momentum=0.01):
@@ -135,15 +135,15 @@ class GhostBatchNorm(nn.Module):
         Longer description of the __init__ behavior and usage.
         
         Args:
-        input_dim (Any): Description of input_dim.
-        virtual_batch_size (Any): Description of virtual_batch_size.
-        momentum (Any): Description of momentum.
+            input_dim (Any): Description of input_dim.
+            virtual_batch_size (Any): Description of virtual_batch_size.
+            momentum (Any): Description of momentum.
         
         Returns:
-        None: Description of the return value.
+            None: Description of the return value.
         
         Raises:
-        Exception: Description of why this exception might be raised.
+            Exception: Description of why this exception might be raised.
         """
 
         super(GhostBatchNorm, self).__init__()
@@ -163,13 +163,13 @@ class GhostBatchNorm(nn.Module):
         Longer description of the forward behavior and usage.
         
         Args:
-        x (Any): Description of x.
+            x (Any): Description of x.
         
         Returns:
-        Any: Description of the return value.
+            Any: Description of the return value.
         
         Raises:
-        Exception: Description of why this exception might be raised.
+            Exception: Description of why this exception might be raised.
         """
 
         if self.training and x.shape[0] > self.virtual_batch_size:
@@ -191,9 +191,9 @@ class GLU(nn.Module):
     Longer description of the class behavior and usage.
     
     Attributes:
-    bn (Any): Description of bn.
-    fc (Any): Description of fc.
-    output_dim (Any): Description of output_dim.
+        bn (Any): Description of bn.
+        fc (Any): Description of fc.
+        output_dim (Any): Description of output_dim.
     """
 
     def __init__(self, input_dim, output_dim, fc=None, virtual_batch_size=128, momentum=0.02):
@@ -203,17 +203,17 @@ class GLU(nn.Module):
         Longer description of the __init__ behavior and usage.
         
         Args:
-        input_dim (Any): Description of input_dim.
-        output_dim (Any): Description of output_dim.
-        fc (Any): Description of fc.
-        virtual_batch_size (Any): Description of virtual_batch_size.
-        momentum (Any): Description of momentum.
+            input_dim (Any): Description of input_dim.
+            output_dim (Any): Description of output_dim.
+            fc (Any): Description of fc.
+            virtual_batch_size (Any): Description of virtual_batch_size.
+            momentum (Any): Description of momentum.
         
         Returns:
-        None: Description of the return value.
+            None: Description of the return value.
         
         Raises:
-        Exception: Description of why this exception might be raised.
+            Exception: Description of why this exception might be raised.
         """
 
         super(GLU, self).__init__()
@@ -239,13 +239,13 @@ class GLU(nn.Module):
         Longer description of the forward behavior and usage.
         
         Args:
-        x (Any): Description of x.
+            x (Any): Description of x.
         
         Returns:
-        Any: Description of the return value.
+            Any: Description of the return value.
         
         Raises:
-        Exception: Description of why this exception might be raised.
+            Exception: Description of why this exception might be raised.
         """
 
         x = self.fc(x)
@@ -265,9 +265,9 @@ class AttentiveTransformer(nn.Module):
     Longer description of the class behavior and usage.
     
     Attributes:
-    bn (Any): Description of bn.
-    fc (Any): Description of fc.
-    sparsemax (Any): Description of sparsemax.
+        bn (Any): Description of bn.
+        fc (Any): Description of fc.
+        sparsemax (Any): Description of sparsemax.
     """
 
     def __init__(self, input_dim, output_dim, virtual_batch_size=128, momentum=0.02):
@@ -277,16 +277,16 @@ class AttentiveTransformer(nn.Module):
         Longer description of the __init__ behavior and usage.
         
         Args:
-        input_dim (Any): Description of input_dim.
-        output_dim (Any): Description of output_dim.
-        virtual_batch_size (Any): Description of virtual_batch_size.
-        momentum (Any): Description of momentum.
+            input_dim (Any): Description of input_dim.
+            output_dim (Any): Description of output_dim.
+            virtual_batch_size (Any): Description of virtual_batch_size.
+            momentum (Any): Description of momentum.
         
         Returns:
-        None: Description of the return value.
+            None: Description of the return value.
         
         Raises:
-        Exception: Description of why this exception might be raised.
+            Exception: Description of why this exception might be raised.
         """
 
         super(AttentiveTransformer, self).__init__()
@@ -306,14 +306,14 @@ class AttentiveTransformer(nn.Module):
         Longer description of the forward behavior and usage.
         
         Args:
-        priors (Any): Description of priors.
-        processed_feat (Any): Description of processed_feat.
+            priors (Any): Description of priors.
+            processed_feat (Any): Description of processed_feat.
         
         Returns:
-        Any: Description of the return value.
+            Any: Description of the return value.
         
         Raises:
-        Exception: Description of why this exception might be raised.
+            Exception: Description of why this exception might be raised.
         """
 
         x = self.fc(processed_feat)
@@ -335,19 +335,19 @@ class TabNetICD(BaseICDClassifier):
     Longer description of the class behavior and usage.
     
     Attributes:
-    att_transformers (Any): Description of att_transformers.
-    embedding_dim (Any): Description of embedding_dim.
-    epsilon (Any): Description of epsilon.
-    feat_transformers (Any): Description of feat_transformers.
-    final_mapping (Any): Description of final_mapping.
-    flatten_dim (Any): Description of flatten_dim.
-    gamma (Any): Description of gamma.
-    input_bn (Any): Description of input_bn.
-    n_a (Any): Description of n_a.
-    n_d (Any): Description of n_d.
-    n_steps (Any): Description of n_steps.
-    shared_layers (Any): Description of shared_layers.
-    virtual_batch_size (Any): Description of virtual_batch_size.
+        att_transformers (Any): Description of att_transformers.
+        embedding_dim (Any): Description of embedding_dim.
+        epsilon (Any): Description of epsilon.
+        feat_transformers (Any): Description of feat_transformers.
+        final_mapping (Any): Description of final_mapping.
+        flatten_dim (Any): Description of flatten_dim.
+        gamma (Any): Description of gamma.
+        input_bn (Any): Description of input_bn.
+        n_a (Any): Description of n_a.
+        n_d (Any): Description of n_d.
+        n_steps (Any): Description of n_steps.
+        shared_layers (Any): Description of shared_layers.
+        virtual_batch_size (Any): Description of virtual_batch_size.
     """
 
     def __init__(
@@ -391,26 +391,26 @@ class TabNetICD(BaseICDClassifier):
         Longer description of the __init__ behavior and usage.
         
         Args:
-        num_classes (Any): Description of num_classes.
-        input_dim (Any): Description of input_dim.
-        seq_len (Any): Description of seq_len.
-        dropout (Any): Description of dropout.
-        n_d (Any): Description of n_d.
-        n_a (Any): Description of n_a.
-        n_steps (Any): Description of n_steps.
-        gamma (Any): Description of gamma.
-        n_independent (Any): Description of n_independent.
-        n_shared (Any): Description of n_shared.
-        epsilon (Any): Description of epsilon.
-        virtual_batch_size (Any): Description of virtual_batch_size.
-        momentum (Any): Description of momentum.
-        kwargs (Any): Description of kwargs.
+            num_classes (Any): Description of num_classes.
+            input_dim (Any): Description of input_dim.
+            seq_len (Any): Description of seq_len.
+            dropout (Any): Description of dropout.
+            n_d (Any): Description of n_d.
+            n_a (Any): Description of n_a.
+            n_steps (Any): Description of n_steps.
+            gamma (Any): Description of gamma.
+            n_independent (Any): Description of n_independent.
+            n_shared (Any): Description of n_shared.
+            epsilon (Any): Description of epsilon.
+            virtual_batch_size (Any): Description of virtual_batch_size.
+            momentum (Any): Description of momentum.
+            kwargs (Any): Description of kwargs.
         
         Returns:
-        None: Description of the return value.
+            None: Description of the return value.
         
         Raises:
-        Exception: Description of why this exception might be raised.
+            Exception: Description of why this exception might be raised.
         """
 
         super().__init__(num_classes, input_dim, seq_len, dropout)
@@ -510,15 +510,15 @@ class TabNetICD(BaseICDClassifier):
         Longer description of the forward behavior and usage.
         
         Args:
-        x_num (Any): Description of x_num.
-        return_embeddings (Any): Description of return_embeddings.
-        kwargs (Any): Description of kwargs.
+            x_num (Any): Description of x_num.
+            return_embeddings (Any): Description of return_embeddings.
+            kwargs (Any): Description of kwargs.
         
         Returns:
-        torch.Tensor: Description of the return value.
+            torch.Tensor: Description of the return value.
         
         Raises:
-        Exception: Description of why this exception might be raised.
+            Exception: Description of why this exception might be raised.
         """
 
 
