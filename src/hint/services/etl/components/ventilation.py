@@ -87,7 +87,7 @@ class VentilationTagger(PipelineComponent):
 
 
 
-        self.observer.log("INFO", "VentilationTagger: Stage 1/3 Resolving ventilation labels")
+        self.observer.log("INFO", "[1.4.1] Resolving ventilation labels")
 
 
 
@@ -131,7 +131,7 @@ class VentilationTagger(PipelineComponent):
 
         vent_labels = vent_labels_df.to_series().to_list()
 
-        self.observer.log("INFO", f"VentilationTagger: Found {len(vent_labels)} labels for ventilation.")
+        self.observer.log("INFO", f"[1.4.1] Vent labels resolved. count={len(vent_labels)}")
 
 
 
@@ -153,7 +153,7 @@ class VentilationTagger(PipelineComponent):
 
 
 
-        self.observer.log("INFO", f"VentilationTagger: Stage 2/3 Matched {vent_events.height} ventilation hours.")
+        self.observer.log("INFO", f"[1.4.2] Vent events matched. rows={vent_events.height}")
 
 
 
@@ -195,4 +195,4 @@ class VentilationTagger(PipelineComponent):
 
         merged.write_parquet(interventions_path)
 
-        self.observer.log("INFO", f"VentilationTagger: Stage 3/3 updated {interventions_path.name} with ventilation flags.")
+        self.observer.log("INFO", f"[1.4.3] Vent flags updated. target={interventions_path.name}")

@@ -1,13 +1,12 @@
-from unittest.mock import MagicMock, patch
+from pathlib import Path
 
 from loguru import logger
-from rich.console import Console
 from rich.progress import Progress
 
 from hint.infrastructure.telemetry import RichTelemetryObserver
 
 
-def test_telemetry_initializes_console_and_loggers() -> None:
+def test_telemetry_initializes_console_and_loggers(tmp_path: Path) -> None:
     """
     [One-line Summary] Verify RichTelemetryObserver builds console and logging sinks.
 
@@ -26,18 +25,17 @@ def test_telemetry_initializes_console_and_loggers() -> None:
     """
     logger.info("Starting test: test_telemetry_initializes_console_and_loggers")
 
-    with patch.object(RichTelemetryObserver, "_build_console_logger", return_value=MagicMock()) as console_builder, \
-         patch.object(RichTelemetryObserver, "_build_file_logger", return_value=MagicMock()) as file_builder:
-        observer = RichTelemetryObserver()
+    observer = RichTelemetryObserver(run_dir=tmp_path)
 
-    assert isinstance(observer.console, Console)
-    console_builder.assert_called_once()
-    file_builder.assert_called_once()
+    assert (tmp_path / "logs").exists()
+    assert (tmp_path / "metrics").exists()
+    assert (tmp_path / "traces").exists()
+    assert (tmp_path / "artifacts").exists()
 
     logger.info("Telemetry initialization verified.")
 
 
-def test_telemetry_tracks_metrics() -> None:
+def test_telemetry_tracks_metrics(tmp_path: Path) -> None:
     """
     [One-line Summary] Confirm RichTelemetryObserver stores tracked metrics with step metadata.
 
@@ -56,20 +54,19 @@ def test_telemetry_tracks_metrics() -> None:
     """
     logger.info("Starting test: test_telemetry_tracks_metrics")
 
-    with patch.object(RichTelemetryObserver, "_build_console_logger", return_value=MagicMock()), \
-         patch.object(RichTelemetryObserver, "_build_file_logger", return_value=MagicMock()):
-        observer = RichTelemetryObserver()
+    observer = RichTelemetryObserver(run_dir=tmp_path)
 
     observer.track_metric("loss", 0.5, step=1)
     observer.track_metric("loss", 0.4, step=2)
 
     assert observer.metrics["loss"][0] == {"step": 1, "value": 0.5}
     assert observer.metrics["loss"][1] == {"step": 2, "value": 0.4}
+    assert (tmp_path / "metrics" / "history.csv").exists()
 
     logger.info("Telemetry metric tracking verified.")
 
 
-def test_telemetry_creates_progress_with_console() -> None:
+def test_telemetry_creates_progress_with_console(tmp_path: Path) -> None:
     """
     [One-line Summary] Validate progress creation uses the telemetry console.
 
@@ -88,9 +85,7 @@ def test_telemetry_creates_progress_with_console() -> None:
     """
     logger.info("Starting test: test_telemetry_creates_progress_with_console")
 
-    with patch.object(RichTelemetryObserver, "_build_console_logger", return_value=MagicMock()), \
-         patch.object(RichTelemetryObserver, "_build_file_logger", return_value=MagicMock()):
-        observer = RichTelemetryObserver()
+    observer = RichTelemetryObserver(run_dir=tmp_path)
 
     progress = observer.create_progress(desc="demo", total=2)
 

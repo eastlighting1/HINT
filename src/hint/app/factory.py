@@ -4,12 +4,17 @@ Longer description of the module purpose and usage.
 """
 
 from pathlib import Path
+from datetime import datetime
+import json
+import platform
+import sys
 
 from typing import List
 
 
 
 from ..foundation.configs import HydraConfigLoader, load_app_context
+from omegaconf import OmegaConf
 
 from ..foundation.interfaces import Registry, TelemetryObserver, PipelineComponent
 
@@ -91,6 +96,103 @@ class AppFactory:
 
         self.ctx = load_app_context(self.raw_cfg)
 
+        self.run_dir = self._init_run_dir()
+
+        self._write_initial_artifacts()
+
+
+    def _init_run_dir(self) -> Path:
+
+        """Summary of _init_run_dir.
+        
+        Longer description of the _init_run_dir behavior and usage.
+        
+        Args:
+        None (None): This function does not accept arguments.
+        
+        Returns:
+        Path: Description of the return value.
+        
+        Raises:
+        Exception: Description of why this exception might be raised.
+        """
+
+        logging_cfg = self.raw_cfg.get("logging", {}) or {}
+
+        output_root = Path(logging_cfg.get("output_dir", "outputs"))
+
+        run_dir_cfg = logging_cfg.get("run_dir")
+        use_hydra = bool(logging_cfg.get("use_hydra_run_dir", False))
+
+        if use_hydra:
+            try:
+                from hydra.core.hydra_config import HydraConfig
+
+                hydra_cfg = HydraConfig.get()
+                run_dir = Path(hydra_cfg.runtime.output_dir)
+            except Exception:
+                run_dir = None
+        else:
+            run_dir = None
+
+        if run_dir is None and run_dir_cfg:
+
+            run_dir = Path(run_dir_cfg)
+
+            if not run_dir.is_absolute():
+
+                run_dir = output_root / run_dir
+
+        elif run_dir is None:
+
+            timestamp = datetime.now().strftime("%Y-%m-%d/%H-%M-%S")
+
+            run_dir = output_root / timestamp
+
+        for subdir in ["logs", "metrics", "traces", "artifacts"]:
+
+            (run_dir / subdir).mkdir(parents=True, exist_ok=True)
+
+        return run_dir
+
+    def _write_initial_artifacts(self) -> None:
+
+        """Write config and system metadata into the run artifacts directory."""
+
+        artifacts_dir = self.run_dir / "artifacts"
+
+        artifacts_dir.mkdir(parents=True, exist_ok=True)
+
+        config_path = artifacts_dir / "config_snapshot.yaml"
+
+        config_path.write_text(OmegaConf.to_yaml(self.raw_cfg), encoding="utf-8")
+
+        system_spec = {
+            "python_version": sys.version.replace("\n", " "),
+            "platform": platform.platform(),
+            "processor": platform.processor(),
+        }
+
+        try:
+            import torch
+
+            system_spec["torch_version"] = torch.__version__
+            system_spec["cuda_available"] = torch.cuda.is_available()
+        except Exception:
+            system_spec["torch_version"] = None
+            system_spec["cuda_available"] = None
+
+        try:
+            import numpy as np
+
+            system_spec["numpy_version"] = np.__version__
+        except Exception:
+            system_spec["numpy_version"] = None
+
+        system_path = artifacts_dir / "system_spec.json"
+
+        system_path.write_text(json.dumps(system_spec, indent=2), encoding="utf-8")
+
 
 
     def create_registry(self) -> Registry:
@@ -111,7 +213,7 @@ class AppFactory:
 
         path = self.raw_cfg.get("logging", {}).get("artifacts_dir", "artifacts")
 
-        return FileSystemRegistry(base_dir=path)
+        return FileSystemRegistry(base_dir=self.run_dir / path)
 
 
 
@@ -131,7 +233,7 @@ class AppFactory:
         Exception: Description of why this exception might be raised.
         """
 
-        return RichTelemetryObserver()
+        return RichTelemetryObserver(run_dir=self.run_dir)
 
 
 
@@ -169,8 +271,8 @@ class AppFactory:
 
 
 
-        observer.log("INFO", "AppFactory: ETL stage 1/4 starting component initialization.")
-        observer.log("INFO", f"AppFactory: ETL config loaded dataset_root={etl_cfg.raw_dir}.")
+        observer.log("INFO", "[1.0] ETL component initialization started.")
+        observer.log("INFO", f"[1.0] ETL config loaded. dataset_root={etl_cfg.raw_dir}")
 
         static_extractor = StaticExtractor(etl_cfg, registry, observer)
 
@@ -216,7 +318,7 @@ class AppFactory:
 
 
 
-        observer.log("INFO", "AppFactory: ETL stage 2/4 assembling pipeline order.")
+        observer.log("INFO", "[1.0] ETL pipeline order assembled.")
 
         components: List[PipelineComponent] = [
 
@@ -238,8 +340,8 @@ class AppFactory:
 
 
 
-        observer.log("INFO", f"AppFactory: ETL stage 3/4 pipeline components count={len(components)}.")
-        observer.log("INFO", "AppFactory: ETL stage 4/4 service construction complete.")
+        observer.log("INFO", f"[1.0] ETL components count={len(components)}.")
+        observer.log("INFO", "[1.0] ETL service construction complete.")
 
         return ETLService(registry, observer, components)
 
@@ -278,8 +380,8 @@ class AppFactory:
         cache_dir = Path(cfg.data.data_cache_dir)
         prefix = cfg.data.input_h5_prefix
 
-        observer.log("INFO", "AppFactory: ICD stage 1/3 resolving training data sources.")
-        observer.log("INFO", f"AppFactory: ICD cache_dir={cache_dir} prefix={prefix}.")
+        observer.log("INFO", "[2.0] ICD training data resolution started.")
+        observer.log("INFO", f"[2.0] ICD cache_dir={cache_dir} prefix={prefix}")
 
 
 
@@ -311,8 +413,8 @@ class AppFactory:
 
 
 
-        observer.log("INFO", "AppFactory: ICD stage 2/3 service dependencies ready.")
-        observer.log("INFO", "AppFactory: ICD stage 3/3 service construction complete.")
+        observer.log("INFO", "[2.0] ICD service dependencies ready.")
+        observer.log("INFO", "[2.0] ICD service construction complete.")
 
         return ICDService(
 
@@ -365,8 +467,8 @@ class AppFactory:
         cache_dir = Path(cfg.data.data_cache_dir)
         prefix = cfg.data.input_h5_prefix
 
-        observer.log("INFO", "AppFactory: Intervention stage 1/4 resolving training data sources.")
-        observer.log("INFO", f"AppFactory: Intervention cache_dir={cache_dir} prefix={prefix}.")
+        observer.log("INFO", "[3.0] Intervention data resolution started.")
+        observer.log("INFO", f"[3.0] Intervention cache_dir={cache_dir} prefix={prefix}")
 
         train_path = cache_dir / f"{prefix}_train.h5"
 
@@ -440,7 +542,7 @@ class AppFactory:
 
 
 
-        observer.log("INFO", "AppFactory: Intervention stage 2/4 building model network.")
+        observer.log("INFO", "[3.0] Intervention model construction started.")
 
 
 
@@ -467,8 +569,8 @@ class AppFactory:
 
 
 
-        observer.log("INFO", f"AppFactory: Intervention stage 3/4 model in_chs={num_channels} icd_dim={icd_dim}.")
-        observer.log("INFO", "AppFactory: Intervention stage 4/4 service construction complete.")
+        observer.log("INFO", f"[3.0] Intervention model dims in_chs={num_channels} icd_dim={icd_dim}.")
+        observer.log("INFO", "[3.0] Intervention service construction complete.")
 
         return InterventionService(
 

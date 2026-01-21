@@ -93,11 +93,11 @@ class TimeSeriesAggregator(PipelineComponent):
 
         if progress: progress.update(task_id, description="[cyan]TimeSeries (1/4): Scan Raw Dir")
 
-        self.observer.log("INFO", f"TimeSeriesAggregator: Stage 1/4 scanning raw directory {raw_dir}")
+        self.observer.log("INFO", f"[1.2.1] Scanning raw directory. raw_dir={raw_dir}")
 
 
 
-        self.observer.log("INFO", "TimeSeriesAggregator: Loading variable map")
+        self.observer.log("INFO", "[1.2.2] Loading variable map")
 
         varmap = pl.read_csv(resources_dir / "itemid_to_variable_map.csv").with_columns(
 
@@ -123,7 +123,7 @@ class TimeSeriesAggregator(PipelineComponent):
 
         if ranges_path.exists():
 
-            self.observer.log("INFO", f"TimeSeriesAggregator: Loading variable ranges from {ranges_path.name}")
+            self.observer.log("INFO", f"[1.2.2] Loading variable ranges. source={ranges_path.name}")
 
             var_ranges = pl.read_csv(ranges_path).select([
 
@@ -141,11 +141,11 @@ class TimeSeriesAggregator(PipelineComponent):
 
         else:
 
-            self.observer.log("WARNING", "TimeSeriesAggregator: Variable ranges not found; skipping outlier filtering.")
+            self.observer.log("WARNING", "[1.2.2] Variable ranges missing. outlier_filtering=skip")
 
 
 
-        self.observer.log("INFO", "TimeSeriesAggregator: Loading ICU stay map")
+        self.observer.log("INFO", "[1.2.3] Loading ICU stay map")
 
         icu_map = pl.scan_csv(raw_dir / "ICUSTAYS.csv.gz", infer_schema_length=0, has_header=True).with_columns([
 
@@ -196,7 +196,7 @@ class TimeSeriesAggregator(PipelineComponent):
 
 
 
-            self.observer.log("INFO", f"TimeSeriesAggregator: Reading {table} from {fpath.name}")
+            self.observer.log("INFO", f"[1.2.4] Reading table. name={table} source={fpath.name}")
 
             try:
 
@@ -260,7 +260,7 @@ class TimeSeriesAggregator(PipelineComponent):
 
             if "ICUSTAY_ID" in columns:
 
-                self.observer.log("INFO", f"TimeSeriesAggregator: Joining {table} directly on ICUSTAY_ID")
+                self.observer.log("INFO", f"[1.2.4] Join on ICUSTAY_ID. table={table}")
 
                 joined = ev_labeled.join(icu_map, on="ICUSTAY_ID", how="inner")
 
@@ -274,7 +274,7 @@ class TimeSeriesAggregator(PipelineComponent):
 
             else:
 
-                self.observer.log("INFO", f"TimeSeriesAggregator: Mapping {table} via HADM_ID (with 6h lookback)")
+                self.observer.log("INFO", f"[1.2.4] Map via HADM_ID with lookback. table={table}")
 
 
 
@@ -302,11 +302,11 @@ class TimeSeriesAggregator(PipelineComponent):
 
 
 
-        self.observer.log("INFO", "TimeSeriesAggregator: Loading chart events")
+        self.observer.log("INFO", "[1.2.5] Loading chart events")
 
         lf_chart = process_events("chartevents", "charttime")
 
-        self.observer.log("INFO", "TimeSeriesAggregator: Loading lab events")
+        self.observer.log("INFO", "[1.2.5] Loading lab events")
 
         lf_lab = process_events("labevents", "charttime")
 
@@ -324,7 +324,7 @@ class TimeSeriesAggregator(PipelineComponent):
 
         if progress: progress.update(task_id, description="[cyan]TimeSeries (3/4): Convert Units")
 
-        self.observer.log("INFO", "TimeSeriesAggregator: Stage 2/4 applying unit conversions")
+        self.observer.log("INFO", "[1.2.6] Applying unit conversions")
 
 
 
@@ -380,7 +380,7 @@ class TimeSeriesAggregator(PipelineComponent):
 
 
 
-        self.observer.log("INFO", "TimeSeriesAggregator: Stage 3/4 applying variable limits (outliers)")
+        self.observer.log("INFO", "[1.2.7] Applying variable limits (outliers)")
 
 
 
@@ -446,7 +446,7 @@ class TimeSeriesAggregator(PipelineComponent):
 
         if progress: progress.update(task_id, description="[cyan]TimeSeries (4/4): Aggregate")
 
-        self.observer.log("INFO", "TimeSeriesAggregator: Stage 4/4 aggregating hourly statistics")
+        self.observer.log("INFO", "[1.2.8] Aggregating hourly statistics")
 
 
 
@@ -466,13 +466,13 @@ class TimeSeriesAggregator(PipelineComponent):
 
 
 
-        self.observer.log("INFO", "TimeSeriesAggregator: Writing vitals outputs")
+        self.observer.log("INFO", "[1.2.9] Writing vitals outputs")
 
         vitals_labs.write_parquet(proc_dir / self.cfg.artifacts.vitals_file)
 
         vitals_labs.select(["ICUSTAY_ID", "HOURS_IN", "LABEL", "MEAN"]).write_parquet(proc_dir / self.cfg.artifacts.vitals_mean_file)
 
-        self.observer.log("INFO", "TimeSeriesAggregator: Finished")
+        self.observer.log("INFO", "[1.2] TimeSeries aggregation finished")
 
 
 

@@ -53,19 +53,20 @@ def configure_test_logging(
     active_console = console or Console()
     logger.remove()
 
-    logger.add(
-        RichHandler(
-            console=active_console,
-            markup=True,
-            rich_tracebacks=True,
-            show_path=False,
-        ),
-        format="{message}",
-        level=level.upper(),
-        enqueue=True,
-        backtrace=True,
-        diagnose=False,
-    )
+    if console is not None:
+        logger.add(
+            RichHandler(
+                console=active_console,
+                markup=True,
+                rich_tracebacks=True,
+                show_path=False,
+            ),
+            format="{message}",
+            level=level.upper(),
+            enqueue=True,
+            backtrace=True,
+            diagnose=False,
+        )
 
     if log_file_path is not None:
         log_path = Path(log_file_path)

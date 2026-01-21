@@ -118,7 +118,7 @@ class InterventionEvaluator(BaseEvaluator):
         self.entity.network.eval()
         self.observer.log(
             "INFO",
-            f"InterventionEvaluator: Stage 1/3 starting evaluation batches={len(loader)}.",
+            f"[EVAL START] batches={len(loader)}",
         )
 
 
@@ -187,11 +187,8 @@ class InterventionEvaluator(BaseEvaluator):
             class_counts = np.bincount(y_true, minlength=4)
 
             self.observer.log(
-
                 "INFO",
-
-                f"InterventionEvaluator: Stage 2/3 class_counts={class_counts.tolist()}",
-
+                f"[EVAL STATS] class_counts={class_counts.tolist()}",
             )
 
 
@@ -252,7 +249,7 @@ class InterventionEvaluator(BaseEvaluator):
 
         self.observer.log(
             "INFO",
-            "InterventionEvaluator: Stage 2/3 auc_raw="
+            "[EVAL STATS] auc_raw="
             f"{[None if np.isnan(x) else float(x) for x in auc_per_class]}",
         )
 
@@ -294,7 +291,7 @@ class InterventionEvaluator(BaseEvaluator):
 
         self.observer.log(
             "INFO",
-            f"InterventionEvaluator: Stage 3/3 complete accuracy={acc:.4f} f1={f1:.4f} macro_auc={macro_auc:.4f} macro_auprc={macro_auprc:.4f}.",
+            f"[EVAL END] accuracy={acc:.4f} f1={f1:.4f} macro_auc={macro_auc:.4f} macro_auprc={macro_auprc:.4f}",
         )
 
         return {

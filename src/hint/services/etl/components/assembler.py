@@ -110,7 +110,7 @@ class FeatureAssembler(PipelineComponent):
 
         if missing_deps:
 
-            error_msg = f"FeatureAssembler: Missing dependencies: {', '.join(missing_deps)}."
+            error_msg = f"[1.5.0] Missing dependencies. items={', '.join(missing_deps)}"
 
             self.observer.log("ERROR", error_msg)
 
@@ -120,7 +120,7 @@ class FeatureAssembler(PipelineComponent):
 
 
 
-        self.observer.log("INFO", f"FeatureAssembler: Stage 1/6 loading cohort")
+        self.observer.log("INFO", "[1.5.1] Loading cohort")
 
         patients = pl.read_parquet(patients_path).with_columns([
 
@@ -170,13 +170,13 @@ class FeatureAssembler(PipelineComponent):
 
         )
 
-        self.observer.log("INFO", f"FeatureAssembler: Cohort size={pat.height}")
+        self.observer.log("INFO", f"[1.5.1] Cohort size={pat.height}")
 
 
 
 
 
-        self.observer.log("INFO", "FeatureAssembler: Stage 2/6 loading vitals")
+        self.observer.log("INFO", "[1.5.2] Loading vitals")
 
         vitals_lazy = pl.scan_parquet(vitals_path)
 
@@ -296,7 +296,7 @@ class FeatureAssembler(PipelineComponent):
             and any(marker in c for marker in leakage_markers)
         ]
         if leakage_cols:
-            self.observer.log("INFO", f"FeatureAssembler: Dropping leakage columns: {leakage_cols}")
+            self.observer.log("INFO", f"[1.5.3] Dropping leakage columns. cols={leakage_cols}")
             vl_wide = vl_wide.drop(leakage_cols)
 
         feature_cols = [c for c in vl_wide.columns if c not in ["ICUSTAY_ID", "HOUR_IN"]]
@@ -305,7 +305,7 @@ class FeatureAssembler(PipelineComponent):
 
 
 
-        self.observer.log("INFO", "FeatureAssembler: Stage 3/6 creating 3-channel tensors (VAL, MSK, DELTA)")
+        self.observer.log("INFO", "[1.5.4] Creating 3-channel tensors (VAL, MSK, DELTA)")
 
 
 
@@ -404,7 +404,7 @@ class FeatureAssembler(PipelineComponent):
 
 
 
-        self.observer.log("INFO", "FeatureAssembler: Stage 4/6 loading ICD9 codes")
+        self.observer.log("INFO", "[1.5.5] Loading ICD9 codes")
 
         cand = raw_dir / "DIAGNOSES_ICD.csv"
 
@@ -444,7 +444,7 @@ class FeatureAssembler(PipelineComponent):
 
 
 
-        self.observer.log("INFO", "FeatureAssembler: Stage 5/6 joining static features")
+        self.observer.log("INFO", "[1.5.6] Joining static features")
 
         age_bins = self.cfg.age_bin_edges
 
@@ -599,4 +599,4 @@ class FeatureAssembler(PipelineComponent):
 
         feat.write_parquet(out_path)
 
-        self.observer.log("INFO", f"FeatureAssembler: Wrote {out_path.name} rows={feat.height} (3-Channel format)")
+        self.observer.log("INFO", f"[1.5.7] Dataset written. path={out_path.name} rows={feat.height}")

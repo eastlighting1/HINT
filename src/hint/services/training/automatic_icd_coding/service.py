@@ -143,20 +143,20 @@ class ICDService(BaseDomainService):
         stats_path = cache_dir / "stats.json"
         self.observer.log(
             "INFO",
-            f"ICDService: Stage 0/5 setup device={self.device} cache_dir={cache_dir}.",
+            f"[2.1] Device ready. device={self.device} cache_dir={cache_dir}",
         )
 
 
 
         if not stats_path.exists():
 
-            self.observer.log("ERROR", f"Stats file not found at {stats_path}")
+            self.observer.log("ERROR", f"[2.1] Stats file missing. path={stats_path}")
 
             return
 
 
 
-        self.observer.log("INFO", "ICDService: Stage 1/5 loading class statistics.")
+        self.observer.log("INFO", "[2.2] Loading ICD class statistics.")
 
         with open(stats_path, "r") as f:
 
@@ -169,7 +169,7 @@ class ICDService(BaseDomainService):
         self.ignored_indices = [i for i, label in enumerate(stats["icd_classes"]) if label in ["__MISSING__", "__OTHER__"]]
         self.observer.log(
             "INFO",
-            f"ICDService: Stage 1/5 loaded classes count={num_classes} ignored={len(self.ignored_indices)}.",
+            f"[2.2] ICD classes loaded. count={num_classes} ignored={len(self.ignored_indices)}",
         )
 
 
@@ -178,7 +178,7 @@ class ICDService(BaseDomainService):
 
 
 
-        self.observer.log("INFO", "ICDService: Stage 2/5 initializing HDF5 sources.")
+        self.observer.log("INFO", "[2.3] Initializing HDF5 sources.")
 
         try:
 
@@ -190,13 +190,13 @@ class ICDService(BaseDomainService):
 
         except Exception as e:
 
-            self.observer.log("ERROR", f"Failed to initialize HDF5 sources: {e}")
+            self.observer.log("ERROR", f"[2.3] HDF5 sources init failed. error={e}")
 
             return
 
 
 
-        self.observer.log("INFO", "ICDService: Stage 3/5 preparing training loaders.")
+        self.observer.log("INFO", "[2.4] Preparing training loaders.")
 
         class_labels = stats.get("icd_classes", [])
         report = {"num_classes": num_classes, "splits": {}}
@@ -205,7 +205,7 @@ class ICDService(BaseDomainService):
         for split_name in ("train", "val", "test"):
             split_path = cache_dir / f"{prefix}_{split_name}.h5"
             if not split_path.exists():
-                self.observer.log("WARNING", f"ICDService: Missing split file {split_path}")
+                self.observer.log("WARNING", f"[2.4] Missing split file. path={split_path}")
                 continue
             summary, inclusion = self._summarize_candidates(split_path, num_classes, class_labels)
             report["splits"][split_name] = summary
@@ -217,16 +217,16 @@ class ICDService(BaseDomainService):
             try:
                 with open(report_path, "w") as f:
                     json.dump(report, f, indent=2)
-                self.observer.log("INFO", f"ICDService: Saved ICD label report to {report_path}.")
+                self.observer.log("INFO", f"[2.4] ICD label report saved. path={report_path}")
                 train_summary = report["splits"].get("train", {})
                 if train_summary:
                     self.observer.log(
                         "INFO",
-                        f"ICDService: Train best_class_inclusion={train_summary.get('best_class_inclusion', 0.0):.4f} "
-                        f"cand_size_mean={train_summary.get('cand_size_mean', 0.0):.2f}.",
+                        f"[2.4] Train label stats best_class_inclusion={train_summary.get('best_class_inclusion', 0.0):.4f} "
+                        f"cand_size_mean={train_summary.get('cand_size_mean', 0.0):.2f}",
                     )
             except Exception as e:
-                self.observer.log("WARNING", f"ICDService: Failed to write ICD label report error={e}")
+                self.observer.log("WARNING", f"[2.4] Failed to write ICD label report. error={e}")
 
         target_counts = np.where(target_counts <= 0, 1.0, target_counts)
         class_weights = None
@@ -301,11 +301,11 @@ class ICDService(BaseDomainService):
 
         best_score = float("-inf")
 
-        self.observer.log("INFO", f"ICDService: Stage 4/5 model roster={models_to_run}.")
+        self.observer.log("INFO", f"[2.5] Model roster ready. models={models_to_run}")
 
         for model_name in models_to_run:
 
-            self.observer.log("INFO", f"ICDService: Stage 4/5 starting workflow for model={model_name}.")
+            self.observer.log("INFO", f"[2.5] Model workflow start. model={model_name}")
 
             try:
 
@@ -321,7 +321,7 @@ class ICDService(BaseDomainService):
 
                 self.observer.log(
                     "INFO",
-                    f"ICDService: Stage 4/5 model={model_name} input_dim={input_dim} seq_len={seq_len}.",
+                    f"[2.5] Model shape resolved. model={model_name} input_dim={input_dim} seq_len={seq_len}",
                 )
 
 
@@ -384,7 +384,7 @@ class ICDService(BaseDomainService):
 
                 self.observer.log(
                     "INFO",
-                    f"ICDService: Stage 4/5 trainer setup use_amp={use_amp} lr_override={lr_override}.",
+                    f"[2.5] Trainer setup. use_amp={use_amp} lr_override={lr_override}",
                 )
                 trainer = ICDTrainer(
 
@@ -421,9 +421,9 @@ class ICDService(BaseDomainService):
 
 
 
-                self.observer.log("INFO", f"ICDService: Stage 4/5 training start model={model_name}.")
+                self.observer.log("INFO", f"[2.5] Training start. model={model_name}")
                 trainer.train(dl_tr, dl_val, evaluator)
-                self.observer.log("INFO", f"ICDService: Stage 4/5 training complete model={model_name}.")
+                self.observer.log("INFO", f"[2.5] Training complete. model={model_name}")
 
 
 
@@ -435,11 +435,11 @@ class ICDService(BaseDomainService):
 
 
 
-                self.observer.log("INFO", f"ICDService: Stage 4/5 evaluation start model={model_name}.")
+                self.observer.log("INFO", f"[2.5] Evaluation start. model={model_name}")
                 test_metrics = evaluator.evaluate(dl_test)
-                self.observer.log("INFO", f"ICDService: Stage 4/5 evaluation complete model={model_name}.")
+                self.observer.log("INFO", f"[2.5] Evaluation complete. model={model_name}")
 
-                self.observer.log("INFO", f"Final Test Metrics: {json.dumps(test_metrics, indent=2)}")
+                self.observer.log("INFO", f"[TEST METRICS] {json.dumps(test_metrics, indent=2)}")
 
                 cand_acc = test_metrics.get("candidate_accuracy")
 
@@ -453,7 +453,7 @@ class ICDService(BaseDomainService):
 
             except Exception as e:
 
-                self.observer.log("ERROR", f"Failed to run model {model_name}: {str(e)}")
+                self.observer.log("ERROR", f"[2.5] Model run failed. model={model_name} error={str(e)}")
 
                 import traceback
 
@@ -462,7 +462,7 @@ class ICDService(BaseDomainService):
 
 
         self.best_model_name = best_model_name or (models_to_run[0] if models_to_run else None)
-        self.observer.log("INFO", f"ICDService: Stage 5/5 selected best_model={self.best_model_name}.")
+        self.observer.log("INFO", f"[2.5] Best model selected. model={self.best_model_name}")
     def generate_intervention_dataset(self, cnn_config) -> None:
 
         """Summary of generate_intervention_dataset.
@@ -479,7 +479,7 @@ class ICDService(BaseDomainService):
         Exception: Description of why this exception might be raised.
         """
 
-        self.observer.log("INFO", "ICDService: Stage 1/4 starting feature injection.")
+        self.observer.log("INFO", "[2B.1] Feature injection started")
 
 
 
@@ -490,7 +490,7 @@ class ICDService(BaseDomainService):
             return
 
         model_name = getattr(self, "best_model_name", None) or models_to_run[0]
-        self.observer.log("INFO", f"ICDService: Stage 1/4 using model={model_name}.")
+        self.observer.log("INFO", f"[2B.1] Using model. model={model_name}")
 
 
 
@@ -520,7 +520,7 @@ class ICDService(BaseDomainService):
 
         self.observer.log(
             "INFO",
-            f"ICDService: Stage 1/4 extracted input_dim={num_feats} seq_len={seq_len}.",
+            f"[2B.1] Extracted input shape. input_dim={num_feats} seq_len={seq_len}",
         )
 
 
@@ -582,20 +582,20 @@ class ICDService(BaseDomainService):
             network.to(self.device)
 
             network.eval()
-            self.observer.log("INFO", "ICDService: Stage 2/4 model loaded and set to eval.")
+            self.observer.log("INFO", "[2B.2] Model loaded and set to eval")
 
 
 
         except Exception as e:
 
-            self.observer.log("ERROR", f"ICDService: Stage 2/4 model init failed error={e}.")
+            self.observer.log("ERROR", f"[2B.2] Model init failed. error={e}")
 
             return
 
 
 
         splits = ["train", "val", "test"]
-        self.observer.log("INFO", "ICDService: Stage 3/4 embedding extraction start.")
+        self.observer.log("INFO", "[2B.3] Embedding extraction start")
 
         for split in splits:
 
@@ -611,7 +611,7 @@ class ICDService(BaseDomainService):
 
 
 
-            self.observer.log("INFO", f"ICDService: Stage 3/4 injecting context into {tgt_path}.")
+            self.observer.log("INFO", f"[2B.3] Injecting context. target={tgt_path}")
 
             source = HDF5StreamingSource(src_path, label_key="y")
 
@@ -649,7 +649,7 @@ class ICDService(BaseDomainService):
 
                 if not all_embeds:
 
-                    self.observer.log("WARNING", f"ICDService: Stage 3/4 no embeddings for split={split}.")
+                    self.observer.log("WARNING", f"[2B.3] No embeddings for split. split={split}")
                     continue
 
                 full_embeds = np.concatenate(all_embeds, axis=0)
@@ -702,13 +702,13 @@ class ICDService(BaseDomainService):
 
                 self.observer.log(
                     "INFO",
-                    f"ICDService: Stage 3/4 injected X_icd shape={aligned.shape} matched={matched}/{aligned.shape[0]}.",
+                    f"[2B.3] X_icd injected. shape={aligned.shape} matched={matched}/{aligned.shape[0]}",
                 )
 
 
 
             except Exception as e:
 
-                self.observer.log("ERROR", f"ICDService: Stage 3/4 injection failed split={split} error={e}.")
+                self.observer.log("ERROR", f"[2B.3] Injection failed. split={split} error={e}")
 
-        self.observer.log("INFO", "ICDService: Stage 4/4 feature injection complete.")
+        self.observer.log("INFO", "[2B.4] Feature injection complete")

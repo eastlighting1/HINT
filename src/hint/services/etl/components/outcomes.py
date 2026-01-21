@@ -83,7 +83,7 @@ class OutcomesBuilder(PipelineComponent):
 
 
 
-        self.observer.log("INFO", "OutcomesBuilder: Stage 1/4 loading cohort")
+        self.observer.log("INFO", "[1.3.1] Loading cohort")
 
         patients = pl.read_parquet(patients_path).select(
 
@@ -93,7 +93,7 @@ class OutcomesBuilder(PipelineComponent):
 
 
 
-        self.observer.log("INFO", "OutcomesBuilder: Stage 2/4 building hourly grid")
+        self.observer.log("INFO", "[1.3.2] Building hourly grid")
 
         max_hours = int(self.cnn_cfg.seq_len)
 
@@ -123,11 +123,11 @@ class OutcomesBuilder(PipelineComponent):
 
 
 
-        self.observer.log("INFO", f"OutcomesBuilder: Created {skeleton.height} hourly rows")
+        self.observer.log("INFO", f"[1.3.2] Hourly grid ready. rows={skeleton.height}")
 
 
 
-        self.observer.log("INFO", "OutcomesBuilder: Stage 3/4 initializing outcome flags")
+        self.observer.log("INFO", "[1.3.3] Initializing outcome flags")
 
         final_df = skeleton.with_columns([
 
@@ -141,10 +141,10 @@ class OutcomesBuilder(PipelineComponent):
 
 
 
-        self.observer.log("INFO", "OutcomesBuilder: Stage 4/4 saving outcome skeleton")
+        self.observer.log("INFO", "[1.3.4] Saving outcome skeleton")
 
         out_path = proc_dir / self.cfg.artifacts.interventions_file
 
         final_df.write_parquet(out_path)
 
-        self.observer.log("INFO", f"OutcomesBuilder: Saved event skeleton to {out_path}")
+        self.observer.log("INFO", f"[1.3.4] Outcome skeleton saved. path={out_path}")

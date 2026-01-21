@@ -105,7 +105,7 @@ class TensorConverter(PipelineComponent):
 
 
 
-        self.observer.log("INFO", f"TensorConverter: Loading features from {features_path}")
+        self.observer.log("INFO", f"[1.7.1] Loading features. path={features_path}")
 
         df = pl.read_parquet(features_path)
 
@@ -121,7 +121,7 @@ class TensorConverter(PipelineComponent):
 
 
 
-        self.observer.log("INFO", f"TensorConverter: Found {len(val_cols)} features with 3 channels (V, M, D).")
+        self.observer.log("INFO", f"[1.7.1] 3-channel features count={len(val_cols)}")
 
 
 
@@ -149,7 +149,7 @@ class TensorConverter(PipelineComponent):
 
 
 
-        self.observer.log("INFO", "TensorConverter: Preparing random split by ICU stay.")
+        self.observer.log("INFO", "[1.7.2] Preparing random split by ICU stay")
 
 
 

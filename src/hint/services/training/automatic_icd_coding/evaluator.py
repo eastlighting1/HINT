@@ -160,7 +160,7 @@ class ICDEvaluator(BaseEvaluator):
         if log_metrics:
             self.observer.log(
                 "INFO",
-                f"ICDEvaluator: Stage 1/3 starting evaluation batches={len(dataloader)}.",
+                f"[EVAL START] batches={len(dataloader)}",
             )
 
         all_candidate_hits = []
@@ -347,7 +347,8 @@ class ICDEvaluator(BaseEvaluator):
             if log_metrics:
                 self.observer.log(
                     "INFO",
-                    f"ICDEvaluator: Stage 2/3 pred_unique={unique_preds} top_pred={top_idx} top_ratio={top_ratio:.4f} avg_cand={avg_cand:.2f} CPM={cpm:.4f} CMG={cmg:.4f} NDI={ndi:.4f} EPR={epr:.4f}.",
+                    f"[EVAL STATS] pred_unique={unique_preds} top_pred={top_idx} top_ratio={top_ratio:.4f} "
+                    f"avg_cand={avg_cand:.2f} cpm={cpm:.4f} cmg={cmg:.4f} ndi={ndi:.4f} epr={epr:.4f}",
                 )
 
 
@@ -355,12 +356,12 @@ class ICDEvaluator(BaseEvaluator):
             self.observer.log(
                 "INFO",
                 (
-                    "ICDEvaluator: Stage 3/3 complete "
-                    f"Candidate Accuracy={cand_acc:.4f} "
-                    f"Hit@3={cand_hit_at[3]:.4f} "
-                    f"Hit@5={cand_hit_at[5]:.4f} "
-                    f"Hit@10={cand_hit_at[10]:.4f} "
-                    f"Loss={total_loss / len(dataloader) if len(dataloader) > 0 else 0.0:.4f}."
+                    "[EVAL END] "
+                    f"cand_acc={cand_acc:.4f} "
+                    f"hit3={cand_hit_at[3]:.4f} "
+                    f"hit5={cand_hit_at[5]:.4f} "
+                    f"hit10={cand_hit_at[10]:.4f} "
+                    f"loss={total_loss / len(dataloader) if len(dataloader) > 0 else 0.0:.4f}"
                 ),
             )
 

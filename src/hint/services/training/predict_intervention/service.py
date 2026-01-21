@@ -128,7 +128,7 @@ class InterventionService(BaseDomainService):
 
         self.observer.log(
             "INFO",
-            f"InterventionService: Stage 1/4 building dataloaders and class weights device={self.device}.",
+            f"[3.1] Building dataloaders and class weights. device={self.device}",
         )
 
         self._ensure_expected_h5_paths()
@@ -180,7 +180,7 @@ class InterventionService(BaseDomainService):
 
                             class_weights = torch.clamp(class_weights, max=50.0)
 
-                            self.observer.log("INFO", f"Computed Class Weights: {class_weights.tolist()}")
+                            self.observer.log("INFO", f"[3.1] Class weights computed. weights={class_weights.tolist()}")
 
                             if getattr(self.cfg, "use_weighted_sampler", False):
                                 sample_weights = np.zeros_like(y_train, dtype=np.float32)
@@ -190,7 +190,7 @@ class InterventionService(BaseDomainService):
 
         except Exception as e:
 
-            self.observer.log("WARNING", f"Failed to compute class weights: {e}")
+            self.observer.log("WARNING", f"[3.1] Failed to compute class weights. error={e}")
 
         sampler = None
         if sample_weights is not None:
@@ -218,10 +218,10 @@ class InterventionService(BaseDomainService):
 
         self.observer.log(
             "INFO",
-            f"InterventionService: Stage 1/4 loaders ready train={len(dl_tr)} val={len(dl_val)} test={len(dl_test) if dl_test else 0}.",
+            f"[3.2] Loaders ready. train={len(dl_tr)} val={len(dl_val)} test={len(dl_test) if dl_test else 0}",
         )
 
-        self.observer.log("INFO", "InterventionService: Stage 2/4 initializing HINT model and input dimensions.")
+        self.observer.log("INFO", "[3.2] Initializing model and input dimensions")
 
 
 
@@ -237,7 +237,7 @@ class InterventionService(BaseDomainService):
                     f"X_icd not found in dataset ({self.train_ds.h5_path}). Gating disabled.",
                 )
 
-        self.observer.log("INFO", f"InterventionService: Stage 2/4 input_dim={num_feats} icd_dim={icd_dim}.")
+        self.observer.log("INFO", f"[3.2] Input dimensions resolved. input_dim={num_feats} icd_dim={icd_dim}")
 
 
 
@@ -291,13 +291,13 @@ class InterventionService(BaseDomainService):
 
 
 
-        self.observer.log("INFO", "InterventionService: Stage 3/4 entering training loop.")
+        self.observer.log("INFO", "[3.3] Training loop start")
 
         trainer.train(dl_tr, dl_val, evaluator)
 
-        self.observer.log("INFO", "InterventionService: Stage 3/4 training complete.")
+        self.observer.log("INFO", "[3.3] Training complete")
 
-        self.observer.log("INFO", "InterventionService: Stage 4/4 entering test phase.")
+        self.observer.log("INFO", "[3.4] Test phase start")
 
         if dl_test:
 
@@ -314,11 +314,11 @@ class InterventionService(BaseDomainService):
             metrics = evaluator.evaluate(dl_test)
 
             self.observer.log("INFO", f"Final Test Results: {json.dumps(metrics, indent=2)}")
-            self.observer.log("INFO", "InterventionService: Stage 4/4 test evaluation complete.")
+            self.observer.log("INFO", "[3.4] Test evaluation complete")
 
         else:
 
-            self.observer.log("WARNING", "InterventionService: No test dataset available, skipping test evaluation.")
+            self.observer.log("WARNING", "[3.4] No test dataset available. action=skip")
 
 
     def _ensure_expected_h5_paths(self) -> None:
@@ -348,7 +348,7 @@ class InterventionService(BaseDomainService):
             if expected_path.exists():
                 self.observer.log(
                     "WARNING",
-                    f"InterventionService: {split} dataset path mismatch ({ds.h5_path}); switching to {expected_path}.",
+                    f"[3.1] Dataset path mismatch. split={split} current={ds.h5_path} switch_to={expected_path}",
                 )
                 datasets[split] = HDF5StreamingSource(
                     expected_path,
@@ -358,7 +358,7 @@ class InterventionService(BaseDomainService):
             else:
                 self.observer.log(
                     "WARNING",
-                    f"InterventionService: {split} dataset path mismatch ({ds.h5_path}); expected {expected_path} missing.",
+                    f"[3.1] Dataset path mismatch. split={split} current={ds.h5_path} expected_missing={expected_path}",
                 )
 
         self.train_ds = datasets["train"]

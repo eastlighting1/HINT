@@ -77,7 +77,7 @@ class StaticExtractor(PipelineComponent):
 
 
 
-        self.observer.log("INFO", f"StaticExtractor: Searching raw CSVs under {raw_dir}")
+        self.observer.log("INFO", f"[1.1] Static extraction started. raw_dir={raw_dir}")
 
 
 
@@ -135,11 +135,11 @@ class StaticExtractor(PipelineComponent):
 
 
 
-        self.observer.log("INFO", "StaticExtractor: Stage 1/4 loading ICU stays")
+        self.observer.log("INFO", "[1.1.1] Loading ICU stays")
 
         icu_fp = find_raw_file("ICUSTAYS")
 
-        self.observer.log("INFO", f"StaticExtractor: Loading ICU stays from {icu_fp.name}")
+        self.observer.log("INFO", f"[1.1.1] ICU stays source={icu_fp.name}")
 
 
 
@@ -185,7 +185,7 @@ class StaticExtractor(PipelineComponent):
 
 
 
-        self.observer.log("INFO", "StaticExtractor: Stage 2/4 loading admissions")
+        self.observer.log("INFO", "[1.1.2] Loading admissions")
 
         adm_fp = find_raw_file("ADMISSIONS")
 
@@ -213,7 +213,7 @@ class StaticExtractor(PipelineComponent):
 
 
 
-        self.observer.log("INFO", "StaticExtractor: Stage 3/4 loading patients")
+        self.observer.log("INFO", "[1.1.3] Loading patients")
 
         pat_fp = find_raw_file("PATIENTS")
 
@@ -237,7 +237,7 @@ class StaticExtractor(PipelineComponent):
 
 
 
-        self.observer.log("INFO", "StaticExtractor: Stage 4/4 joining tables and computing outcomes")
+        self.observer.log("INFO", "[1.1.4] Joining tables and computing outcomes")
 
         df = (
 
@@ -271,4 +271,4 @@ class StaticExtractor(PipelineComponent):
 
         df.write_parquet(out_path)
 
-        self.observer.log("INFO", f"StaticExtractor: Saved cohort to {out_path} rows={df.height}")
+        self.observer.log("INFO", f"[1.1.5] Cohort saved. path={out_path} rows={df.height}")

@@ -29,7 +29,8 @@ def run_test():
     # 만약 main.py에서 base_dir를 다르게 설정했다면 여기서도 맞춰주세요.
     registry = FileSystemRegistry(base_dir="./artifacts") 
     
-    observer = RichTelemetryObserver()
+    run_dir = Path("outputs/manual_run")
+    observer = RichTelemetryObserver(run_dir=run_dir)
     device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
     
     observer.log("INFO", f"=== Start Testing Mode (Device: {device}) ===")

@@ -99,7 +99,7 @@ class LabelGenerator(PipelineComponent):
 
 
 
-        self.observer.log("INFO", f"LabelGenerator: Loading features from {ds_path}")
+        self.observer.log("INFO", f"[1.6.1] Loading features. path={ds_path}")
 
         ds = pl.read_parquet(ds_path)
 
@@ -128,7 +128,7 @@ class LabelGenerator(PipelineComponent):
         Exception: Description of why this exception might be raised.
         """
 
-        self.observer.log("INFO", "LabelGenerator: Stage 1/2 generating ventilation transitions.")
+        self.observer.log("INFO", "[1.6.2] Generating ventilation transitions")
 
 
 
@@ -218,7 +218,7 @@ class LabelGenerator(PipelineComponent):
 
         targets.write_parquet(out_path)
 
-        self.observer.log("INFO", f"LabelGenerator: Saved Vent transition targets to {out_path}")
+        self.observer.log("INFO", f"[1.6.2] Vent targets saved. path={out_path}")
 
 
 
@@ -239,7 +239,7 @@ class LabelGenerator(PipelineComponent):
         Exception: Description of why this exception might be raised.
         """
 
-        self.observer.log("INFO", "LabelGenerator: Stage 2/2 generating ICD candidate sets.")
+        self.observer.log("INFO", "[1.6.3] Generating ICD candidate sets")
 
 
 
@@ -328,4 +328,4 @@ class LabelGenerator(PipelineComponent):
 
 
 
-        self.observer.log("INFO", f"LabelGenerator: Saved ICD candidate sets to {out_path}")
+        self.observer.log("INFO", f"[1.6.3] ICD candidate sets saved. path={out_path}")

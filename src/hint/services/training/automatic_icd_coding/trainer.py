@@ -4,6 +4,7 @@ Longer description of the module purpose and usage.
 """
 
 import torch
+import time
 
 import torch.nn as nn
 import torch.nn.functional as F
@@ -611,7 +612,7 @@ class ICDTrainer(BaseTrainer):
         )
         self.observer.log(
             "INFO",
-            f"ICDTrainer: Stage 1/4 setup device={self.device} loss_type={self.loss_type} use_amp={self.use_amp} lr={lr}.",
+            f"[2.5] Trainer setup. device={self.device} loss_type={self.loss_type} use_amp={self.use_amp} lr={lr}",
         )
 
 
@@ -622,33 +623,40 @@ class ICDTrainer(BaseTrainer):
 
 
 
-        self.observer.log("INFO", "ICDTrainer: Stage 2/4 starting training loop.")
+        self.observer.log("INFO", "[2.6] Training loop started.")
 
-        for epoch in range(1, self.cfg.epochs + 1):
+        use_dashboard = hasattr(self.observer, "start_dashboard")
 
-            self.entity.epoch = epoch
+        if use_dashboard:
+            self.observer.start_dashboard("ICD Training")
 
-            self.entity.model.train()
+        try:
+            for epoch in range(1, self.cfg.epochs + 1):
 
-            epoch_loss = 0.0
+                self.entity.epoch = epoch
 
-            steps = 0
+                self.entity.model.train()
 
+                epoch_loss = 0.0
 
+                steps = 0
+                epoch_start = time.time()
 
-            with self.observer.create_progress(f"Epoch {epoch} ICD Train", total=len(train_loader)) as progress:
-
-                task = progress.add_task("Training", total=len(train_loader))
-
-
+                if use_dashboard:
+                    self.observer.reset_dashboard_progress(len(train_loader), f"Train batches e{epoch}")
+                    self.observer.update_dashboard(
+                        "ICD Training",
+                        epoch=epoch,
+                        total_epochs=self.cfg.epochs,
+                        metrics={"train_loss": 0.0},
+                        note="train",
+                    )
 
                 for batch in train_loader:
 
                     optimizer.zero_grad()
 
                     inputs = self._prepare_inputs(batch)
-
-
 
                     candidates = batch.candidates
 
@@ -717,7 +725,7 @@ class ICDTrainer(BaseTrainer):
 
                     if not torch.isfinite(loss):
 
-                        self.observer.log("WARNING", "ICDTrainer: Non-finite loss detected; skipping step.")
+                        self.observer.log("WARNING", "[BATCH] Non-finite loss detected. action=skip")
 
                         continue
 
@@ -753,21 +761,29 @@ class ICDTrainer(BaseTrainer):
 
                     steps += 1
 
-                    progress.advance(task)
+                    if use_dashboard:
+                        self.observer.advance_dashboard_progress()
 
 
 
-            avg_loss = epoch_loss / max(1, steps)
+                avg_loss = epoch_loss / max(1, steps)
 
-            self.observer.track_metric("icd_train_loss", avg_loss, step=epoch)
+                self.observer.track_metric("icd_train_loss", avg_loss, step=epoch)
 
-            self.observer.log("INFO", f"ICDTrainer: Stage 2/4 epoch={epoch} train_loss={avg_loss:.4f}.")
+                self.observer.log("INFO", f"[EPOCH END] e={epoch} train_loss={avg_loss:.4f}")
 
+                if use_dashboard:
+                    self.observer.update_dashboard(
+                        "ICD Training",
+                        epoch=epoch,
+                        total_epochs=self.cfg.epochs,
+                        metrics={"train_loss": avg_loss},
+                        note="train",
+                    )
 
+                self.observer.log("INFO", f"[VALIDATION] e={epoch} start")
 
-            self.observer.log("INFO", f"ICDTrainer: Stage 3/4 epoch={epoch} validation start.")
-
-            metrics = evaluator.evaluate(val_loader)
+                metrics = evaluator.evaluate(val_loader)
 
 
 
@@ -779,27 +795,57 @@ class ICDTrainer(BaseTrainer):
             self.observer.log(
                 "INFO",
                 (
-                    f"ICDTrainer: Stage 3/4 epoch={epoch} Loss={val_loss:.4f} "
-                    f"Candidate Accuracy={cand_acc:.4f} Hit@3={hit3:.4f} "
-                    f"Hit@5={hit5:.4f} Hit@10={hit10:.4f}."
+                    f"[EPOCH END] e={epoch} val_loss={val_loss:.4f} "
+                    f"cand_acc={cand_acc:.4f} hit3={hit3:.4f} "
+                    f"hit5={hit5:.4f} hit10={hit10:.4f}"
                 ),
             )
-            scheduler.step(val_loss)
+                if use_dashboard:
+                    self.observer.update_dashboard(
+                        "ICD Training",
+                        epoch=epoch,
+                        total_epochs=self.cfg.epochs,
+                        metrics={
+                            "train_loss": avg_loss,
+                            "val_loss": val_loss,
+                            "cand_acc": cand_acc,
+                            "hit3": hit3,
+                            "hit5": hit5,
+                            "hit10": hit10,
+                        },
+                        note="val",
+                    )
 
-            if val_loss < self.entity.best_metric:
+                if hasattr(self.observer, "trace_event"):
+                    self.observer.trace_event(
+                        "icd_epoch_end",
+                        {
+                            "epoch": epoch,
+                            "train_loss": avg_loss,
+                            "val_loss": val_loss,
+                            "duration_sec": time.time() - epoch_start,
+                        },
+                    )
 
-                self.entity.best_metric = val_loss
+                scheduler.step(val_loss)
 
-                self.registry.save_model(self.entity.model.state_dict(), self.entity.name, "best")
+                if val_loss < self.entity.best_metric:
 
-                no_improve = 0
+                    self.entity.best_metric = val_loss
 
-            else:
+                    self.registry.save_model(self.entity.model.state_dict(), self.entity.name, "best")
 
-                no_improve += 1
+                    no_improve = 0
 
-                if no_improve >= self.cfg.patience:
+                else:
 
-                    self.observer.log("WARNING", f"ICDTrainer: Stage 4/4 early stopping epoch={epoch}.")
+                    no_improve += 1
 
-                    break
+                    if no_improve >= self.cfg.patience:
+
+                        self.observer.log("WARNING", f"[EARLY STOP] e={epoch} reason=patience")
+
+                        break
+        finally:
+            if use_dashboard:
+                self.observer.stop_dashboard()

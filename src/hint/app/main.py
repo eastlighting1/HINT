@@ -3,8 +3,13 @@
 Longer description of the module purpose and usage.
 """
 
+import json
 import random
+import subprocess
 import sys
+import time
+import traceback
+from pathlib import Path
 
 try:
     import numpy as np
@@ -65,81 +70,176 @@ def main() -> None:
 
     mode = factory.ctx.mode
 
-    logged_start = False
+    start_time = time.time()
+
+    status = "success"
+
+    error_detail = None
+
+    stage0_observer = factory.create_telemetry()
+
+    def _resolve_git_commit() -> str:
+        try:
+            result = subprocess.run(
+                ["git", "rev-parse", "HEAD"],
+                capture_output=True,
+                text=True,
+                check=True,
+            )
+            return result.stdout.strip()
+        except Exception:
+            return "unknown"
+
+    stage0_observer.log("INFO", "[STAGE 0 START] Pipeline initialization.")
+
+    if hasattr(stage0_observer, "render_stage0_receipt"):
+
+        stage0_observer.render_stage0_receipt(factory.ctx)
+
+    stage0_observer.log("INFO", f"[0.1] Configuration loaded. mode={mode}")
+
+    stage0_observer.log("INFO", f"[0.2] Global RNG seeded. seed={factory.ctx.seed}")
+
+    stage0_observer.log("INFO", f"[0.3] Run directory ready. run_dir={factory.run_dir}")
+
+    stage0_observer.log("INFO", "[STAGE 0 END] System ready.")
+
+    icd_best_model = None
+    icd_best_metric = None
+    intervention_best_metric = None
+
+    try:
+
+        if mode in ["all", "etl"]:
+
+            stage_start = time.time()
+
+            etl_service = factory.create_etl_service()
+
+            etl_service.observer.log("INFO", "[STAGE 1 START] ETL pipeline start.")
+
+            etl_service.run_pipeline()
+
+            etl_service.observer.log("INFO", "[STAGE 1 END] ETL pipeline complete.")
+
+            duration = time.time() - stage_start
+            if hasattr(etl_service.observer, "trace_event"):
+                etl_service.observer.trace_event("stage_end", {"stage": "etl", "duration_sec": duration})
+            if hasattr(etl_service.observer, "trace_bottleneck"):
+                etl_service.observer.trace_bottleneck("etl", duration, threshold_sec=300.0)
 
 
+        if mode in ["all", "icd"]:
 
-    if mode in ["all", "etl"]:
+            stage_start = time.time()
 
-        etl_service = factory.create_etl_service()
+            icd_service = factory.create_icd_service()
 
-        if not logged_start:
+            icd_service.observer.log("INFO", "[STAGE 2 START] ICD training start.")
 
-            etl_service.observer.log("INFO", f"App: Stage 1/3 initialize in mode={mode}.")
+            icd_service.execute()
 
-            logged_start = True
+            icd_service.observer.log("INFO", "[STAGE 2 END] ICD training complete.")
 
-        etl_service.observer.log("INFO", "App: Stage 1/3 ETL pipeline start.")
+            icd_best_model = getattr(icd_service, "best_model_name", None)
+            icd_best_metric = getattr(getattr(icd_service, "entity", None), "best_metric", None)
 
-        etl_service.run_pipeline()
-
-        etl_service.observer.log("INFO", "App: Stage 1/3 ETL pipeline complete.")
-
-
-
-    if mode in ["all", "icd"]:
-
-        icd_service = factory.create_icd_service()
-
-        if not logged_start:
-
-            icd_service.observer.log("INFO", f"App: Stage 2/3 initialize in mode={mode}.")
-
-            logged_start = True
+            duration = time.time() - stage_start
+            if hasattr(icd_service.observer, "trace_event"):
+                icd_service.observer.trace_event("stage_end", {"stage": "icd", "duration_sec": duration})
+            if hasattr(icd_service.observer, "trace_bottleneck"):
+                icd_service.observer.trace_bottleneck("icd", duration, threshold_sec=300.0)
 
 
+            stage_start = time.time()
 
-        icd_service.observer.log("INFO", "App: Stage 2/3 ICD training start.")
+            icd_service.observer.log("INFO", "[STAGE 2B START] Feature injection start.")
 
-        icd_service.execute()
+            icd_service.generate_intervention_dataset(factory.ctx.cnn)
 
-        icd_service.observer.log("INFO", "App: Stage 2/3 ICD training complete.")
+            icd_service.observer.log("INFO", "[STAGE 2B END] Feature injection complete.")
 
-
-
-        icd_service.observer.log("INFO", "App: Stage 2/3 ICD feature injection start.")
-
-        icd_service.generate_intervention_dataset(factory.ctx.cnn)
-
-        icd_service.observer.log("INFO", "App: Stage 2/3 ICD feature injection complete.")
-
+            duration = time.time() - stage_start
+            if hasattr(icd_service.observer, "trace_event"):
+                icd_service.observer.trace_event("stage_end", {"stage": "feature_injection", "duration_sec": duration})
+            if hasattr(icd_service.observer, "trace_bottleneck"):
+                icd_service.observer.trace_bottleneck("feature_injection", duration, threshold_sec=300.0)
 
 
-    if mode in ["all", "intervention"]:
+        if mode in ["all", "intervention"]:
 
-        int_service = factory.create_intervention_service()
+            stage_start = time.time()
 
-        if not logged_start:
+            int_service = factory.create_intervention_service()
 
-            if int_service.observer:
+            if int_service.train_ds is not None:
 
-                int_service.observer.log("INFO", f"App: Stage 3/3 initialize in mode={mode}.")
+                int_service.observer.log("INFO", "[STAGE 3 START] Intervention training start.")
 
-            logged_start = True
+                int_service.execute()
 
+                int_service.observer.log("INFO", "[STAGE 3 END] Intervention training complete.")
 
+                intervention_best_metric = getattr(getattr(int_service, "entity", None), "best_metric", None)
 
-        if int_service.train_ds is not None:
+            else:
 
-            int_service.observer.log("INFO", "App: Stage 3/3 intervention training start.")
+                int_service.observer.log("ERROR", "[STAGE 3 SKIP] Intervention training skipped (no data).")
 
-            int_service.execute()
+            duration = time.time() - stage_start
+            if hasattr(int_service.observer, "trace_event"):
+                int_service.observer.trace_event("stage_end", {"stage": "intervention", "duration_sec": duration})
+            if hasattr(int_service.observer, "trace_bottleneck"):
+                int_service.observer.trace_bottleneck("intervention", duration, threshold_sec=300.0)
 
-            int_service.observer.log("INFO", "App: Stage 3/3 intervention training complete.")
+    except Exception as exc:
 
-        else:
+        status = "error"
 
-            int_service.observer.log("ERROR", "App: Stage 3/3 intervention training skipped (no data).")
+        error_detail = f"{exc}"
+
+        stage0_observer.log("CRITICAL", f"[RUN END] status=error error={exc}")
+
+        stage0_observer.log("ERROR", traceback.format_exc())
+
+        raise
+
+    finally:
+
+        end_time = time.time()
+
+        summary = {
+            "status": status,
+            "mode": mode,
+            "seed": factory.ctx.seed,
+            "run_dir": str(factory.run_dir),
+            "git_commit": _resolve_git_commit(),
+            "start_time": start_time,
+            "end_time": end_time,
+            "total_time_sec": end_time - start_time,
+            "error": error_detail,
+            "icd_best_model": icd_best_model,
+            "icd_best_metric": icd_best_metric,
+            "intervention_best_metric": intervention_best_metric,
+        }
+
+        metrics_dir = Path(factory.run_dir) / "metrics"
+
+        metrics_dir.mkdir(parents=True, exist_ok=True)
+
+        summary_path = metrics_dir / "summary.json"
+
+        summary_path.write_text(json.dumps(summary, indent=2), encoding="utf-8")
+
+        if status == "success":
+
+            stage0_observer.log("SUCCESS", "[RUN END] status=success")
+
+        if hasattr(stage0_observer, "render_run_end"):
+
+            message = "Pipeline finished successfully." if status == "success" else "Pipeline terminated with errors."
+
+            stage0_observer.render_run_end(status, message)
 
 
 

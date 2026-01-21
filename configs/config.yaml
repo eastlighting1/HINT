@@ -10,4 +10,6 @@ seed: 42
 
 # 로깅 설정 (Hydra에 의해 보간됨)
 logging:
+  output_dir: "outputs"
   artifacts_dir: "artifacts"
+  use_hydra_run_dir: false

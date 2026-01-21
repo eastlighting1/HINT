@@ -4,6 +4,7 @@ Longer description of the module purpose and usage.
 """
 
 import torch
+import time
 
 import torch.nn as nn
 
@@ -225,91 +226,122 @@ class InterventionTrainer(BaseTrainer):
         optimizer = torch.optim.AdamW(self.entity.network.parameters(), lr=self.cfg.lr, weight_decay=1e-4)
         self.observer.log(
             "INFO",
-            f"InterventionTrainer: Stage 1/3 setup device={self.device} lr={self.cfg.lr} focal_gamma={self.gamma}.",
+            f"[3.2] Trainer setup. device={self.device} lr={self.cfg.lr} focal_gamma={self.gamma}",
         )
 
 
 
         no_improve = 0
 
-        self.observer.log("INFO", "InterventionTrainer: Stage 2/3 starting training loop.")
+        self.observer.log("INFO", "[3.3] Training loop started.")
 
-        for epoch in range(1, self.cfg.epochs + 1):
+        use_dashboard = hasattr(self.observer, "start_dashboard")
 
-            self.entity.epoch = epoch
+        if use_dashboard:
+            self.observer.start_dashboard("Intervention Training")
 
-            self.observer.log("INFO", f"InterventionTrainer: Stage 2/3 epoch={epoch} start.")
+        try:
+            for epoch in range(1, self.cfg.epochs + 1):
 
-            self._train_epoch(epoch, train_loader, optimizer)
+                self.entity.epoch = epoch
 
+                self.observer.log("INFO", f"[EPOCH START] e={epoch}")
+                epoch_start = time.time()
 
+                if use_dashboard:
+                    self.observer.reset_dashboard_progress(len(train_loader), f"Train batches e{epoch}")
+                    self.observer.update_dashboard(
+                        "Intervention Training",
+                        epoch=epoch,
+                        total_epochs=self.cfg.epochs,
+                        metrics={"train_loss": 0.0},
+                        note="train",
+                    )
 
-            self.observer.log("INFO", f"InterventionTrainer: Stage 2/3 epoch={epoch} validation start.")
+                self._train_epoch(epoch, train_loader, optimizer)
 
-            metrics = evaluator.evaluate(val_loader)
+                self.observer.log("INFO", f"[VALIDATION] e={epoch} start")
 
+                metrics = evaluator.evaluate(val_loader)
 
+                val_f1 = metrics["f1_score"]
 
-            val_f1 = metrics["f1_score"]
+                val_loss = metrics.get("loss", 0.0)
 
-            val_loss = metrics.get("loss", 0.0)
+                macro_auc = metrics.get("macro_auc", 0.0)
 
-            macro_auc = metrics.get("macro_auc", 0.0)
+                onset_auc = metrics.get("onset_auc", 0.0)
 
-            onset_auc = metrics.get("onset_auc", 0.0)
+                wean_auc = metrics.get("wean_auc", 0.0)
 
-            wean_auc = metrics.get("wean_auc", 0.0)
+                macro_auprc = metrics.get("macro_auprc", 0.0)
 
-            macro_auprc = metrics.get("macro_auprc", 0.0)
+                self.observer.log(
+                    "INFO",
+                    f"[EPOCH END] e={epoch} val_loss={val_loss:.4f} f1={val_f1:.4f} "
+                    f"macro_auc={macro_auc:.4f} onset_auc={onset_auc:.4f} wean_auc={wean_auc:.4f}",
+                )
 
+                if use_dashboard:
+                    self.observer.update_dashboard(
+                        "Intervention Training",
+                        epoch=epoch,
+                        total_epochs=self.cfg.epochs,
+                        metrics={
+                            "val_loss": val_loss,
+                            "f1": val_f1,
+                            "macro_auc": macro_auc,
+                            "onset_auc": onset_auc,
+                            "wean_auc": wean_auc,
+                        },
+                        note="val",
+                    )
 
+                if hasattr(self.observer, "trace_event"):
+                    self.observer.trace_event(
+                        "intervention_epoch_end",
+                        {
+                            "epoch": epoch,
+                            "val_loss": val_loss,
+                            "val_f1": val_f1,
+                            "duration_sec": time.time() - epoch_start,
+                        },
+                    )
 
+                metric_name = getattr(self.cfg, "early_stop_metric", "f1")
 
+                metric_map = {
+                    "f1": val_f1,
+                    "macro_auc": macro_auc,
+                    "macro_auprc": macro_auprc,
+                }
 
-            self.observer.log(
-                "INFO",
-                f"InterventionTrainer: Stage 2/3 epoch={epoch} loss={val_loss:.4f} f1={val_f1:.4f} macro_auc={macro_auc:.4f} onset_auc={onset_auc:.4f} wean_auc={wean_auc:.4f}.",
-            )
+                val_metric = metric_map.get(metric_name, val_f1)
 
+                self.observer.log("INFO", f"[EARLY STOP] metric={metric_name} value={val_metric:.4f}")
 
+                if val_metric > self.entity.best_metric:
 
-            metric_name = getattr(self.cfg, "early_stop_metric", "f1")
+                    self.entity.best_metric = val_metric
 
-            metric_map = {
+                    self.entity.update_ema()
 
-                "f1": val_f1,
+                    self.registry.save_model(self.entity.state_dict(), self.cfg.artifacts.model_name, "best")
 
-                "macro_auc": macro_auc,
+                    no_improve = 0
 
-                "macro_auprc": macro_auprc,
+                else:
 
-            }
+                    no_improve += 1
 
-            val_metric = metric_map.get(metric_name, val_f1)
+                    if no_improve >= self.cfg.patience:
 
-            self.observer.log("INFO", f"InterventionTrainer: Stage 2/3 early_stop_metric={metric_name} value={val_metric:.4f}.")
+                        self.observer.log("WARNING", "[EARLY STOP] triggered=true")
 
-
-
-            if val_metric > self.entity.best_metric:
-
-                self.entity.best_metric = val_metric
-
-                self.entity.update_ema()
-
-                self.registry.save_model(self.entity.state_dict(), self.cfg.artifacts.model_name, "best")
-
-                no_improve = 0
-
-            else:
-
-                no_improve += 1
-
-                if no_improve >= self.cfg.patience:
-
-                    self.observer.log("WARNING", "InterventionTrainer: Stage 3/3 early stopping triggered.")
-
-                    break
+                        break
+        finally:
+            if use_dashboard:
+                self.observer.stop_dashboard()
 
 
 
@@ -339,51 +371,40 @@ class InterventionTrainer(BaseTrainer):
 
 
 
-        with self.observer.create_progress(f"Epoch {epoch} Train", total=len(loader)) as progress:
+        for batch in loader:
 
-            task = progress.add_task("Training", total=len(loader))
+            optimizer.zero_grad()
 
-            for batch in loader:
+            inputs = self._prepare_inputs(batch)
 
-                optimizer.zero_grad()
+            y = batch.y.to(self.device)
 
+            target = self._select_last_valid(y)
 
+            logits = self.entity.network(**inputs)
 
-                inputs = self._prepare_inputs(batch)
+            loss = self.focal_loss(logits, target)
 
-                y = batch.y.to(self.device)
+            loss.backward()
 
-                target = self._select_last_valid(y)
+            grad_clip_norm = getattr(self.cfg, "grad_clip_norm", None)
+            if grad_clip_norm:
+                torch.nn.utils.clip_grad_norm_(self.entity.network.parameters(), grad_clip_norm)
 
+            optimizer.step()
 
+            self.entity.update_ema()
 
-                logits = self.entity.network(**inputs)
+            total_loss += loss.item()
 
+            steps += 1
 
-
-                loss = self.focal_loss(logits, target)
-
-                loss.backward()
-
-                grad_clip_norm = getattr(self.cfg, "grad_clip_norm", None)
-                if grad_clip_norm:
-                    torch.nn.utils.clip_grad_norm_(self.entity.network.parameters(), grad_clip_norm)
-
-                optimizer.step()
-
-                self.entity.update_ema()
-
-
-
-                total_loss += loss.item()
-
-                steps += 1
-
-                progress.advance(task)
+            if hasattr(self.observer, "advance_dashboard_progress"):
+                self.observer.advance_dashboard_progress()
 
 
 
         avg_loss = total_loss / max(1, steps)
 
         self.observer.track_metric("train_loss", avg_loss, step=epoch)
-        self.observer.log("INFO", f"InterventionTrainer: Stage 2/3 epoch={epoch} train_loss={avg_loss:.4f}.")
+        self.observer.log("INFO", f"[EPOCH END] e={epoch} train_loss={avg_loss:.4f}")
