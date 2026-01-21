@@ -25,7 +25,7 @@ Welcome to the **HINT** repository!
 
 ### Why is this important?
 
-In the ICU, a patient's condition changes rapidly. Clinicians must process massive amounts of data—vital signs (heart rate, SpO2) and lab results—in real-time. However, existing AI models often fail to connect these "low-level" signals with the patient's "high-level" diagnosis (ICD codes), leading to suboptimal predictions.
+In the ICU, a patient's condition changes rapidly. Clinicians must process massive amounts of data — vital signs (heart rate, SpO2) and lab results — in real-time. However, existing AI models often fail to connect these "low-level" signals with the patient's "high-level" diagnosis (ICD codes), leading to suboptimal predictions.
 
 **HINT solves this by thinking like a doctor:** it first understands the patient's underlying diagnosis (even if records are incomplete!) and then uses that context to interpret the fluctuating vital signs more accurately.
 
@@ -65,8 +65,9 @@ This is where the magic happens. The model combines the context from Stage 1 wit
   - **ICD Gating (optional)** to modulate numeric features using the ICD context.
 - **Output**: Probabilities for 4 states (`ONSET`, `WEAN`, `STAY ON`, `STAY OFF`).
 
+<br>
 <div align="center">
-  <img width="850" alt="HINT Architecture Diagram" src="https://github.com/user-attachments/assets/85fde6e4-3800-4bd2-8983-e33a504cd72d" />
+  <img width="850" alt="HINT Architecture Diagram" src="https://github.com/user-attachments/assets/0279bdfa-4cdb-44a4-a0e2-97812ab62c85" />
   <br>
   <em>Figure 1. The comprehensive pipeline: From raw MIMIC-III data to actionable clinical insights.</em>
 </div>
