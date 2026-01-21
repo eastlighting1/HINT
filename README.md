@@ -48,7 +48,9 @@ The system is built upon a **Domain-Driven Design (DDD)** architecture, ensuring
 HINT first learns admission-level ICD context from the ETL tensors.
 
 - **Input**: Time-series tensors (values/mask/delta), static categorical features, and candidate ICD-9 code sets.
-- **Model Choices**: Configurable backbones (default `DCNv2`; optional `TabNet`, `FTTransformer`, `GRU-D`, `TST`, `LatentODE`, `iTransformer`, `MedBERT`).
+- **Tech Stack**:
+  - **Dense + cross feature modeling** for ICD coding.
+  - **Candidate-set aware loss (CLPL/adaptive CLPL)** for partial-label learning.
 - **Output**: An admission-level ICD context vector that can be injected into the intervention dataset.
 
 ### Stage 2: Intervention Prediction Module (TCN)
@@ -235,11 +237,11 @@ src/
 
 ## Citation
 
-If this work helps your research, please cite the Master's Thesis:
+If this work helps your research, please cite the paper :
 
 ```bibtex
-@article{kim2026design,
-title = {Design and Implementation of a Clinical Decision Support System Using an Intervention Prediction Model},
+@article{HINT,
+title = {HINT: Hierarchical ICD-aware Network for Time-series Intervention},
 journal = {TBD},
 year = {2026},
 author = {Donghyeon Kim},
