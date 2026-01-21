@@ -5,13 +5,13 @@
 ![Version](https://img.shields.io/badge/Version-0.1.0-blue?style=for-the-badge)
 ![License](https://img.shields.io/badge/License-MIT-yellow?style=for-the-badge)
 ![Python](https://img.shields.io/badge/Python-3.10%2B-3776AB?style=for-the-badge&logo=python&logoColor=white)
-![PyTorch](https://img.shields.io/badge/PyTorch-2.0%2B-EE4C2C?style=for-the-badge&logo=pytorch&logoColor=white)
+![PyTorch](https://img.shields.io/badge/PyTorch-2.1%2B-EE4C2C?style=for-the-badge&logo=pytorch&logoColor=white)
 ![Hydra](https://img.shields.io/badge/Config-Hydra-89b8cd?style=for-the-badge&logo=hydra&logoColor=white)
 ![uv](https://img.shields.io/badge/Managed%20by-uv-purple?style=for-the-badge)
 
 **A Hierarchical Clinical Decision Support System (CDSS) for ICU Mechanical Ventilation Prediction**
 
-[Introduction](#introduction) • [Core Architecture](#core-architecture) • [Quick Start](#quick-start-with-uv) • [Usage Guide](#usage-guide) • [Project Layout](#project-layout) • [Benchmarks](#benchmarks--performance)
+[Introduction](#introduction) • [Core Architecture](#core-architecture) • [Quick Start](#quick-start-with-uv) • [Usage Guide](#usage-guide) • [Project Layout](#project-layout) • [Data Analysis Tools](#data-analysis-tools) • [Benchmarks](#benchmarks--performance) • [Code Structure](#code-structure)
 
 </div>
 
@@ -31,11 +31,11 @@ In the ICU, a patient's condition changes rapidly. Clinicians must process massi
 
 ### Key Features at a Glance
 
-- **Hierarchical Thinking**: A two-stage pipeline that separates *diagnosis inference* from *event prediction*, mimicking clinical reasoning.
-- **Robust to Noisy Data**: Uses **Partial Label Learning** with MedBERT. Even if the medical records are messy or incomplete, HINT can infer the probable diagnosis.
-- **Context-Aware**: It doesn't just look at the numbers. An **ICD-Conditioned Gating Mechanism** dynamically adjusts which vital signs are most important based on the patient's specific disease.
-- **Imbalance Expert**: Designed for rare events. It uses specialized loss functions (Focal Loss) to accurately predict critical moments like `Onset` (starting ventilation) or `Weaning` (stopping it).
-- **Explainable (XAI)**: It's not a black box. HINT provides **SHAP** and **LIME** analyses so clinicians can understand *why* a prediction was made.
+- **Hierarchical Pipeline**: ETL builds tensors, ICD coding learns context, and intervention prediction models ventilation states.
+- **Partial-Label ICD Learning**: Uses CLPL/adaptive CLPL losses with candidate ICD-9 sets to handle incomplete labels.
+- **Context-Aware Prediction**: Optional ICD-conditioned gating reweights time-series features during intervention prediction.
+- **Imbalance Handling**: Focal loss and weighted sampling target rare ventilation transitions.
+- **Hydra-Driven**: All stages are configured via `configs/*.yaml` with CLI overrides.
 
 ---
 
@@ -45,13 +45,13 @@ The system is built upon a **Domain-Driven Design (DDD)** architecture, ensuring
 
 ### Stage 1: Automated ICD Coding Module
 
-Before looking at the time-series, HINT understands the patient.
+HINT first learns admission-level ICD context from the ETL tensors.
 
-- **Input**: Static data (age, gender) & Candidate ICD-9 code sets.
-- **Tech Stack**: `MedBERT` (Text Encoder) + `XGBoost` (Stacking).
-- **Output**: A dense "Context Vector" representing the patient's admission-level diagnosis.
+- **Input**: Time-series tensors (values/mask/delta), static categorical features, and candidate ICD-9 code sets.
+- **Model Choices**: Configurable backbones (default `DCNv2`; optional `TabNet`, `FTTransformer`, `GRU-D`, `TST`, `LatentODE`, `iTransformer`, `MedBERT`).
+- **Output**: An admission-level ICD context vector that can be injected into the intervention dataset.
 
-### Stage 2: Intervention Prediction Module (GFINet)
+### Stage 2: Intervention Prediction Module (TCN)
 
 This is where the magic happens. The model combines the context from Stage 1 with real-time monitoring data.
 
@@ -59,8 +59,8 @@ This is where the magic happens. The model combines the context from Stage 1 wit
   - **Time-Series Tensor**: (Values, Mask, Time-Delta) for 30+ vital signs.
   - **Context Vector**: Output from Stage 1.
 - **Tech Stack**:
-  - **Group-wise TCN**: Analyzes temporal patterns efficiently.
-  - **Gating Mechanism**: Fuses diagnosis context to re-weight time-series features.
+  - **Temporal Convolutional Network (TCN)** for time-series modeling.
+  - **ICD Gating (optional)** to modulate numeric features using the ICD context.
 - **Output**: Probabilities for 4 states (`ONSET`, `WEAN`, `STAY ON`, `STAY OFF`).
 
 <div align="center">
@@ -101,7 +101,7 @@ Since we cannot distribute MIMIC-III data, please place your downloaded CSV file
 ```bash
 # Example directory structure
 mkdir -p data/raw
-# Place ADMISSIONS.csv, CHARTEVENTS.csv, etc. inside data/raw
+# Place ADMISSIONS.csv(.gz), CHARTEVENTS.csv(.gz), etc. inside data/raw
 ```
 
 -----
@@ -133,6 +133,9 @@ Trains the ICD coding module to learn patient representations.
 ```bash
 uv run hint mode=icd
 ```
+
+> **Note:** The ICD stage also generates `X_icd` features for the intervention dataset (feature injection).
+> By default, only `DCNv2` runs. To try multiple backbones, set `icd.model_testing=true` and edit `icd.models_to_run` in `configs/icd_config.yaml`.
 
 ### 3. Intervention Prediction (Stage 2)
 
@@ -176,6 +179,22 @@ You can review and override defaults in `configs/config.yaml`, `configs/etl_conf
 
 -----
 
+## Data Analysis Tools
+
+For quick inspection of generated data, use the Analyzer utilities:
+
+```bash
+# HDF5 structure and tensor stats
+uv run Analyzer/h5_analyzer.py
+
+# Parquet schema and column stats
+uv run Analyzer/parquet_analyzer.py
+```
+
+Reports are saved under `Analyzer/Report/`.
+
+-----
+
 ## Benchmarks & Performance
 
 HINT has been rigorously evaluated on the MIMIC-III dataset. It specifically excels in the **Macro AUPRC** metric, which is the most critical metric for imbalanced medical data.
@@ -187,7 +206,7 @@ HINT has been rigorously evaluated on the MIMIC-III dataset. It specifically exc
 | **MTS-GCNN**       |   91.9    |      52.5       |   60.6   |
 | **HINT (Ours)**    | **92.3**  |   **75.2**      | **69.8** |
 
-> **Result:** HINT improves the AUPRC by **+22.7%** compared to the strongest baseline (MTS-GCNN). This means significantly fewer false alarms for clinicians.
+> **Result:** HINT improves the AUPRC by **+22.7%** compared to the strongest baseline (MTS-GCNN). This means significantly fewer false alarms for clinicians. Reported results require MIMIC-III access to reproduce.
 
 -----
 
@@ -214,7 +233,7 @@ src/
 
 -----
 
-## 📝 Citation
+## Citation
 
 If this work helps your research, please cite the Master's Thesis:
 
@@ -222,21 +241,14 @@ If this work helps your research, please cite the Master's Thesis:
 @article{kim2026design,
 title = {Design and Implementation of a Clinical Decision Support System Using an Intervention Prediction Model},
 journal = {TBD},
-volume = {},
-pages = {},
 year = {2026},
-issn = {},
-doi = {},
-url = {},
 author = {Donghyeon Kim},
-keywords = {ICD Coding, Partial-label learning, Intervention Prediction, Clinical Decision Support System, TCN, Class Imbalance, Explainable AI, MIMIC-III},
-abstract = {Intensive Care Units generate massive volumes of heterogeneous clinical data from electronic medical records and bedside monitoring, yet the rapid and unstable nature of critical illness makes it difficult for clinicians to integrate these signals in real time. Building trustworthy clinical decision support systems (CDSSs) therefore requires models that can handle irregular, sparse multivariate time series and incorporate high-level diagnostic context. In practice, ICU time series are heavily affected by missingness and non-uniform sampling, while International Classification of Diseases codes exhibit incomplete and overlapping label structures together with extreme class imbalance. To address these challenges, this study proposes a hierarchical diagnosis-time-series-intervention CDSS for ICU intervention prediction. The system consists of a two-stage pipeline. First, an Automated ICD Coding module infers an admission-level representative ICD label from ICD-9 candidate sets and static/numerical patient features. The module embeds realistic documentation uncertainty through partial-label learning, and it mitigates extreme imbalance via inverse-frequency sampling and class-balanced focal loss, yielding robust diagnostic context under weak supervision. Second, an Intervention Prediction module constructs ICU time-series tensors augmented with the inferred ICD context and predicts four mechanical ventilation states. The proposed model combines (i) multi-branch TCN-based CNN blocks that learn feature-group-specific temporal representations to reduce representation interference, and (ii) an ICD-driven gating mechanism that dynamically reweights numerical time-series features according to diagnostic context, enabling context-adaptive intervention inference. To ensure clinical interpretability, SHAP-based global explanations and LIME-based local explanations are provided in parallel for both modules. Experiments on MIMIC-III demonstrate that the proposed system achieves the best balanced performance under severe imbalance, reaching a Macro AUPRC of 75.2% and an F1 score of 69.8%, while also delivering a Macro AUC of 92.3% comparable to or slightly surpassing strong hybrid baselines. ICD impact analyses further confirm that clinically valid ICD context consistently outperforms random ICD injection, and that admission-level diagnostic context is more effective than ICU-stay-level fixation. These results validate the proposed hierarchical CDSS as a practical and imbalance-robust framework for context-aware ICU intervention prediction.}
 }
 ```
 
 -----
 
-## 📮 Contact & Support
+## Contact & Support
 
 We love hearing from the community\! If you have questions, run into issues, or just want to discuss medical AI:
 
@@ -244,4 +256,4 @@ We love hearing from the community\! If you have questions, run into issues, or 
 - **Email**: eastlighting1@gachon.ac.kr
 - **GitHub Issues**: Please open an issue if you find a bug\!
 
-Happy Coding\! 🚀
+Happy coding.
