@@ -134,6 +134,7 @@ class ICDModelEntity(TrainableEntity):
         self.network = model
 
         self.num_classes = num_classes
+        self.best_metric = float("inf")
 
 
 
@@ -185,7 +186,7 @@ class ICDModelEntity(TrainableEntity):
 
         self.model.load_state_dict(state["model"])
 
-        self.best_metric = state.get("best_metric", 0.0)
+        self.best_metric = state.get("best_metric", float("inf"))
 
         self.epoch = state.get("epoch", 0)
 

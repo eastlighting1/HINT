@@ -258,18 +258,7 @@ class LabelGenerator(PipelineComponent):
 
 
         code_counts = Counter(all_codes)
-
-        top_k = self.icd_cfg.top_k_labels
-
-
-
-        if top_k:
-
-            sorted_codes = [c for c, _ in code_counts.most_common(top_k)]
-
-        else:
-
-            sorted_codes = [c for c, _ in code_counts.most_common()]
+        sorted_codes = [c for c, _ in code_counts.most_common()]
 
 
 
@@ -325,9 +314,17 @@ class LabelGenerator(PipelineComponent):
 
         meta_path = proc_dir / self.etl_cfg.artifacts.icd_meta_file
 
+        idx_to_code = {i: c for i, c in enumerate(sorted_codes)}
         with open(meta_path, "w") as f:
-
-            json.dump({"icd_classes": sorted_codes}, f, indent=2)
+            json.dump(
+                {
+                    "icd_classes": sorted_codes,
+                    "icd_to_idx": code_to_idx,
+                    "idx_to_icd": idx_to_code,
+                },
+                f,
+                indent=2,
+            )
 
 
 

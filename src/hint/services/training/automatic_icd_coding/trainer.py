@@ -6,6 +6,7 @@ Longer description of the module purpose and usage.
 import torch
 
 import torch.nn as nn
+import torch.nn.functional as F
 
 import numpy as np
 
@@ -18,6 +19,7 @@ from torch.utils.data import DataLoader
 from ..common.base import BaseTrainer, BaseEvaluator
 
 from ....domain.entities import ICDModelEntity
+from ....infrastructure.models.tabnet import TabNetICD
 
 from ....domain.vo import ICDConfig
 
@@ -36,7 +38,7 @@ class CLPLLoss(nn.Module):
     loss_type (Any): Description of loss_type.
     """
 
-    def __init__(self, loss_type: str = "exponential"):
+    def __init__(self, loss_type: str = "exponential", class_weights: Optional[torch.Tensor] = None):
 
         """Summary of __init__.
         
@@ -55,6 +57,7 @@ class CLPLLoss(nn.Module):
         super().__init__()
 
         self.loss_type = loss_type
+        self.class_weights = class_weights
 
 
 
@@ -131,7 +134,8 @@ class CLPLLoss(nn.Module):
 
 
 
-        y_cardinality = torch.clamp(y_mask.sum(dim=1), min=1.0)
+        y_counts = y_mask.sum(dim=1)
+        y_cardinality = torch.clamp(y_counts, min=1.0)
 
         avg_candidate_score = (logits * y_mask).sum(dim=1) / y_cardinality
 
@@ -145,7 +149,15 @@ class CLPLLoss(nn.Module):
 
 
 
-        return (term1 + term2).mean()
+        loss = term1 + term2
+
+        if self.class_weights is not None:
+            class_weights = self.class_weights.to(logits.device)
+            cand_weights = (y_mask * class_weights).sum(dim=1) / y_cardinality
+            cand_weights = torch.where(y_counts > 0, cand_weights, torch.ones_like(cand_weights))
+            loss = loss * cand_weights
+
+        return loss.mean()
 
 
 
@@ -173,6 +185,7 @@ class AdaptiveCLPLLoss(nn.Module):
         loss_type: str = "logistic",
 
         logit_clip: float = 20.0,
+        class_weights: Optional[torch.Tensor] = None,
 
     ):
 
@@ -202,6 +215,7 @@ class AdaptiveCLPLLoss(nn.Module):
         self.loss_type = loss_type
 
         self.logit_clip = logit_clip
+        self.class_weights = class_weights
 
 
 
@@ -284,7 +298,8 @@ class AdaptiveCLPLLoss(nn.Module):
 
             y_mask[row_ids[valid], candidates[valid]] = 1.0
 
-        y_cardinality = torch.clamp(y_mask.sum(dim=1), min=1.0)
+        y_counts = y_mask.sum(dim=1)
+        y_cardinality = torch.clamp(y_counts, min=1.0)
 
         avg_candidate_score = (logits * y_mask).sum(dim=1) / y_cardinality
 
@@ -356,7 +371,15 @@ class AdaptiveCLPLLoss(nn.Module):
 
 
 
-        return (term1 + term2 + term3).mean()
+        loss = term1 + term2 + term3
+
+        if self.class_weights is not None:
+            class_weights = self.class_weights.to(logits.device)
+            cand_weights = (y_mask * class_weights).sum(dim=1) / y_cardinality
+            cand_weights = torch.where(y_counts > 0, cand_weights, torch.ones_like(cand_weights))
+            loss = loss * cand_weights
+
+        return loss.mean()
 
 
 
@@ -434,6 +457,7 @@ class ICDTrainer(BaseTrainer):
         self.entity = entity
 
         self.class_freq = class_freq
+        self.ignored_indices = ignored_indices if ignored_indices else []
 
         self.use_amp = self.cfg.use_amp if use_amp is None else use_amp
 
@@ -444,6 +468,17 @@ class ICDTrainer(BaseTrainer):
         self.scaler = torch.amp.GradScaler('cuda') if torch.cuda.is_available() and self.use_amp else None
 
         self.loss_type = self.cfg.loss_type
+        self.class_weights = None
+        if self.class_freq is not None:
+            freq = np.asarray(self.class_freq, dtype=np.float32)
+            freq = np.where(freq <= 0, 1.0, freq)
+            power = float(getattr(self.cfg, "class_weight_power", 0.5))
+            weights = 1.0 / np.power(freq, power)
+            weights = weights / np.mean(weights)
+            clip = float(getattr(self.cfg, "class_weight_clip", 0.0))
+            if clip > 0:
+                weights = np.clip(weights, 0.0, clip)
+            self.class_weights = torch.tensor(weights, dtype=torch.float32, device=self.device)
 
         if self.loss_type in ("adaptive_softmax", "adaptive_clpl"):
             head_size = min(getattr(self.cfg, "adaptive_clpl_head_size", 2000), self.num_classes or 0)
@@ -454,11 +489,12 @@ class ICDTrainer(BaseTrainer):
                 tail_sample_size=getattr(self.cfg, "adaptive_clpl_tail_sample_size", 100),
                 loss_type="logistic",
                 logit_clip=getattr(self.cfg, "adaptive_clpl_logit_clip", 20.0),
+                class_weights=self.class_weights,
             )
 
         else:
 
-            self.loss_fn = CLPLLoss(loss_type=self.loss_type)
+            self.loss_fn = CLPLLoss(loss_type=self.loss_type, class_weights=self.class_weights)
 
     def _prepare_inputs(self, batch: TensorBatch) -> Dict[str, torch.Tensor]:
 
@@ -566,6 +602,13 @@ class ICDTrainer(BaseTrainer):
         lr = self.cfg.lr if self.lr_override is None else self.lr_override
 
         optimizer = torch.optim.Adam(params, lr=lr)
+        scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(
+            optimizer,
+            mode="min",
+            factor=getattr(self.cfg, "lr_plateau_factor", 0.5),
+            patience=getattr(self.cfg, "lr_plateau_patience", 2),
+            min_lr=getattr(self.cfg, "lr_plateau_min_lr", 1e-6),
+        )
         self.observer.log(
             "INFO",
             f"ICDTrainer: Stage 1/4 setup device={self.device} loss_type={self.loss_type} use_amp={self.use_amp} lr={lr}.",
@@ -616,15 +659,59 @@ class ICDTrainer(BaseTrainer):
                         use_adaptive = self.loss_type in ("adaptive_softmax", "adaptive_clpl") and hasattr(
                             self.entity.model, "adaptive_head"
                         )
+                        sparse_loss = None
+                        is_tabnet = isinstance(self.entity.model, TabNetICD)
                         if use_adaptive:
-                            embeddings = self.entity.model(**inputs, return_embeddings=True)
+                            if is_tabnet:
+                                embeddings, sparse_loss = self.entity.model(
+                                    **inputs, return_embeddings=True, return_sparse_loss=True
+                                )
+                            else:
+                                embeddings = self.entity.model(**inputs, return_embeddings=True)
                             logits = self.entity.model.adaptive_head.log_prob(embeddings)
                         else:
-                            logits = self.entity.model(**inputs, return_embeddings=False)
-                            if isinstance(logits, tuple):
-                                logits = logits[0]
+                            if is_tabnet:
+                                logits, sparse_loss = self.entity.model(
+                                    **inputs, return_embeddings=False, return_sparse_loss=True
+                                )
+                            else:
+                                logits = self.entity.model(**inputs, return_embeddings=False)
+                                if isinstance(logits, tuple):
+                                    logits = logits[0]
 
                         loss = self.loss_fn(logits, candidates)
+                        if sparse_loss is not None:
+                            loss = loss + (self.cfg.lambda_sparse * sparse_loss)
+
+                        pseudo_weight = float(getattr(self.cfg, "pseudo_label_ce_weight", 0.0))
+                        if pseudo_weight > 0.0 and candidates is not None:
+                            cand = candidates.to(logits.device).long()
+                            valid = cand >= 0
+                            cand_mask = torch.zeros(
+                                logits.shape[0], logits.shape[1], device=logits.device, dtype=torch.bool
+                            )
+                            if valid.any():
+                                row_ids = torch.arange(logits.shape[0], device=logits.device).unsqueeze(1).expand_as(cand)
+                                cand_mask[row_ids[valid], cand[valid]] = True
+                                if self.ignored_indices:
+                                    cand_mask[:, self.ignored_indices] = False
+                                row_valid = cand_mask.any(dim=1)
+                                if row_valid.any():
+                                    masked_logits = logits.masked_fill(~cand_mask, float("-inf"))
+                                    margin = float(getattr(self.cfg, "pseudo_label_margin", 0.0))
+                                    if margin > 0.0:
+                                        top2 = torch.topk(masked_logits[row_valid], k=2, dim=1).values
+                                        confident = (top2[:, 0] - top2[:, 1]) >= margin
+                                    else:
+                                        confident = torch.ones(int(row_valid.sum().item()), device=logits.device, dtype=torch.bool)
+                                    if confident.any():
+                                        pseudo_targets = masked_logits[row_valid].argmax(dim=1)
+                                        loss_inputs = masked_logits[row_valid][confident]
+                                        if use_adaptive:
+                                            pl_loss = F.nll_loss(loss_inputs, pseudo_targets[confident])
+                                        else:
+                                            pl_loss = F.cross_entropy(loss_inputs, pseudo_targets[confident])
+                                        loss = loss + (pseudo_weight * pl_loss)
 
 
 
@@ -684,16 +771,24 @@ class ICDTrainer(BaseTrainer):
 
 
 
-            cand_acc = metrics.get("candidate_accuracy", 0.0)
             val_loss = metrics.get("loss", 0.0)
+            cand_acc = metrics.get("candidate_accuracy", 0.0)
+            hit3 = metrics.get("cand_hit@3", 0.0)
+            hit5 = metrics.get("cand_hit@5", 0.0)
+            hit10 = metrics.get("cand_hit@10", 0.0)
             self.observer.log(
                 "INFO",
-                f"ICDTrainer: Stage 3/4 epoch={epoch} Loss={val_loss:.4f} Candidate Accuracy={cand_acc:.4f}.",
+                (
+                    f"ICDTrainer: Stage 3/4 epoch={epoch} Loss={val_loss:.4f} "
+                    f"Candidate Accuracy={cand_acc:.4f} Hit@3={hit3:.4f} "
+                    f"Hit@5={hit5:.4f} Hit@10={hit10:.4f}."
+                ),
             )
+            scheduler.step(val_loss)
 
-            if cand_acc > self.entity.best_metric:
+            if val_loss < self.entity.best_metric:
 
-                self.entity.best_metric = cand_acc
+                self.entity.best_metric = val_loss
 
                 self.registry.save_model(self.entity.model.state_dict(), self.entity.name, "best")
 

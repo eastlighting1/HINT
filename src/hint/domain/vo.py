@@ -288,6 +288,7 @@ class ICDConfig(HyperparamVO):
     adaptive_clpl_head_size: int = 800
     adaptive_clpl_tail_sample_size: int = 800
     adaptive_clpl_logit_clip: float = 30.0
+    lambda_sparse: float = 1e-3
 
 
 
@@ -296,6 +297,9 @@ class ICDConfig(HyperparamVO):
     batch_size: int = 2048
 
     lr: float = 1e-5
+    lr_plateau_factor: float = 0.5
+    lr_plateau_patience: int = 2
+    lr_plateau_min_lr: float = 1.0e-6
 
     epochs: int = 100
 
@@ -326,6 +330,11 @@ class ICDConfig(HyperparamVO):
     logit_adjust_tau: float = 1.0
 
     entropy_reg_lambda: float = 1e-3
+
+    pseudo_label_ce_weight: float = 0.0
+    pseudo_label_margin: float = 0.0
+    class_weight_power: float = 0.5
+    class_weight_clip: float = 10.0
 
     freeze_bert_epochs: int = 1
 

@@ -216,3 +216,6 @@ requirements.md
 tasks.md
 output123.txt
 all_schemas.txt
+example.py
+mismatches.txt
+test.csv

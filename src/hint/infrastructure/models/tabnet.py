@@ -497,7 +497,13 @@ class TabNetICD(BaseICDClassifier):
 
 
 
-    def forward(self, x_num: torch.Tensor, return_embeddings: bool = False, **kwargs) -> torch.Tensor:
+    def forward(
+        self,
+        x_num: torch.Tensor,
+        return_embeddings: bool = False,
+        return_sparse_loss: bool = False,
+        **kwargs
+    ) -> torch.Tensor:
 
         """Summary of forward.
         
@@ -549,9 +555,13 @@ class TabNetICD(BaseICDClassifier):
 
 
 
+        sparse_loss = 0.0 if return_sparse_loss else None
         for step in range(self.n_steps):
 
             mask = self.att_transformers[step](priors, x_processed[:, self.n_d:])
+
+            if return_sparse_loss:
+                sparse_loss = sparse_loss + torch.mean(torch.sum(mask * torch.log(mask + self.epsilon), dim=1))
 
 
 
@@ -591,12 +601,18 @@ class TabNetICD(BaseICDClassifier):
 
             out_accum = torch.add(out_accum, out)
 
-
+        if return_sparse_loss:
+            sparse_loss = -sparse_loss / self.n_steps
 
         if self.proj is not None:
             out_accum = self.proj(out_accum)
 
         if return_embeddings:
+            if return_sparse_loss:
+                return out_accum, sparse_loss
             return out_accum
+
+        if return_sparse_loss:
+            return self.final_mapping(out_accum), sparse_loss
 
         return self.final_mapping(out_accum)

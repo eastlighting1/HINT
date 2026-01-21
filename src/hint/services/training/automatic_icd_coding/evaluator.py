@@ -38,7 +38,8 @@ class ICDEvaluator(BaseEvaluator):
         registry,
         observer,
         device,
-        ignored_indices: Optional[List[int]] = None
+        ignored_indices: Optional[List[int]] = None,
+        class_weights: Optional[torch.Tensor] = None
     ):
 
         """Summary of __init__.
@@ -67,6 +68,7 @@ class ICDEvaluator(BaseEvaluator):
         self.entity = entity
 
         self.ignored_indices = ignored_indices if ignored_indices else []
+        self.class_weights = class_weights
 
         self.temperature = 1.0
 
@@ -79,11 +81,12 @@ class ICDEvaluator(BaseEvaluator):
                 tail_sample_size=getattr(self.cfg, "adaptive_clpl_tail_sample_size", 100),
                 loss_type="logistic",
                 logit_clip=getattr(self.cfg, "adaptive_clpl_logit_clip", 20.0),
+                class_weights=self.class_weights,
             )
 
         else:
 
-            self.loss_fn = CLPLLoss(loss_type=self.cfg.loss_type)
+            self.loss_fn = CLPLLoss(loss_type=self.cfg.loss_type, class_weights=self.class_weights)
 
     def _prepare_inputs(self, batch: TensorBatch) -> Dict[str, torch.Tensor]:
 
@@ -161,6 +164,9 @@ class ICDEvaluator(BaseEvaluator):
             )
 
         all_candidate_hits = []
+        topk_list = [1, 3, 5, 10]
+        topk_hits = {k: 0 for k in topk_list}
+        topk_total = 0
 
         total_loss = 0.0
 
@@ -209,6 +215,7 @@ class ICDEvaluator(BaseEvaluator):
                         ignored = torch.tensor(self.ignored_indices, device=self.device)
 
                         cands = torch.where(torch.isin(cands, ignored), torch.tensor(-1, device=self.device), cands)
+                        logits[:, self.ignored_indices] = -1e9
 
 
                     scaled_logits = logits / float(max(temperature, 1e-6))
@@ -236,6 +243,19 @@ class ICDEvaluator(BaseEvaluator):
                         hits = (cands == scaled_preds.unsqueeze(1)).any(dim=1)
 
                         all_candidate_hits.extend(hits[valid_rows].cpu().numpy())
+
+                        max_k = min(max(topk_list), scaled_logits.shape[1])
+                        if max_k > 0:
+                            topk_idx = torch.topk(scaled_logits, k=max_k, dim=1).indices
+                            cands_valid = cands[valid_rows]
+                            topk_valid = topk_idx[valid_rows]
+                            for k in topk_list:
+                                k_eff = min(k, max_k)
+                                hits_k = (
+                                    topk_valid[:, :k_eff].unsqueeze(2) == cands_valid.unsqueeze(1)
+                                ).any(dim=2).any(dim=1)
+                                topk_hits[k] += int(hits_k.sum().item())
+                            topk_total += int(valid_rows.sum().item())
 
                         probs = torch.softmax(scaled_logits, dim=1)
 
@@ -288,6 +308,9 @@ class ICDEvaluator(BaseEvaluator):
                         total_loss += loss.item()
 
         cand_acc = np.mean(all_candidate_hits) if all_candidate_hits else 0.0
+        cand_hit_at = {
+            k: (topk_hits[k] / topk_total) if topk_total > 0 else 0.0 for k in topk_list
+        }
 
         cpm = float(total_cpm / total_cand_rows) if total_cand_rows > 0 else 0.0
 
@@ -331,7 +354,14 @@ class ICDEvaluator(BaseEvaluator):
         if log_metrics:
             self.observer.log(
                 "INFO",
-                f"ICDEvaluator: Stage 3/3 complete Candidate Accuracy={cand_acc:.4f} Loss={total_loss / len(dataloader) if len(dataloader) > 0 else 0.0:.4f}.",
+                (
+                    "ICDEvaluator: Stage 3/3 complete "
+                    f"Candidate Accuracy={cand_acc:.4f} "
+                    f"Hit@3={cand_hit_at[3]:.4f} "
+                    f"Hit@5={cand_hit_at[5]:.4f} "
+                    f"Hit@10={cand_hit_at[10]:.4f} "
+                    f"Loss={total_loss / len(dataloader) if len(dataloader) > 0 else 0.0:.4f}."
+                ),
             )
 
         return {
@@ -343,5 +373,8 @@ class ICDEvaluator(BaseEvaluator):
             "cmg": cmg,
             "ndi": ndi,
             "epr": epr,
+            "cand_hit@3": cand_hit_at[3],
+            "cand_hit@5": cand_hit_at[5],
+            "cand_hit@10": cand_hit_at[10],
 
         }

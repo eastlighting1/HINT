@@ -76,6 +76,42 @@ class ICDService(BaseDomainService):
 
         self.ignored_indices = []
 
+    def _summarize_candidates(self, h5_path: Path, num_classes: int, class_labels: Optional[List[str]] = None):
+        with h5py.File(h5_path, "r") as f:
+            y = f["y"][:]
+
+        valid = y >= 0
+        n_samples = int(y.shape[0])
+        cand_sizes = valid.sum(axis=1) if n_samples > 0 else np.array([], dtype=np.int64)
+        class_inclusion = np.zeros(num_classes, dtype=np.int64)
+
+        for row in y:
+            vals = row[row >= 0]
+            if vals.size:
+                class_inclusion[np.unique(vals)] += 1
+
+        best_class = int(class_inclusion.argmax()) if n_samples > 0 else -1
+        best_ratio = float(class_inclusion[best_class] / n_samples) if n_samples > 0 else 0.0
+
+        top_idx = np.argsort(class_inclusion)[-5:][::-1].tolist() if n_samples > 0 else []
+        top5 = []
+        for idx in top_idx:
+            label = class_labels[idx] if class_labels and idx < len(class_labels) else str(idx)
+            top5.append({"index": idx, "label": label, "ratio": float(class_inclusion[idx] / n_samples)})
+
+        summary = {
+            "samples": n_samples,
+            "cand_size_mean": float(cand_sizes.mean()) if n_samples > 0 else 0.0,
+            "cand_size_p50": float(np.median(cand_sizes)) if n_samples > 0 else 0.0,
+            "cand_size_p90": float(np.percentile(cand_sizes, 90)) if n_samples > 0 else 0.0,
+            "cand_size_max": int(cand_sizes.max()) if n_samples > 0 else 0,
+            "best_class_index": best_class,
+            "best_class_label": class_labels[best_class] if class_labels and best_class >= 0 else None,
+            "best_class_inclusion": best_ratio,
+            "top5_inclusion": top5,
+        }
+
+        return summary, class_inclusion
 
 
     def execute(self) -> None:
@@ -162,7 +198,46 @@ class ICDService(BaseDomainService):
 
         self.observer.log("INFO", "ICDService: Stage 3/5 preparing training loaders.")
 
-        target_counts = np.ones(num_classes)
+        class_labels = stats.get("icd_classes", [])
+        report = {"num_classes": num_classes, "splits": {}}
+        target_counts = np.ones(num_classes, dtype=np.float32)
+
+        for split_name in ("train", "val", "test"):
+            split_path = cache_dir / f"{prefix}_{split_name}.h5"
+            if not split_path.exists():
+                self.observer.log("WARNING", f"ICDService: Missing split file {split_path}")
+                continue
+            summary, inclusion = self._summarize_candidates(split_path, num_classes, class_labels)
+            report["splits"][split_name] = summary
+            if split_name == "train":
+                target_counts = inclusion.astype(np.float32)
+
+        if report["splits"]:
+            report_path = cache_dir / "icd_label_report.json"
+            try:
+                with open(report_path, "w") as f:
+                    json.dump(report, f, indent=2)
+                self.observer.log("INFO", f"ICDService: Saved ICD label report to {report_path}.")
+                train_summary = report["splits"].get("train", {})
+                if train_summary:
+                    self.observer.log(
+                        "INFO",
+                        f"ICDService: Train best_class_inclusion={train_summary.get('best_class_inclusion', 0.0):.4f} "
+                        f"cand_size_mean={train_summary.get('cand_size_mean', 0.0):.2f}.",
+                    )
+            except Exception as e:
+                self.observer.log("WARNING", f"ICDService: Failed to write ICD label report error={e}")
+
+        target_counts = np.where(target_counts <= 0, 1.0, target_counts)
+        class_weights = None
+        if target_counts is not None:
+            power = float(getattr(self.cfg, "class_weight_power", 0.5))
+            weights = 1.0 / np.power(target_counts, power)
+            weights = weights / float(np.mean(weights))
+            clip = float(getattr(self.cfg, "class_weight_clip", 0.0))
+            if clip > 0:
+                weights = np.clip(weights, 0.0, clip)
+            class_weights = torch.tensor(weights, dtype=torch.float32, device=self.device)
 
 
 
@@ -334,7 +409,15 @@ class ICDService(BaseDomainService):
 
                 )
 
-                evaluator = ICDEvaluator(self.cfg, model_entity, self.registry, self.observer, self.device)
+                evaluator = ICDEvaluator(
+                    self.cfg,
+                    model_entity,
+                    self.registry,
+                    self.observer,
+                    self.device,
+                    ignored_indices=self.ignored_indices,
+                    class_weights=class_weights,
+                )
 
 
 
